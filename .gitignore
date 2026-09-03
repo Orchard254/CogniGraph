@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+venv/
+.venv/
+opencode/
+
+# Local memory database and caches (per-project state, never committed)
+.project-memory/
+.pytest_cache/
+
+# Node
+node_modules/
+
+# Generated artifacts
+memory_graph.html
+MEMORY_SNAPSHOT.md
+
+# Scratch / dev artifacts
+scratch/
+*.bak
+*.bak-*
+*.db-journal
+*.db-wal
+*.db-shm
+
+# IDE / agent local state
+.kiro/
+.trae/
+opencode.json
+
+# Bytecode-recovery provenance artifacts from the 2026-09 memory_store.py
+# corruption recovery — kept on disk as provenance, never committed
+# (mirrors _EXCLUDE_SYNC_FILENAMES in pm_structural.py)
+memory_store.PRISTINE.bak.py
+memory_store_corrupted_backup.py
+memory_store_reconstructed.py
+_bytecode_recovery.json
+_bytecode_source_map.json
+_pyc_dump.txt
+_method_details.txt
+_rebuild_store.py
+_split_store.py
+_refactor_split.py
+_pyc_inspect.py

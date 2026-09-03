@@ -1,0 +1,13 @@
+mcp==1.9.4
+fastembed
+scikit-learn
+numpy
+sqlite-vec==0.1.9
+
+# Tree-sitter packages: pinned to recent releases using the modern constructor-based API.
+# Old tutorials reference Parser.set_language() which is incompatible with 0.26.0 core.
+# Modern pattern: Parser(Language(pkg.language())) passes language directly at init.
+tree-sitter==0.26.0
+tree-sitter-python==0.25.0
+tree-sitter-javascript==0.25.0
+tree-sitter-typescript==0.23.2

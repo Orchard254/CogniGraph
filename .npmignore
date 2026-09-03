@@ -1,0 +1,59 @@
+# Test files
+test_*.py
+check_*.py
+phase0_*.py
+simulate_*.py
+run_*.py
+test_env*.py
+test_*.py
+call_tool.py
+list_tool.py
+session_test.py
+fixtures/
+tests/
+.pytest_cache/
+
+# Documentation (keep only npm-specific docs)
+README.md
+MEMORY_SNAPSHOT.md
+project-memory_master_engineering_blueprint_v2_3_0.md
+scripts/
+dev/
+*.md
+!README_NPM.md
+!INSTALL.md
+!AGENTS.md
+
+# Database files
+.project-memory/
+*.db
+*.db-shm
+*.db-wal
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.cursor/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Cache
+.cache/
+*.log
+
+# Development
+venv/
+.venv/
+__pycache__/
+*.pyc

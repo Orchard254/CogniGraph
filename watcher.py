@@ -1,0 +1,209 @@
+"""
+File watcher for automatic memory sync — real-time file change detection.
+
+Watches the project root (e.g., C:/Ai) for .py/.ts/.js/.rs changes and incrementally
+updates memory: re-extracts structural nodes, re-hashes, and upserts file-level facts.
+
+Fallback: polling every 30s if watchdog not available. Non-blocking, daemon thread.
+"""
+import os
+import time
+import hashlib
+import logging
+import threading
+from pathlib import Path
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+try:
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+    _WATCHDOG_AVAILABLE = True
+except ImportError:
+    _WATCHDOG_AVAILABLE = False
+    Observer = None
+    FileSystemEventHandler = object
+
+try:
+    from memory_store import MemoryStore
+except ImportError:
+    MemoryStore = None
+
+try:
+    from structural_extract import extract_structures
+except ImportError:
+    extract_structures = None
+
+WATCHED_EXTS = {".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".java"}
+IGNORE_DIRS = {".git", "venv", ".venv", "node_modules", "__pycache__", ".project-memory", "dist", "build", "target", ".next", ".cache", ".idea", ".vscode", "site-packages", ".pytest_cache", ".mypy_cache", "coverage", ".opencode", "scratch", "fixtures"}
+
+def _should_watch(path: Path, root: Path) -> bool:
+    rel = path.relative_to(root) if path.is_absolute() else path
+    for part in rel.parts:
+        if part in IGNORE_DIRS or part.endswith(".egg-info"):
+            return False
+    if path.suffix.lower() not in WATCHED_EXTS:
+        return False
+    if path.stat().st_size > 1_000_000:
+        return False
+    return True
+
+_thread_local = threading.local()
+
+def _thread_store(db_path: str) -> MemoryStore:
+    """Per-thread MemoryStore for watcher callbacks.
+
+    sqlite3 connections are bound to the thread that created them, but every
+    watcher callback (watchdog observer or polling loop) runs on a background
+    thread — reusing the main-thread store raises ProgrammingError, which the
+    sync error handling used to swallow silently.
+    """
+    cache = getattr(_thread_local, "stores", None)
+    if cache is None:
+        cache = {}
+        _thread_local.stores = cache
+    store = cache.get(db_path)
+    if store is None:
+        store = MemoryStore(db_path)
+        cache[db_path] = store
+    return store
+
+def _sync_file(file_path: Path, root: Path, store: MemoryStore):
+    """Incrementally sync a single file: structural nodes + file fact."""
+    if MemoryStore is not None and store is not None:
+        store = _thread_store(store.db_path)
+    try:
+        rel = file_path.relative_to(root).as_posix()
+        # 1. Structural nodes
+        if extract_structures:
+            try:
+                nodes = extract_structures(file_path)
+                store.sync_structural_nodes(rel, nodes, project_root=str(root))
+            except Exception as e:
+                logger.debug("watcher structural sync failed %s: %r", rel, e)
+        # 2. File fact upsert (hash + lines)
+        try:
+            data = file_path.read_bytes()
+            h = hashlib.sha256(data).hexdigest()
+            lines = data.decode('utf-8', errors='replace').count('\n') + 1
+            content = f"Source file: {rel} (python, {lines} lines, hash {h[:8]})" if file_path.suffix.lower()==".py" else f"Source file: {rel} ({lines} lines, hash {h[:8]})"
+            # Check existing
+            existing = store.conn.execute("SELECT id, code_hash FROM memory WHERE file_path=? AND deprecated_at IS NULL", (rel,)).fetchall()
+            if existing:
+                # Update hash directly if changed (avoid supersede dance which creates duplicate with old hash)
+                for row in existing:
+                    if row["code_hash"] != h:
+                        store.conn.execute(
+                            "UPDATE memory SET code_hash=?, line_start=1, line_end=?, content=? WHERE id=?",
+                            (h, lines, content, row["id"])
+                        )
+                        store.conn.commit()
+                        # Re-embed so semantic lane reflects the updated content
+                        try:
+                            store._store_embedding(row["id"], content)
+                        except Exception as e:
+                            logger.debug("watcher re-embed failed for fact %s: %r", row["id"], e)
+            else:
+                # New file
+                store.write(category="component", content=content, file_path=rel, tags="bootstrap, file, auto-watched", importance=2, line_start=1, line_end=lines, code_hash=h, force=True, embed=True)
+            # Link to structural nodes
+            try:
+                store.link_facts_to_structural_nodes(rel)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.debug("watcher file fact sync failed %s: %r", file_path, e)
+    except Exception as e:
+        # Warning, not debug: a swallowed sync failure means the memory
+        # silently drifts from the code, which is the bug this watcher exists
+        # to prevent.
+        logger.warning("watcher _sync_file failed %s: %r", file_path, e)
+
+class _Handler(FileSystemEventHandler):
+    def __init__(self, root: Path, store: MemoryStore):
+        self.root = root
+        self.store = store
+        self._last_sync = {}
+        self._pending = {}
+
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+        p = Path(event.src_path)
+        if not _should_watch(p, self.root):
+            return
+        now = time.time()
+        key = str(p)
+        elapsed = now - self._last_sync.get(key, 0)
+        if elapsed < 2.0:
+            # Inside the debounce window this is either the tail of the same
+            # save burst or a real follow-up edit. Schedule one trailing sync
+            # just after the window closes so a genuine quick second edit is
+            # never dropped — a missed sync is silent memory drift.
+            if not self._pending.get(key):
+                self._pending[key] = True
+                t = threading.Timer(2.0 - elapsed + 0.1, self._trailing_sync, args=(p, key))
+                t.daemon = True
+                t.start()
+            return
+        self._last_sync[key] = now
+        logger.info("watcher detected change: %s", p.relative_to(self.root))
+        _sync_file(p, self.root, self.store)
+
+    def _trailing_sync(self, p: Path, key: str):
+        self._pending.pop(key, None)
+        self._last_sync[key] = time.time()
+        logger.info("watcher trailing sync: %s", p.relative_to(self.root))
+        _sync_file(p, self.root, self.store)
+
+    def on_created(self, event):
+        self.on_modified(event)
+
+def start_watcher(project_root: Optional[Path] = None, store: Optional[MemoryStore] = None) -> Optional[object]:
+    """Start daemon watcher thread. Returns Observer or polling thread, or None if failed."""
+    try:
+        root = Path(project_root) if project_root else Path(store.db_path).parent.parent if store and hasattr(store, 'db_path') else Path.cwd()
+        root = root.resolve()
+        if not root.is_dir():
+            logger.warning("watcher: root does not exist %s", root)
+            return None
+        store = store or MemoryStore()
+        if _WATCHDOG_AVAILABLE:
+            handler = _Handler(root, store)
+            observer = Observer()
+            observer.schedule(handler, str(root), recursive=True)
+            observer.daemon = True
+            observer.start()
+            logger.info("watcher started (watchdog) for %s", root)
+            return observer
+        else:
+            # Polling fallback every 30s
+            import threading
+            def poll_loop():
+                seen = {}
+                first_scan = True
+                while True:
+                    try:
+                        for ext in WATCHED_EXTS:
+                            for p in root.rglob(f"*{ext}"):
+                                if not _should_watch(p, root):
+                                    continue
+                                mtime = p.stat().st_mtime
+                                key = str(p)
+                                if key not in seen or seen[key] != mtime:
+                                    if not first_scan:
+                                        _sync_file(p, root, store)
+                                    seen[key] = mtime
+                        first_scan = False
+                        time.sleep(30)
+                    except Exception as e:
+                        logger.debug("watcher poll error: %r", e)
+                        time.sleep(30)
+            t = threading.Thread(target=poll_loop, daemon=True)
+            t.start()
+            logger.info("watcher started (polling) for %s", root)
+            return t
+    except Exception as e:
+        logger.warning("watcher failed to start: %r", e)
+        return None

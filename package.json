@@ -1,0 +1,54 @@
+{
+  "name": "@project-memory/mcp-server",
+  "version": "1.0.0",
+  "description": "Universal MCP server for persistent project memory across all AI coding IDEs - zero configuration setup",
+  "main": "index.js",
+  "bin": {
+    "project-memory-mcp": "./index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall": "node postinstall.js"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "project-memory",
+    "ai",
+    "coding-agent",
+    "windsurf",
+    "cursor",
+    "claude",
+    "trae",
+    "zed",
+    "persistent-memory",
+    "context-aware",
+    "auto-bootstrap",
+    "zero-config"
+  ],
+  "author": "project-memory",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "files": [
+    "index.js",
+    "postinstall.js",
+    "__init__.py",
+    "server.py",
+    "memory_store.py",
+    "bootstrap.py",
+    "structural_extract.py",
+    "branch_promotion.py",
+    "genesis_migrate.py",
+    "watcher.py",
+    "wire.py",
+    "memory_cli.py",
+    "requirements.txt",
+    "README_NPM.md",
+    "INSTALL.md",
+    "AGENTS.md"
+  ],
+  "dependencies": {},
+  "devDependencies": {}
+}
