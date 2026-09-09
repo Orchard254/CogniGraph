@@ -17,7 +17,7 @@ The easiest way to add persistent memory to any AI coding agent:
 }
 ```
 
-That's it! No manual setup, no database creation, no bootstrapping required.
+That's it! Prerequisites below apply: Python 3.8+ on PATH and Node.js >= 14 (package.json engines). On first run the wrapper creates venv/, installs requirements.txt (only mcp is hard-required; sqlite-vec/tree-sitter*/fastembed/numpy lanes degrade with a warning), and launches server.py (index.js:98-132,171-232), guarded by a pre-spawn py_compile check and a 5 s startup watchdog (index.js:245-285). postinstall.js is best-effort and leaves a .postinstall-incomplete marker re-verified on next startup (index.js:175-183).
 
 ## ✨ Features
 
@@ -100,13 +100,22 @@ That's it! No manual setup, no database creation, no bootstrapping required.
   "context_servers": {
     "project-memory": {
       "command": "npx",
-      "args": ["-y", "@project-memory/mcp-server"]
+      "args": ["-y", "@project-memory/mcp-server"],
+      "env": {
+        "MEMORY_DB_PATH": "<your-project>/.project-memory/memory.db"
+      }
     }
   }
 }
 ```
 
 ## 🔧 Advanced Configuration
+
+### Wire report + safety notes (current code)
+
+- wire pins MEMORY_DB_PATH to <project>/.project-memory/memory.db (wire.py:142-149) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md/next_steps (wire.py:207-222) - on WIRED_WITH_ERRORS, fix config_errors first.
+- Corrupt existing configs are preserved as .corrupt-<timestamp>.bak, never overwritten (wire.py:64-90).
+- Without --db, --root commands bind to <root>/.project-memory/memory.db (memory_cli.py:163-174); limit/ttl/importance inputs are clamped (server.py:42-71). Zed env is a sibling of command/args inside the server entry, not nested under settings (settings.env never reaches the process - wire.py:180-185).
 
 ### Custom Database Location
 Set the `MEMORY_DB_PATH` environment variable:
