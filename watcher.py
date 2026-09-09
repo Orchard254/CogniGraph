@@ -115,19 +115,31 @@ def _sync_file(file_path: Path, root: Path, store: MemoryStore):
             # Check existing
             existing = store.conn.execute("SELECT id, code_hash FROM memory WHERE file_path=? AND deprecated_at IS NULL", (rel,)).fetchall()
             if existing:
-                # Update hash directly if changed (avoid supersede dance which creates duplicate with old hash)
-                for row in existing:
-                    if row["code_hash"] != h:
-                        store.conn.execute(
-                            "UPDATE memory SET code_hash=?, line_start=1, line_end=?, content=? WHERE id=?",
-                            (h, lines, content, row["id"])
-                        )
-                        store.conn.commit()
+                # Update hash directly if changed (avoid supersede dance which creates duplicate with old hash).
+                # Wrapped in one transaction so concurrent syncs can't interleave;
+                # re-embed stays outside (slow model call, must not hold the lock).
+                changed = [(row["id"],) for row in existing if row["code_hash"] != h]
+                if changed:
+                    store.conn.execute("BEGIN IMMEDIATE")
+                    try:
+                        for (fid,) in changed:
+                            store.conn.execute(
+                                "UPDATE memory SET code_hash=?, line_start=1, line_end=?, content=? WHERE id=?",
+                                (h, lines, content, fid)
+                            )
+                        store.conn.execute("COMMIT")
+                    except Exception:
+                        try:
+                            store.conn.execute("ROLLBACK")
+                        except Exception:
+                            pass
+                        raise
+                    for (fid,) in changed:
                         # Re-embed so semantic lane reflects the updated content
                         try:
-                            store._store_embedding(row["id"], content)
+                            store._store_embedding(fid, content)
                         except Exception as e:
-                            logger.debug("watcher re-embed failed for fact %s: %r", row["id"], e)
+                            logger.debug("watcher re-embed failed for fact %s: %r", fid, e)
             else:
                 # New file
                 store.write(category="component", content=content, file_path=rel, tags="bootstrap, file, auto-watched", importance=2, line_start=1, line_end=lines, code_hash=h, force=True, embed=True)
@@ -261,3 +273,23 @@ def start_watcher(project_root: Optional[Path] = None, store: Optional[MemorySto
     except Exception as e:
         logger.warning("watcher failed to start: %r", e)
         return None
+
+
+def stop_watcher(handle: Optional[object] = None, db_path: Optional[str] = None) -> None:
+    """Stop a watcher started by start_watcher and release its DB handles.
+
+    Observer handles are stopped/joined; polling threads are daemons and
+    need no join. Per-thread cached stores are always closed so fd/WAL
+    handles don't leak across restarts (e.g. tests creating many watchers).
+    """
+    if handle is not None:
+        try:
+            stop = getattr(handle, "stop", None)
+            if callable(stop):
+                stop()
+            join = getattr(handle, "join", None)
+            if callable(join):
+                join(timeout=5)
+        except Exception as e:
+            logger.debug("watcher stop failed: %r", e)
+    close_thread_stores(db_path)

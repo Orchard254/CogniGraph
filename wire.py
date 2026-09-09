@@ -7,11 +7,15 @@ AGENTS.md protocol file. Existing agent configs are merged (never clobbered)
 and backed up first.
 
 Usage:
-    python memory_cli.py wire cursor --root C:\path\to\project
+    python memory_cli.py wire cursor --root C:/path/to/project
 """
 import os
 import json
 import shutil
+import subprocess
+import sys
+import tempfile
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -25,29 +29,67 @@ def _python_exe(pm_root: Path) -> str:
                       pm_root / "venv" / "bin" / "python"):
         if candidate.exists():
             return str(candidate.resolve()).replace("\\", "/")
-    return "python"
+    # No venv yet: prefer a version-checked interpreter over bare "python".
+    for cmd in ("python3", "python"):
+        try:
+            out = subprocess.check_output([cmd, "--version"], text=True, stderr=subprocess.STDOUT)
+            import re
+            m = re.search(r"Python\s+(\d+)\.(\d+)", out or "")
+            if m and (int(m.group(1)) > 3 or (int(m.group(1)) == 3 and int(m.group(2)) >= 8)):
+                return cmd
+        except Exception:
+            continue
+    return sys.executable.replace("\\", "/")
 
 
 def _backup(path: Path) -> Optional[str]:
-    if path.exists():
-        backup = path.with_name(path.name + ".bak")
-        shutil.copy2(path, backup)
-        return str(backup)
-    return None
+    if not path.exists():
+        return None
+    # Rotating backups: .bak, .bak.1, .bak.2 — never silently lose the original.
+    candidates = [path.with_name(path.name + ".bak")] + [
+        path.with_name(f"{path.name}.bak.{i}") for i in (1, 2)
+    ]
+    oldest = candidates[-1]
+    if oldest.exists():
+        oldest.unlink()
+    for newer, older in zip(reversed(candidates[1:]), reversed(candidates[:-1])):
+        if older.exists():
+            shutil.move(str(older), str(newer))
+    newest = candidates[0]
+    shutil.copy2(path, newest)
+    return str(newest)
 
 
 def _merge_json(path: Path, top_key: str, entry: Dict[str, Any]) -> None:
     """Merge one MCP entry into a JSON config file, preserving existing content.
-    Removes deprecated keys (e.g., 'mcp' when writing 'mcpServers')."""
+    Removes deprecated keys (e.g., 'mcp' when writing 'mcpServers').
+
+    A corrupt (unparseable) existing file is NEVER silently clobbered: it is
+    preserved as <name>.corrupt-<timestamp>.bak and reported, then rebuilt.
+    Writes are atomic (tmp + fsync + os.replace) so a mid-write crash cannot
+    leave a half-written config.
+    """
     data: Dict[str, Any] = {}
     if path.exists():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
+        except Exception as e:
+            corrupt_backup = path.with_name(
+                f"{path.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}.bak"
+            )
+            try:
+                shutil.copy2(path, corrupt_backup)
+            except Exception:
+                corrupt_backup = None
+            raise ValueError(
+                f"existing config {path} is not valid JSON ({e}); "
+                f"preserved as {corrupt_backup}, refusing to overwrite"
+                if corrupt_backup is not None
+                else f"existing config {path} is not valid JSON ({e}); refusing to overwrite"
+            )
     if not isinstance(data, dict):
         data = {}
-    
+
     # Remove deprecated keys for this agent
     if top_key == "mcpServers":
         data.pop("mcp", None)
@@ -56,13 +98,26 @@ def _merge_json(path: Path, top_key: str, entry: Dict[str, Any]) -> None:
     elif top_key == "context_servers":
         data.pop("mcpServers", None)
         data.pop("mcp", None)
-    
+
     data.setdefault(top_key, {})
     if not isinstance(data[top_key], dict):
         data[top_key] = {}
     data[top_key][ENTRY_NAME] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    payload = json.dumps(data, indent=2, ensure_ascii=False)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except Exception:
+            pass
+        raise
 
 
 def wire_agent(agent: str, project_root: Optional[str] = None,
@@ -72,6 +127,8 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
     Wire a target project to project-memory for the given coding agent.
     Returns a report with config file paths, backups, and exact next-step commands.
     """
+    if not isinstance(agent, str):
+        raise ValueError(f"agent must be one of {SUPPORTED_AGENTS}, got {type(agent).__name__}")
     agent = agent.lower().strip()
     if agent not in SUPPORTED_AGENTS:
         raise ValueError(f"agent must be one of {SUPPORTED_AGENTS}, got {agent!r}")
@@ -152,8 +209,8 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         "agents_md": agents_md_status,
         "mcp_snippet": snippet,
         "next_steps": [
-            f'{py} "{cli}" bootstrap --root "{proj_root}"   # dry-run preview',
-            f'{py} "{cli}" bootstrap --root "{proj_root}" --apply   # ingest into memory',
+            f'"{py}" "{cli}" bootstrap --root "{proj_root}"   # dry-run preview',
+            f'"{py}" "{cli}" bootstrap --root "{proj_root}" --apply   # ingest into memory',
             "Restart your coding agent so it loads the new MCP configuration.",
         ],
     }

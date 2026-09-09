@@ -69,6 +69,15 @@ def _iter_files(root: Path):
                 yield entry.relative_to(root), entry
 
 
+def _small_enough(p: Path, limit: int = 1_000_000) -> bool:
+    """Size gate that never raises: a file deleted or growing mid-walk
+    simply counts as not-small instead of aborting the whole scan."""
+    try:
+        return p.stat().st_size < limit
+    except (OSError, FileNotFoundError):
+        return False
+
+
 def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dry_run: bool = False) -> Tuple[List[Dict[str, Any]], int]:
     """Directory summary facts + key-file facts. `full=True` adds per-file facts.
     
@@ -155,7 +164,7 @@ def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dr
                 })
         
         # Function-level provenance: when full, create per-function/class/method facts with line ranges
-        if full and p.suffix.lower() in CODE_LANGS and p.stat().st_size < 1_000_000:
+        if full and p.suffix.lower() in CODE_LANGS and _small_enough(p):
             try:
                 nodes = extract_structures(p)
             except NotImplementedError:
