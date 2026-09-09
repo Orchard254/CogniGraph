@@ -5,9 +5,10 @@ Run via stdio - point opencode's, Cursor's, or Antigravity's mcpServers config a
 """
 import logging
 import threading
-from typing import List, Dict, Any, Optional
+from contextlib import contextmanager
+from typing import List, Dict, Any, Optional, Iterator
 from mcp.server.fastmcp import FastMCP
-from memory_store import MemoryStore, default_db_path
+from memory_store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,38 @@ def _get_store():
     from memory_store import MemoryStore
     return MemoryStore()
 
+@contextmanager
+def _store() -> Iterator["MemoryStore"]:
+    """Yield a fresh store and always close it (no leaked fd/WAL handles).
+
+    Each MCP tool call gets its own connection, so no SQLite connection is
+    ever shared across threads; the finally-close keeps handle counts flat
+    under load.
+    """
+    store = _get_store()
+    try:
+        yield store
+    finally:
+        try:
+            store.close()
+        except Exception:
+            pass
+
+def _clamp_limit(limit: int, default: int = 10, maximum: int = 100) -> int:
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(maximum, limit))
+
+def _clamp_chars(max_chars: int, default: int = 8000, maximum: int = 128000) -> int:
+    """Clamp a character budget (chars, not tokens — never mix the units)."""
+    try:
+        max_chars = int(max_chars)
+    except (TypeError, ValueError):
+        return default
+    return max(256, min(maximum, max_chars))
+
 def _ensure_first_time_setup():
     """Run automatic first-time setup (bootstrap) on first tool call."""
     global _first_time_setup_done
@@ -31,7 +64,8 @@ def _ensure_first_time_setup():
         # Double-check after acquiring lock
         if _first_time_setup_done:
             return
-        
+
+        store = None
         try:
             from bootstrap import bootstrap_project
             from pathlib import Path
@@ -63,6 +97,12 @@ def _ensure_first_time_setup():
         except Exception as e:
             logger.warning("First-time setup failed: %r", e)
             # Continue anyway - the system should still work
+        finally:
+            if store is not None:
+                try:
+                    store.close()
+                except Exception:
+                    pass
 
 def _auto_maintenance():
     """Background self-heal: bootstrap 20 + scan auto_heal + backfill + optimize - keeps 99% without manual loop."""
@@ -139,20 +179,21 @@ def memory_write(category: str, content: str, rationale: str = "",
     tags: optional comma-separated tags
     importance: 1 (low) to 5 (critical)
     """
-    new_id = _get_store().write(
-        category=category,
-        content=content,
-        rationale=rationale or None,
-        confidence=confidence,
-        session_id=session_id or None,
-        file_path=file_path or None,
-        tags=tags or None,
-        importance=importance,
-        line_start=line_start or None,
-        line_end=line_end or None,
-        code_hash=code_hash or None,
-        git_commit_sha=git_commit_sha or None,
-    )
+    with _store() as _s:
+        new_id = _s.write(
+            category=category,
+            content=content,
+            rationale=rationale or None,
+            confidence=confidence,
+            session_id=session_id or None,
+            file_path=file_path or None,
+            tags=tags or None,
+            importance=importance,
+            line_start=line_start or None,
+            line_end=line_end or None,
+            code_hash=code_hash or None,
+            git_commit_sha=git_commit_sha or None,
+        )
     if new_id < 0:
         # Auto-dedup guard triggered: near-duplicate already exists
         existing_id = -new_id
@@ -172,7 +213,8 @@ def memory_write_batch(facts: List[Dict[str, Any]]) -> dict:
     """
     Record multiple new facts atomically in a single transaction.
     """
-    new_ids = _get_store().write_batch(facts)
+    with _store() as _s:
+        new_ids = _s.write_batch(facts if isinstance(facts, list) else [])
     return {
         "count": len(new_ids),
         "written": sum(1 for i in new_ids if i > 0),
@@ -189,7 +231,9 @@ def memory_query(text: str, category: str = "", tag: str = "", limit: int = 10, 
     Search project memory by keyword/tag (FTS5 lexical).
     """
     _ensure_first_time_setup()  # Auto-bootstrap on first use
-    results = _get_store().query(text, category=category or None, tag=tag or None, limit=limit, session_id=session_id or None)
+    limit = _clamp_limit(limit, default=10)
+    with _store() as _s:
+        results = _s.query(text, category=category or None, tag=tag or None, limit=limit, session_id=session_id or None)
     return {"count": len(results), "results": results}
 
 
@@ -197,10 +241,12 @@ def memory_query(text: str, category: str = "", tag: str = "", limit: int = 10, 
 def memory_query_hybrid(text: str, category: str = "", tag: str = "", limit: int = 10, expand_graph: bool = True, session_id: str = "", repo_id: Optional[int] = None, intent: str = "", agent_type: str = "") -> dict:
     """Hybrid RRF search combining lexical BM25 matching and term vector similarity, with intent-aware ranking and usage-pattern learning. Automatically includes graph-linked dependency facts when expand_graph=True. repo_id: optional - if omitted, defaults to the store's own repo (first repo) for episodic filtering. intent: optional task intent ('fix', 'implement', 'refactor', etc.) that boosts category-relevant facts in ranking; auto-detected from text if omitted. agent_type: optional ('cursor', 'claude', 'opencode', 'zed', 'default') to apply agent-specific retrieval-lane weights. Every retrieval is logged for usage-pattern learning."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
+    limit = _clamp_limit(limit, default=10)
     # Derive repo_id for episodic filtering if not provided (single-repo deployment)
-    if repo_id is None:
-        repo_id = _get_store()._derive_default_repo_id()
-    results = _get_store().query_hybrid(text, category=category or None, tag=tag or None, limit=limit, expand_graph=expand_graph, session_id=session_id or None, repo_id=repo_id, intent=intent, agent_type=agent_type)
+    with _store() as _s:
+        if repo_id is None:
+            repo_id = _s._derive_default_repo_id()
+        results = _s.query_hybrid(text, category=category or None, tag=tag or None, limit=limit, expand_graph=expand_graph, session_id=session_id or None, repo_id=repo_id, intent=intent, agent_type=agent_type)
     return {"count": len(results), "results": results}
 
 
@@ -222,10 +268,14 @@ def memory_get_context(query: str, limit: int = 5, repo_id: Optional[int] = None
         Dictionary with 'query' and 'context_markdown' keys containing the enhanced context.
     """
     _ensure_first_time_setup()  # Auto-bootstrap on first use
-    if repo_id is None:
-        repo_id = _get_store()._derive_default_repo_id()
-    ctx_md = _get_store().get_context(query, limit=limit, repo_id=repo_id, max_chars=max_chars, intent=intent)
-    return {"query": query, "detected_intent": intent or _get_store()._detect_intent(query), "context_markdown": ctx_md}
+    limit = _clamp_limit(limit, default=5, maximum=50)
+    max_chars = _clamp_chars(max_chars)
+    with _store() as _s:
+        if repo_id is None:
+            repo_id = _s._derive_default_repo_id()
+        ctx_md = _s.get_context(query, limit=limit, repo_id=repo_id, max_chars=max_chars, intent=intent)
+        detected = intent or _s._detect_intent(query)
+    return {"query": query, "detected_intent": detected, "context_markdown": ctx_md}
 
 
 @mcp.tool()
@@ -252,11 +302,9 @@ def memory_get_context_optimized(query: str, agent_type: str = "default", limit:
         zed: Optimized for Zed editor's AI features
     """
     _ensure_first_time_setup()  # Auto-bootstrap on first use
-    
-    store = _get_store()
-    detected_intent = intent or store._detect_intent(query)
-    
-    # Agent-specific formatting configuration
+
+    # Agent-specific formatting configuration (caps below are char budgets,
+    # kept in the same units as max_chars so the two never mix).
     AGENT_FORMATS = {
         'cursor': {
             'max_tokens': 8000,
@@ -299,26 +347,36 @@ def memory_get_context_optimized(query: str, agent_type: str = "default", limit:
             'output_format': 'Rich Markdown with emoji indicators'
         }
     }
-    
-    format_config = AGENT_FORMATS.get(agent_type, AGENT_FORMATS['default'])
-    
-    # Generate context with agent-specific parameters (agent lane weights applied at retrieval)
-    ctx_md = store.get_context(
-        query=query,
-        limit=limit,
-        repo_id=None,
-        max_chars=min(max_chars, format_config['max_tokens']),
-        intent=detected_intent,
-        agent_type=agent_type
-    )
-    
-    return {
-        "query": query,
-        "agent_type": agent_type,
-        "detected_intent": detected_intent,
-        "format_info": format_config,
-        "context_markdown": ctx_md
-    }
+
+    limit = _clamp_limit(limit, default=5, maximum=50)
+    max_chars = _clamp_chars(max_chars)
+    agent_type = agent_type if agent_type in AGENT_FORMATS else "default"
+
+    with _store() as store:
+        detected_intent = intent or store._detect_intent(query)
+
+        format_config = AGENT_FORMATS.get(agent_type, AGENT_FORMATS['default'])
+
+        # Generate context with agent-specific parameters (agent lane weights applied at retrieval).
+        # NOTE: max_chars is a character budget; format_config caps below are
+        # also chars (not tokens) so the units never mix.
+        char_cap = min(max_chars, format_config['max_tokens'])
+        ctx_md = store.get_context(
+            query=query,
+            limit=limit,
+            repo_id=None,
+            max_chars=char_cap,
+            intent=detected_intent,
+            agent_type=agent_type
+        )
+
+        return {
+            "query": query,
+            "agent_type": agent_type,
+            "detected_intent": detected_intent,
+            "format_info": dict(format_config),
+            "context_markdown": ctx_md
+        }
 
 
 @mcp.tool()
@@ -339,54 +397,60 @@ def memory_get_context_for_agent(query: str, agent_type: str = "default", max_to
         Optimized context with format selection and usage tips.
     """
     _ensure_first_time_setup()  # Auto-bootstrap on first use
-    
-    store = _get_store()
-    detected_intent = store._detect_intent(query)
-    
-    # Auto-select best format based on agent and query
-    if agent_type == 'claude' or max_tokens > 10000:
-        # Use concise format for large context windows
-        result = memory_get_context_optimized(query, 'claude', limit=10, max_chars=max_tokens, intent=detected_intent)
-        result['format_info']['auto_selected'] = True
-        result['format_info']['reason'] = 'Large context window detected, using concise format'
+
+    max_chars = _clamp_chars(max_tokens)
+    with _store() as _s:
+        detected_intent = _s._detect_intent(query)
+
+    def _tag(result: dict, reason: str) -> dict:
+        # Tolerate shape drift from the inner call instead of KeyError.
+        if not isinstance(result, dict):
+            return {"query": query, "error": "context generation failed", "reason": reason}
+        info = result.get("format_info")
+        if not isinstance(info, dict):
+            result["format_info"] = {}
+            info = result["format_info"]
+        info["auto_selected"] = True
+        info["reason"] = reason
         return result
+
+    # Auto-select best format based on agent and query
+    if agent_type == 'claude' or max_chars > 10000:
+        # Use concise format for large context windows
+        return _tag(memory_get_context_optimized(query, 'claude', limit=10, max_chars=max_chars, intent=detected_intent),
+                    'Large context window detected, using concise format')
     elif agent_type == 'cursor':
         # Use structured format for Cursor
-        result = memory_get_context_optimized(query, 'cursor', limit=8, max_chars=max_tokens, intent=detected_intent)
-        result['format_info']['auto_selected'] = True
-        result['format_info']['reason'] = 'Cursor IDE detected, using structured format'
-        return result
+        return _tag(memory_get_context_optimized(query, 'cursor', limit=8, max_chars=max_chars, intent=detected_intent),
+                    'Cursor IDE detected, using structured format')
     elif agent_type == 'opencode':
         # Use structured sections for OpenCode
-        result = memory_get_context_optimized(query, 'opencode', limit=10, max_chars=max_tokens, intent=detected_intent)
-        result['format_info']['auto_selected'] = True
-        result['format_info']['reason'] = 'OpenCode detected, using sectioned format'
-        return result
+        return _tag(memory_get_context_optimized(query, 'opencode', limit=10, max_chars=max_chars, intent=detected_intent),
+                    'OpenCode detected, using sectioned format')
     else:
         # Default smart selection
-        if max_tokens > 8000:
-            result = memory_get_context_optimized(query, 'claude', limit=10, max_chars=max_tokens, intent=detected_intent)
-            result['format_info']['auto_selected'] = True
-            result['format_info']['reason'] = 'Large token budget, using concise format'
+        if max_chars > 8000:
+            return _tag(memory_get_context_optimized(query, 'claude', limit=10, max_chars=max_chars, intent=detected_intent),
+                        'Large token budget, using concise format')
         else:
-            result = memory_get_context_optimized(query, 'default', limit=5, max_chars=max_tokens, intent=detected_intent)
-            result['format_info']['auto_selected'] = True
-            result['format_info']['reason'] = 'Standard token budget, using default format'
-        return result
+            return _tag(memory_get_context_optimized(query, 'default', limit=5, max_chars=max_chars, intent=detected_intent),
+                        'Standard token budget, using default format')
 
 
 @mcp.tool()
 def memory_get_file_context(file_path: str) -> dict:
     """Get file context before editing."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
-    briefing_md = _get_store().get_file_context(file_path)
+    with _store() as _s:
+        briefing_md = _s.get_file_context(file_path)
     return {"file_path": file_path, "briefing_markdown": briefing_md}
 
 
 @mcp.tool()
 def memory_check_safety(file_paths: List[str]) -> dict:
     """Multi-File Refactor Safety Matrix. Call this BEFORE modifying a batch of multiple files! Analyzes cross-file dependencies, shared constraints, and breaking change risks across all target files."""
-    return _get_store().check_safety(file_paths)
+    with _store() as _s:
+        return _s.check_safety(file_paths if isinstance(file_paths, list) else [])
 
 
 @mcp.tool()
@@ -402,7 +466,9 @@ def memory_get_dependency_map(file_paths: List[str]) -> dict:
     Call this before multi-file refactors to give the LLM a clear picture of
     how the target files relate to each other and the rest of the codebase.
     """
-    map_md = _get_store().get_dependency_map(file_paths)
+    map_md = None
+    with _store() as _s:
+        map_md = _s.get_dependency_map(file_paths if isinstance(file_paths, list) else [])
     return {"file_paths": file_paths, "dependency_map_markdown": map_md}
 
 
@@ -415,7 +481,8 @@ def memory_usage_stats(top_facts: int = 20) -> dict:
     queries. Call this to understand which facts are load-bearing for agents
     and which areas of the project attract the most attention.
     """
-    return _get_store().usage_stats(top_facts=top_facts)
+    with _store() as _s:
+        return _s.usage_stats(top_facts=_clamp_limit(top_facts, default=20, maximum=100))
 
 
 @mcp.tool()
@@ -428,7 +495,9 @@ def memory_suggest_context(current_fact_ids: List[int], limit: int = 5) -> dict:
     currently hold) to preemptively pull in related facts and reduce later
     round-trips.
     """
-    md = _get_store().suggest_proactive_context(current_fact_ids, limit=limit)
+    limit = _clamp_limit(limit, default=5)
+    with _store() as _s:
+        md = _s.suggest_proactive_context(current_fact_ids if isinstance(current_fact_ids, list) else [], limit=limit)
     return {"current_fact_ids": current_fact_ids, "suggestions_markdown": md}
 
 
@@ -437,7 +506,8 @@ def memory_optimize_db() -> dict:
     """
     Run SQLite database maintenance: PRAGMA optimize, VACUUM, and check integrity.
     """
-    return _get_store().optimize_db()
+    with _store() as _s:
+        return _s.optimize_db()
 
 
 @mcp.tool()
@@ -447,20 +517,53 @@ def memory_auto_maintenance(project_root: str = "") -> dict:
     Call this weekly or on startup instead of manual loop. Also runs automatically in background on server startup.
     """
     from pathlib import Path
-    store = _get_store()
-    root = Path(project_root) if project_root else Path(store.db_path).parent.parent
-    # 1. Incremental bootstrap
-    from bootstrap import bootstrap_project
-    boot = bootstrap_project(str(root), store=store, dry_run=False, full=False, max_facts=20, install_hook=False, drop_protocol=False)
-    # 2. Scan with auto-heal
-    scan = _get_store().scan_provenance(str(root), auto_heal=True)
-    # 3. Backfill
-    bf = _get_store().backfill_embeddings()
-    # 4. Optimize
-    opt = _get_store().optimize_db()
-    # 5. Audit for report
-    audit = _get_store().audit()
-    return {"bootstrap": boot, "scan": {"ok": len(scan["ok"]), "drifted": len(scan["drifted"]), "healed": len(scan.get("healed", [])), "missing": len(scan["missing"])}, "backfill": bf, "optimize": opt, "audit_dupes": audit["potential_duplicates_count"]}
+    _ensure_first_time_setup()
+    with _store() as store:
+        root = Path(project_root) if project_root else Path(store.db_path).parent.parent
+        # 1. Incremental bootstrap (best-effort)
+        try:
+            from bootstrap import bootstrap_project
+            boot = bootstrap_project(str(root), store=store, dry_run=False, full=False, max_facts=20, install_hook=False, drop_protocol=False)
+        except Exception as e:
+            logger.warning("maintenance bootstrap failed: %r", e)
+            boot = {"error": str(e)}
+        # 2. Scan with auto-heal (best-effort)
+        try:
+            scan = store.scan_provenance(str(root), auto_heal=True) or {}
+        except Exception as e:
+            logger.warning("maintenance scan failed: %r", e)
+            scan = {"error": str(e)}
+        # 3. Backfill (best-effort)
+        try:
+            bf = store.backfill_embeddings()
+        except Exception as e:
+            logger.warning("maintenance backfill failed: %r", e)
+            bf = {"error": str(e)}
+        # 4. Optimize (best-effort)
+        try:
+            opt = store.optimize_db()
+        except Exception as e:
+            logger.warning("maintenance optimize failed: %r", e)
+            opt = {"error": str(e)}
+        # 5. Audit for report (best-effort, tolerant keys)
+        try:
+            audit = store.audit() or {}
+        except Exception as e:
+            logger.warning("maintenance audit failed: %r", e)
+            audit = {}
+        scan = scan if isinstance(scan, dict) else {}
+        return {
+            "bootstrap": boot,
+            "scan": {
+                "ok": len(scan.get("ok", []) or []),
+                "drifted": len(scan.get("drifted", []) or []),
+                "healed": len(scan.get("healed", []) or []),
+                "missing": len(scan.get("missing", []) or []),
+            },
+            "backfill": bf,
+            "optimize": opt,
+            "audit_dupes": audit.get("potential_duplicates_count", 0),
+        }
 
 
 @mcp.tool()
@@ -468,7 +571,8 @@ def memory_export_ui(out_path: str = "") -> dict:
     """
     Generate an interactive HTML Knowledge Graph visualizer file for browsing memory.
     """
-    html_file = _get_store().export_interactive_html(out_path or None)
+    with _store() as _s:
+        html_file = _s.export_interactive_html(out_path or None)
     return {"status": "generated", "file_path": html_file}
 
 
@@ -480,16 +584,17 @@ def memory_supersede(old_id: int, new_content: str, rationale: str = "",
     Replace an outdated fact with a corrected or updated one.
     Use expected_version > 0 for optimistic concurrency control.
     """
-    new_id = _get_store().supersede(
-        old_id=old_id,
-        new_content=new_content,
-        rationale=rationale or None,
-        confidence=confidence,
-        session_id=session_id or None,
-        file_path=file_path or None,
-        tags=tags or None,
-        expected_version=expected_version if expected_version > 0 else None,
-    )
+    with _store() as _s:
+        new_id = _s.supersede(
+            old_id=old_id,
+            new_content=new_content,
+            rationale=rationale or None,
+            confidence=confidence,
+            session_id=session_id or None,
+            file_path=file_path or None,
+            tags=tags or None,
+            expected_version=expected_version if expected_version > 0 else None,
+        )
     return {"new_id": new_id, "old_id": old_id, "status": "superseded"}
 
 
@@ -498,7 +603,8 @@ def memory_deprecate(id: int, reason: str = "") -> dict:
     """
     Mark a fact as no longer valid without replacing it.
     """
-    _get_store().deprecate(id, reason or None)
+    with _store() as _s:
+        _s.deprecate(id, reason or None)
     return {"id": id, "status": "deprecated"}
 
 
@@ -507,7 +613,8 @@ def memory_get_state(category: str = "", session_id: str = "") -> dict:
     """
     Get full snapshot of active project memory.
     """
-    results = _get_store().get_state(category=category or None, session_id=session_id or None)
+    with _store() as _s:
+        results = _s.get_state(category=category or None, session_id=session_id or None)
     return {"count": len(results), "facts": results}
 
 
@@ -517,7 +624,8 @@ def memory_link_facts(source_id: int, target_id: int, relation: str) -> dict:
     Create a directed graph edge between two facts.
     relation: depends_on | implements | conflicts_with | relates_to
     """
-    edge_id = _get_store().link_facts(source_id, target_id, relation)
+    with _store() as _s:
+        edge_id = _s.link_facts(source_id, target_id, relation)
     return {"edge_id": edge_id, "source_id": source_id, "target_id": target_id, "relation": relation, "status": "linked"}
 
 
@@ -526,7 +634,8 @@ def memory_unlink_facts(source_id: int, target_id: int, relation: str) -> dict:
     """
     Remove a directed graph edge between two facts.
     """
-    _get_store().unlink_facts(source_id, target_id, relation)
+    with _store() as _s:
+        _s.unlink_facts(source_id, target_id, relation)
     return {"source_id": source_id, "target_id": target_id, "relation": relation, "status": "unlinked"}
 
 
@@ -536,7 +645,9 @@ def memory_get_graph(root_id: int, max_depth: int = 3) -> dict:
     Traverse relationship edges starting from root_id up to max_depth.
     Returns DAG of related components, decisions, and constraints.
     """
-    graph = _get_store().get_graph(root_id, max_depth)
+    max_depth = _clamp_limit(max_depth, default=3, maximum=10)
+    with _store() as _s:
+        graph = _s.get_graph(root_id, max_depth)
     return {"count": len(graph), "root_id": root_id, "graph": graph}
 
 
@@ -545,7 +656,8 @@ def memory_acquire_lock(resource: str, locked_by: str, ttl_seconds: int = 60) ->
     """
     Acquire an advisory lock on a named resource for multi-turn multi-agent operations.
     """
-    success = _get_store().acquire_lock(resource, locked_by, ttl_seconds)
+    with _store() as _s:
+        success = _s.acquire_lock(resource, locked_by, ttl_seconds)
     return {"resource": resource, "locked_by": locked_by, "acquired": success}
 
 
@@ -554,7 +666,8 @@ def memory_release_lock(resource: str, locked_by: str) -> dict:
     """
     Release an advisory lock on a named resource.
     """
-    released = _get_store().release_lock(resource, locked_by)
+    with _store() as _s:
+        released = _s.release_lock(resource, locked_by)
     return {"resource": resource, "locked_by": locked_by, "released": released}
 
 
@@ -564,7 +677,8 @@ def memory_verify_provenance(fact_id: int, project_root: str = "") -> dict:
     Verify code snippet SHA256 hash at file_path. Self-heals line range shifts
     or flags code drift / deletion.
     """
-    res = _get_store().verify_provenance(fact_id, project_root or None)
+    with _store() as _s:
+        res = _s.verify_provenance(fact_id, project_root or None)
     return res
 
 
@@ -575,7 +689,8 @@ def memory_consolidate(session_id: str = "", category: str = "state", allow_all:
     Requires session_id to scope the operation. Pass allow_all=True explicitly
     to consolidate ALL state facts (destructive - collapses entire state history).
     """
-    res = _get_store().consolidate_state_facts(session_id or None, category, allow_all=allow_all)
+    with _store() as _s:
+        res = _s.consolidate_state_facts(session_id or None, category, allow_all=allow_all)
     return res
 
 
@@ -587,7 +702,8 @@ def memory_prune(days_inactive: int = 90, dry_run: bool = True) -> dict:
     facts with graph edges, or the last 10 active facts.
     ALWAYS run with dry_run=True first to preview candidates.
     """
-    return _get_store().prune_stale(days_inactive=days_inactive, dry_run=dry_run)
+    with _store() as _s:
+        return _s.prune_stale(days_inactive=max(1, days_inactive), dry_run=dry_run)
 
 
 @mcp.tool()
@@ -595,7 +711,8 @@ def memory_audit() -> dict:
     """
     Scan active memory for potential near-duplicates or conflicting facts.
     """
-    return _get_store().audit()
+    with _store() as _s:
+        return _s.audit()
 
 
 @mcp.tool()
@@ -603,7 +720,8 @@ def memory_export_markdown(category: str = "") -> dict:
     """
     Export active memory as formatted markdown for LLM context prompts.
     """
-    md = _get_store().export_markdown(category=category or None)
+    with _store() as _s:
+        md = _s.export_markdown(category=category or None)
     return {"markdown": md}
 
 
@@ -613,7 +731,8 @@ def memory_stats() -> dict:
     Overview of memory database statistics, categories, edges, and location.
     """
     _ensure_first_time_setup()  # Auto-bootstrap on first use
-    return _get_store().stats()
+    with _store() as _s:
+        return _s.stats()
 
 
 @mcp.tool()
@@ -630,7 +749,9 @@ def memory_prepare_task(intent: str, file_paths: List[str] | None = None, limit:
     file_paths: List of files you plan to edit (optional but recommended)
     """
     _ensure_first_time_setup()  # Auto-bootstrap on first use
-    briefing = _get_store().prepare_task(intent, file_paths=file_paths or None, limit=limit)
+    limit = _clamp_limit(limit, default=5, maximum=50)
+    with _store() as _s:
+        briefing = _s.prepare_task(intent, file_paths=file_paths or None, limit=limit)
     return {"intent": intent, "briefing_markdown": briefing}
 
 
@@ -656,13 +777,14 @@ def memory_checkpoint_task(
         dict with content (what was tried) and rationale (why it failed).
         Stored as constraints so future agents do not re-derive the dead end.
     """
-    result = _get_store().checkpoint_task(
-        summary=summary,
-        components=components or [],
-        decisions=decisions or [],
-        test_baseline=test_baseline or None,
-        failures=failures or [],
-    )
+    with _store() as _s:
+        result = _s.checkpoint_task(
+            summary=summary,
+            components=components or [],
+            decisions=decisions or [],
+            test_baseline=test_baseline or None,
+            failures=failures or [],
+        )
     # Translate negative dedup sentinels to positive IDs, matching memory_write/memory_write_batch
     fact_ids = result.get("fact_ids", [])
     if any(isinstance(i, int) and i < 0 for i in fact_ids) or result.get("state_id", 0) < 0:
@@ -695,7 +817,8 @@ def memory_scan_provenance(project_root: str = "", auto_deprecate: bool = False,
     auto_deprecate: If True, automatically deprecate facts for deleted files
     auto_heal: If True, auto-update code_hash for low-importance (1) file-coverage drifted facts
     """
-    return _get_store().scan_provenance(project_root or None, auto_deprecate=auto_deprecate, auto_heal=auto_heal)
+    with _store() as _s:
+        return _s.scan_provenance(project_root or None, auto_deprecate=auto_deprecate, auto_heal=auto_heal)
 
 
 @mcp.tool()
@@ -707,7 +830,8 @@ def memory_backfill_embeddings() -> dict:
     for existing historical facts. Safe to call multiple times (skips already-embedded facts).
     Uses the all-MiniLM-L6-v2 model (384-dim, approx 80MB, CPU-friendly).
     """
-    return _get_store().backfill_embeddings()
+    with _store() as _s:
+        return _s.backfill_embeddings()
 
 
 @mcp.tool()
@@ -729,7 +853,8 @@ def memory_promote_branch(source_branch_id: int, convergence_policy: str = "KEEP
 
     # Use the module-level store's DB path so the MCP tool operates on the same DB
     # the rest of the tools use (respects MEMORY_DB_PATH env).
-    db_path = _get_store().db_path
+    with _store() as _s:
+        db_path = _s.db_path
     result = promote_branch(db_path, source_branch_id, convergence_policy=convergence_policy)
     return {"status": "promoted", "source_branch_id": source_branch_id, **result}
 
@@ -753,7 +878,8 @@ def memory_create_branch(repo_id: Optional[int] = None) -> dict:
     """
     from branch_promotion import create_branch
 
-    db_path = _get_store().db_path
+    with _store() as _s:
+        db_path = _s.db_path
     result = create_branch(db_path, repo_id=repo_id)
     return {"status": "created", **result}
 
@@ -774,7 +900,8 @@ def memory_discard_branch(source_branch_id: int, reason: str = "") -> dict:
     """
     from branch_promotion import discard_branch
 
-    db_path = _get_store().db_path
+    with _store() as _s:
+        db_path = _s.db_path
     result = discard_branch(db_path, source_branch_id, reason=reason or None)
     return {"status": "discarded", "source_branch_id": source_branch_id, **result}
 
@@ -794,7 +921,8 @@ def memory_list_branches(repo_id: Optional[int] = None, status: str = "") -> dic
     """
     from branch_promotion import list_branches
 
-    db_path = _get_store().db_path
+    with _store() as _s:
+        db_path = _s.db_path
     result = list_branches(db_path, repo_id=repo_id, status=status or None)
     return {"status": "listed", **result}
 
@@ -813,9 +941,14 @@ def memory_bootstrap_project(project_root: str = "", dry_run: bool = True,
     ALWAYS run with dry_run=True first to preview.
     """
     from bootstrap import bootstrap_project
-    return bootstrap_project(project_root or None, store=_get_store(), dry_run=dry_run,
-                             full=full, max_facts=max_facts,
-                             install_hook=install_hook, drop_protocol=drop_protocol)
+    max_facts = _clamp_limit(max_facts, default=150, maximum=1000)
+    with _store() as _s:
+        try:
+            return bootstrap_project(project_root or None, store=_s, dry_run=dry_run,
+                                     full=full, max_facts=max_facts,
+                                     install_hook=install_hook, drop_protocol=drop_protocol)
+        finally:
+            pass  # _store() closes the handle
 
 
 @mcp.tool()
@@ -827,7 +960,8 @@ def memory_who_calls(symbol: str) -> dict:
     ('query_hybrid') or Class.method ('MemoryStore.write'). Every edge is
     ground truth extracted from the tree-sitter AST, not LLM output.
     """
-    return _get_store().who_calls(symbol)
+    with _store() as _s:
+        return _s.who_calls(symbol)
 
 
 @mcp.tool()
@@ -838,7 +972,8 @@ def memory_project_shape() -> dict:
     indexed, which modules carry the most definitions, and how large the
     call/import graph is.
     """
-    return {"markdown": _get_store().project_shape()}
+    with _store() as _s:
+        return {"markdown": _s.project_shape()}
 
 
 @mcp.tool()
@@ -849,7 +984,8 @@ def memory_flag_fact(fact_id: int, note: str = "", flag_type: str = "misleading"
     bad context is never silently consumed again. Prefer memory_supersede when
     you know the corrected content; use this when you only know it misled you.
     """
-    return _get_store().flag_fact(fact_id, note=note, flag_type=flag_type)
+    with _store() as _s:
+        return _s.flag_fact(fact_id, note=note, flag_type=flag_type)
 
 
 if __name__ == "__main__":
