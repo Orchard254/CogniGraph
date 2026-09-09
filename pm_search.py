@@ -217,6 +217,10 @@ class SearchMixin:
                 "INSERT INTO memory_usage_log (query_text, intent, agent_type, retrieved_fact_ids, result_count, session_id, logged_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (query_text, intent, agent_type, ids_str, result_count, session_id, now_str),
             )
+        except sqlite3.ProgrammingError as e:
+            # A cross-thread connection here is a real bug (per-thread stores
+            # exist precisely to prevent it) — never demote to debug.
+            logger.warning("usage logging failed (cross-thread?): %r", e)
         except Exception as e:
             logger.debug("usage logging failed: %r", e)
 
@@ -835,19 +839,38 @@ class SearchMixin:
 
         # Access counters and usage logging apply only to real agent queries;
         # internal seeding and eval calls pass log_usage=False so they cannot
-        # feed a popularity feedback loop into usage learning.
+        # feed a popularity feedback loop into usage learning. Both stay behind
+        # the SAME flag (never split): access_count feeds the cold-start boost,
+        # so gating only one side would reopen the loop through the back door.
+        # Counter bumps + log insert run in one transaction so concurrent
+        # retrievals can't interleave them; still best-effort, never breaks
+        # retrieval — except cross-thread misuse, which is a real bug.
         if log_usage:
-            if memory_ids:
-                now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                for fid in memory_ids:
-                    if ("memory", fid) in row_dict:
-                        self.conn.execute(
-                            "UPDATE memory SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?",
-                            (now_str, fid),
-                        )
+            try:
+                self.conn.execute("BEGIN IMMEDIATE")
+                try:
+                    if memory_ids:
+                        now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        for fid in memory_ids:
+                            if ("memory", fid) in row_dict:
+                                self.conn.execute(
+                                    "UPDATE memory SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?",
+                                    (now_str, fid),
+                                )
 
-            # Usage logging for pattern learning (best-effort, never breaks retrieval)
-            self._log_usage(text, intent, agent_type or None, memory_ids, len(results), session_id)
+                    # Usage logging for pattern learning (best-effort, never breaks retrieval)
+                    self._log_usage(text, intent, agent_type or None, memory_ids, len(results), session_id)
+                    self.conn.execute("COMMIT")
+                except Exception:
+                    try:
+                        self.conn.execute("ROLLBACK")
+                    except Exception:
+                        pass
+                    raise
+            except sqlite3.ProgrammingError as e:
+                logger.warning("usage accounting failed (cross-thread?): %r", e)
+            except Exception as e:
+                logger.debug("usage accounting failed: %r", e)
 
         # Auto-expand graph neighbors only for memory (episodic graph not yet)
         if expand_graph:

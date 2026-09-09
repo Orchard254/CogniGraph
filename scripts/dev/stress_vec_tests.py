@@ -27,9 +27,9 @@ import statistics
 import sqlite_vec
 import numpy as np
 
-# Import helpers from memory_store to ensure same binary format
-import memory_store
-from memory_store import MemoryStore, _vec_to_blob, _blob_to_vec, _encode
+# Import helpers from pm_common (public location) to ensure same binary format
+from memory_store import MemoryStore
+from pm_common import _vec_to_blob, _blob_to_vec, _encode, _EMBED_MODEL_NAME
 
 # Utility: create a random unit vector (float32)
 def rand_unit(dim=384, seed=None):
@@ -160,8 +160,8 @@ def perf_bench(db_dir, scales=(500,2000,5000,20000)):
         # clear any existing vec_memory and memory_embeddings
         try:
             cur.execute('DELETE FROM vec_memory')
-        except Exception:
-            pass
+        except Exception as e:
+            print(f'N={N}: vec_memory clear skipped (no vec table?): {e}')
         cur.execute('DELETE FROM memory_embeddings')
         conn.commit()
         # Bulk insert N random embeddings directly into memory_embeddings and vec_memory
@@ -171,27 +171,31 @@ def perf_bench(db_dir, scales=(500,2000,5000,20000)):
             blobs.append(pack(v))
         # Ensure memory rows exist for foreign key constraint (insert minimal required fields)
         now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-        cur.executemany('INSERT OR REPLACE INTO memory (id, category, content, created_at, confidence) VALUES (?, ?, ?, ?, ?)',
-                                ((i+1, 'component', f'auto {i+1}', now, 'assumed') for i in range(N)))
+        try:
+            cur.executemany('INSERT OR REPLACE INTO memory (id, category, content, created_at, confidence) VALUES (?, ?, ?, ?, ?)',
+                                    ((i+1, 'component', f'auto {i+1}', now, 'assumed') for i in range(N)))
+        except sqlite3.Error as e:
+            raise RuntimeError(
+                f'N={N}: seed INSERT into memory failed (schema drift? columns id/category/content/created_at/confidence): {e}'
+            )
         conn.commit()
         # insert using executemany for memory_embeddings (fact_id 1..N)
         cur.executemany('INSERT OR REPLACE INTO memory_embeddings (fact_id, model, embedding) VALUES (?, ?, ?)',
-                                ((i+1, memory_store._EMBED_MODEL_NAME, blobs[i]) for i in range(N)))
+                                ((i+1, _EMBED_MODEL_NAME, blobs[i]) for i in range(N)))
         conn.commit()
         # ensure vec_memory synced: if triggers not available, insert explicitly
         try:
             cur.executemany('INSERT OR REPLACE INTO vec_memory(rowid, embedding) VALUES (?, ?)', ((i+1, blobs[i]) for i in range(N)))
             conn.commit()
-        except Exception:
-            # ignore
-            pass
-            # diagnostic counts
+        except Exception as e:
+            # diagnostic counts (vec path unavailable — brute lane still benches)
+            print(f'N={N}: explicit vec_memory sync skipped: {e}')
             try:
                 vc = cur.execute('SELECT COUNT(*) as c FROM vec_memory').fetchone()
                 me = cur.execute('SELECT COUNT(*) as c FROM memory_embeddings').fetchone()
                 print(f'Inserted N={N}: vec_memory_count={vc[0] if vc else vc}, memory_embeddings_count={me[0] if me else me}')
-            except Exception:
-                pass
+            except Exception as e2:
+                print(f'N={N}: vec diagnostic counts failed: {e2}')
             # choose a random query from inserted items
         q_idx = max(1, N//7)
         q_blob = blobs[q_idx]
@@ -231,14 +235,14 @@ def side_by_side_sanity(db_dir):
     for i, blob in enumerate(blobs, start=1):
         # ensure a memory row exists to satisfy FK
         cur.execute('INSERT OR REPLACE INTO memory (id, category, content, created_at, confidence) VALUES (?, ?, ?, ?, ?)', (i, 'component', f'auto {i}', time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'assumed'))
-        cur.execute('INSERT OR REPLACE INTO memory_embeddings(fact_id, model, embedding) VALUES (?, ?, ?)', (i, memory_store._EMBED_MODEL_NAME, blob))
+        cur.execute('INSERT OR REPLACE INTO memory_embeddings(fact_id, model, embedding) VALUES (?, ?, ?)', (i, _EMBED_MODEL_NAME, blob))
     conn.commit()
     # Ensure vec_memory populated
     try:
         cur.executemany('INSERT OR REPLACE INTO vec_memory(rowid, embedding) VALUES (?, ?)', ((i+1, blobs[i]) for i in range(len(blobs))))
         conn.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f'sanity: explicit vec_memory sync skipped: {e}')
     q = _encode(a)
     brute = store._semantic_scores(q)
     vec = store._semantic_scores_vec(q)

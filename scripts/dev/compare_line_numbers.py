@@ -1,9 +1,12 @@
 # Confirm line-number conversion: tree-sitter 0-indexed vs memory table 1-indexed
+from pathlib import Path
 from tree_sitter import Parser, Language
 import tree_sitter_python as tspython
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 parser = Parser(Language(tspython.language()))
-with open("memory_store.py", "rb") as f:
+with open(REPO_ROOT / "memory_store.py", "rb") as f:
     source = f.read()
 
 tree = parser.parse(source)

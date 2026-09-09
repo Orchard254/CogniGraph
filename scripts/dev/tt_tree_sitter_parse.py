@@ -1,21 +1,12 @@
+from pathlib import Path
 from tree_sitter import Language, Parser
 import tree_sitter_python
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 PY_LANGUAGE = Language(tree_sitter_python.language())
 parser = Parser(PY_LANGUAGE)
 
-with open('memory_store.py','rb') as f:
-    src = f.read()
-
-tree = parser.parse(src)
-root = tree.root_node
-
-print('root type:', root.type)
-
-# collect imports
-imports = []
-for node in root.walk():
-    pass
 
 # Use simple traversal: iterate children recursively
 def walk(node):
@@ -40,8 +31,22 @@ def walk(node):
         res.extend(walk(ch))
     return res
 
-items = walk(root)
-print('found items:', len(items))
-# print first 40
-for it in items[:40]:
-    print(it)
+
+def main():
+    with open(REPO_ROOT / 'memory_store.py', 'rb') as f:
+        src = f.read()
+
+    tree = parser.parse(src)
+    root = tree.root_node
+
+    print('root type:', root.type)
+
+    items = walk(root)
+    print('found items:', len(items))
+    # print first 40
+    for it in items[:40]:
+        print(it)
+
+
+if __name__ == "__main__":
+    main()

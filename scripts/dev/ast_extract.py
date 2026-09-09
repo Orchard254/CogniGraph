@@ -6,9 +6,13 @@ Report top-level functions/classes, methods, and imports.
 
 import ast
 import inspect
+from pathlib import Path
+
+# Resolve against the repo root so the script works from any CWD.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Read the target file
-with open('memory_store.py', 'r') as f:
+with open(REPO_ROOT / 'memory_store.py', 'r') as f:
     source_code = f.read()
     lines = source_code.split('\n')
 

@@ -1,8 +1,12 @@
 # Real tree-sitter extraction (not just "parses")
 # Uses modern constructor API: Parser(Language(pkg.language()))
+import tempfile
+from pathlib import Path
 from tree_sitter import Parser, Language
 import tree_sitter_python as tspython
 import tree_sitter_javascript as tsjs
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def extract_python(file_path):
     parser = Parser(Language(tspython.language()))
@@ -92,15 +96,22 @@ if __name__ == "__main__":
     print("TREE-SITTER REAL EXTRACTION (Python grammar)")
     print("Using: Parser(Language(tree_sitter_python.language()))  [modern constructor API]")
     print("=" * 70)
-    extract_python("memory_store.py")
+    extract_python(REPO_ROOT / "memory_store.py")
 
-    # Small JS sample
+    # Small JS sample (temp file — never pollute the repo root)
     js_sample = b"function foo() { return 1; }\nclass Bar { baz() { return 2; } }\nconst x = require('y');\n"
-    with open("test_sample.js", "wb") as f:
+    with tempfile.NamedTemporaryFile(suffix=".js", delete=False) as f:
         f.write(js_sample)
+        js_path = f.name
 
     print()
     print("=" * 70)
     print("TREE-SITTER REAL EXTRACTION (JavaScript grammar)")
     print("=" * 70)
-    extract_js("test_sample.js")
+    try:
+        extract_js(js_path)
+    finally:
+        try:
+            Path(js_path).unlink()
+        except OSError:
+            pass
