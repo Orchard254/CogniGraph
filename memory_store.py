@@ -561,7 +561,9 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                     if fp_norm == norm_fp and rr["id"] in scores:
                         active_ids.add(rr["id"])
                 if not active_ids:
-                    return None
+                    # No scored (embedded) facts in this file scope — fall
+                    # through to Jaccard so embed=False facts are still caught.
+                    pass
             else:
                 active_ids = set(
                     r["id"] for r in self.conn.execute(
@@ -571,7 +573,9 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             for fid, sim in sorted(scores.items(), key=lambda x: x[1], reverse=True):
                 if fid in active_ids and sim >= threshold:
                     return fid
-            return None
+            # No semantic match — fall through to tokenized-Jaccard fallback
+            # below so facts stored with embed=False (no vector) are still
+            # caught by dedup instead of escaping via an early None.
         # Fallback: tokenized Jaccard
         query_tokens = tokenize_text(text)
         if not query_tokens:
