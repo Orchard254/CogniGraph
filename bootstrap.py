@@ -307,17 +307,24 @@ def extract_docs(root: Path, max_chars: int = 900) -> List[Dict[str, Any]]:
 
 
 def scan_git(root: Path, commit_limit: int = 30) -> Dict[str, Any]:
-    """Branch + recent commits + tagged commits from git history."""
+    """Branch + recent commits + tagged commits from git history.
+
+    stdin is detached and every call carries a timeout: under the MCP
+    server an inherited stdio pipe stalls Git-for-Windows children, and
+    without a timeout that stall is unbounded.
+    """
     if not (root / ".git").exists():
         return {"available": False, "branch": "", "recent": [], "tagged": []}
     out: Dict[str, Any] = {"available": True, "branch": "", "recent": [], "tagged": []}
     try:
         out["branch"] = subprocess.check_output(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=root, text=True, encoding="utf-8", stderr=subprocess.DEVNULL).strip()
+            cwd=root, stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
+            stderr=subprocess.DEVNULL, timeout=15).strip()
         log = subprocess.check_output(
             ["git", "log", f"-{commit_limit}", "--pretty=%H|%s"],
-            cwd=root, text=True, encoding="utf-8", stderr=subprocess.DEVNULL)
+            cwd=root, stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
+            stderr=subprocess.DEVNULL, timeout=15)
         tag_re = re.compile(r"\[(decision|constraint|component|arch|state)\]\s*(.*)", re.IGNORECASE)
         for line in log.splitlines():
             sha, _, subject = line.partition("|")

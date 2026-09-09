@@ -420,11 +420,16 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         Gives anchored facts a time axis: the commit the code was at when the
         fact was recorded. Returns None outside a git repository (temp test
         DBs, projects not yet under git) or when git is unavailable.
+
+        stdin is detached (DEVNULL): when this runs inside the MCP server,
+        inheriting the held-open MCP stdio pipe makes Git-for-Windows
+        children stall, defeating the timeout below.
         """
         try:
             root = Path(self.db_path).resolve().parent.parent
             out = subprocess.run(
                 ["git", "-C", str(root), "rev-parse", "HEAD"],
+                stdin=subprocess.DEVNULL,
                 capture_output=True, text=True, timeout=5,
             )
             if out.returncode == 0:

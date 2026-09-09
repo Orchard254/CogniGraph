@@ -834,7 +834,8 @@ class TestGitCommitAnchoring:
         import subprocess
         def run(*args):
             subprocess.run(["git", "-C", str(tmp_path), *args],
-                           check=True, capture_output=True)
+                           check=True, capture_output=True,
+                           stdin=subprocess.DEVNULL, timeout=30)
         run("init", "-b", "main")
         run("config", "user.email", "test@example.com")
         run("config", "user.name", "Test")
@@ -844,6 +845,7 @@ class TestGitCommitAnchoring:
         head = subprocess.run(
             ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
             capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, timeout=30,
         ).stdout.strip()
         return tmp_path, head
 

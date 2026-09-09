@@ -26,8 +26,8 @@ TAG_MAP = {
 
 def get_latest_commit_info():
     try:
-        msg = subprocess.check_output(["git", "log", "-1", "--pretty=%B"], text=True, encoding="utf-8").strip()
-        sha = subprocess.check_output(["git", "log", "-1", "--pretty=%H"], text=True, encoding="utf-8").strip()
+        msg = subprocess.check_output(["git", "log", "-1", "--pretty=%B"], text=True, encoding="utf-8", stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15).strip()
+        sha = subprocess.check_output(["git", "log", "-1", "--pretty=%H"], text=True, encoding="utf-8", stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15).strip()
         return msg, sha
     except Exception:
         return None, None

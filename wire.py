@@ -32,7 +32,8 @@ def _python_exe(pm_root: Path) -> str:
     # No venv yet: prefer a version-checked interpreter over bare "python".
     for cmd in ("python3", "python"):
         try:
-            out = subprocess.check_output([cmd, "--version"], text=True, stderr=subprocess.STDOUT)
+            out = subprocess.check_output([cmd, "--version"], text=True, stderr=subprocess.STDOUT,
+                                          stdin=subprocess.DEVNULL, timeout=15)
             import re
             m = re.search(r"Python\s+(\d+)\.(\d+)", out or "")
             if m and (int(m.group(1)) > 3 or (int(m.group(1)) == 3 and int(m.group(2)) >= 8)):
