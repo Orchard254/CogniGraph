@@ -599,6 +599,10 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         if not facts:
             return []
         new_ids = []
+        # Defer embedding until after COMMIT so the RESERVED write lock is not
+        # held across slow model inference. Inserts stay atomic; embeddings are
+        # best-effort per fact, matching write(embed=True) semantics.
+        pending_embeddings: List[Tuple[int, str]] = []
         try:
             self.conn.execute("BEGIN IMMEDIATE")
             for f in facts:
@@ -616,13 +620,23 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                     code_hash=f.get("code_hash"),
                     git_commit_sha=f.get("git_commit_sha"),
                     force=force,
-                    embed=embed,
+                    embed=False,
                 )
                 new_ids.append(nid)
+                if embed and isinstance(nid, int) and nid > 0:
+                    content = f.get("content", "") or ""
+                    rationale = f.get("rationale") or ""
+                    pending_embeddings.append((nid, f"{content} {rationale}"))
             self.conn.execute("COMMIT")
         except Exception:
             self.conn.execute("ROLLBACK")
             raise
+        if embed:
+            for nid, text in pending_embeddings:
+                try:
+                    self._store_embedding(nid, text)
+                except Exception as e:
+                    logger.warning("memory embedding failed for fact_id %s: %r", nid, e)
         return new_ids
 
     def supersede(self, old_id: int, new_content: str, rationale: Optional[str] = None,

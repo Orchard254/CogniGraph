@@ -41,10 +41,12 @@ def _ensure_first_time_setup():
             # Check if database is empty (new database)
             import sqlite3
             conn = sqlite3.connect(store.db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM memory")
-            count = cursor.fetchone()[0]
-            conn.close()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM memory")
+                count = cursor.fetchone()[0]
+            finally:
+                conn.close()
             
             if count == 0:
                 logger.info("New database detected, running automatic bootstrap...")
@@ -68,7 +70,7 @@ def _auto_maintenance():
     try:
         from bootstrap import bootstrap_project
         from pathlib import Path
-        root = Path(_get_store().db_path).parent.parent
+        root = Path(store.db_path).parent.parent
         # 1. Incremental bootstrap (top 20, no hook/doc drop - just context)
         try:
             bootstrap_project(root, store=store, dry_run=False, full=False, max_facts=20, install_hook=False, drop_protocol=False)
@@ -76,22 +78,27 @@ def _auto_maintenance():
             logger.debug("auto bootstrap failed: %r", e)
         # 2. Scan with auto-heal for low-importance churn
         try:
-            _get_store().scan_provenance(str(root), auto_heal=True)
+            store.scan_provenance(str(root), auto_heal=True)
         except Exception as e:
             logger.debug("auto scan failed: %r", e)
         # 3. Backfill any missing embeddings (batched)
         try:
-            _get_store().backfill_embeddings()
+            store.backfill_embeddings()
         except Exception as e:
             logger.debug("auto backfill failed: %r", e)
         # 4. Optimize
         try:
-            _get_store().optimize_db()
+            store.optimize_db()
         except Exception as e:
             logger.debug("auto optimize failed: %r", e)
         logger.info("auto_maintenance completed for %s", root)
     except Exception as e:
         logger.warning("auto_maintenance failed: %r", e)
+    finally:
+        try:
+            store.close()
+        except Exception:
+            pass
 
 def _start_background_services():
     """Start auto-maintenance and file watcher threads. Called from main block."""
@@ -107,7 +114,7 @@ def _start_background_services():
         from watcher import start_watcher
         from pathlib import Path
         store = _get_store()
-        _watch_root = Path(_get_store().db_path).parent.parent
+        _watch_root = Path(store.db_path).parent.parent
         start_watcher(project_root=_watch_root, store=store)
         logger.info("file watcher started for %s", _watch_root)
     except Exception as e:
@@ -610,7 +617,7 @@ def memory_stats() -> dict:
 
 
 @mcp.tool()
-def memory_prepare_task(intent: str, file_paths: List[str] = [], limit: int = 5) -> dict:
+def memory_prepare_task(intent: str, file_paths: List[str] | None = None, limit: int = 5) -> dict:
     """PRE-CODING FLIGHT BRIEFING - Call this at the START of every coding task.
     
     Returns a complete Markdown briefing containing:
@@ -630,10 +637,10 @@ def memory_prepare_task(intent: str, file_paths: List[str] = [], limit: int = 5)
 @mcp.tool()
 def memory_checkpoint_task(
     summary: str,
-    components: List[Dict[str, Any]] = [],
-    decisions: List[Dict[str, Any]] = [],
+    components: List[Dict[str, Any]] | None = None,
+    decisions: List[Dict[str, Any]] | None = None,
     test_baseline: str = "",
-    failures: List[Dict[str, Any]] = [],
+    failures: List[Dict[str, Any]] | None = None,
 ) -> dict:
     """
     POST-CODING CHECKPOINT - Call this at the END of every coding task.
