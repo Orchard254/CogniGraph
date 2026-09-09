@@ -39,13 +39,20 @@ WATCHED_EXTS = {".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".java"}
 IGNORE_DIRS = {".git", "venv", ".venv", "node_modules", "__pycache__", ".project-memory", "dist", "build", "target", ".next", ".cache", ".idea", ".vscode", "site-packages", ".pytest_cache", ".mypy_cache", "coverage", ".opencode", "scratch", "fixtures"}
 
 def _should_watch(path: Path, root: Path) -> bool:
-    rel = path.relative_to(root) if path.is_absolute() else path
+    try:
+        rel = path.relative_to(root) if path.is_absolute() else path
+    except ValueError:
+        return False
     for part in rel.parts:
         if part in IGNORE_DIRS or part.endswith(".egg-info"):
             return False
     if path.suffix.lower() not in WATCHED_EXTS:
         return False
-    if path.stat().st_size > 1_000_000:
+    try:
+        if path.stat().st_size > 1_000_000:
+            return False
+    except (OSError, FileNotFoundError):
+        # File deleted or unreadable between event delivery and handler.
         return False
     return True
 
@@ -68,6 +75,23 @@ def _thread_store(db_path: str) -> MemoryStore:
         store = MemoryStore(db_path)
         cache[db_path] = store
     return store
+
+def close_thread_stores(db_path: Optional[str] = None) -> None:
+    """Close per-thread cached stores so watcher threads don't leak handles.
+
+    Call on watcher shutdown. If db_path is given, only that entry is closed.
+    """
+    cache = getattr(_thread_local, "stores", None)
+    if not cache:
+        return
+    targets = [db_path] if db_path else list(cache.keys())
+    for key in targets:
+        store = cache.pop(key, None)
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
 
 def _sync_file(file_path: Path, root: Path, store: MemoryStore):
     """Incrementally sync a single file: structural nodes + file fact."""
@@ -126,6 +150,7 @@ class _Handler(FileSystemEventHandler):
         self.store = store
         self._last_sync = {}
         self._pending = {}
+        self._lock = threading.Lock()
 
     def on_modified(self, event):
         if event.is_directory:
@@ -135,26 +160,36 @@ class _Handler(FileSystemEventHandler):
             return
         now = time.time()
         key = str(p)
-        elapsed = now - self._last_sync.get(key, 0)
-        if elapsed < 2.0:
-            # Inside the debounce window this is either the tail of the same
-            # save burst or a real follow-up edit. Schedule one trailing sync
-            # just after the window closes so a genuine quick second edit is
-            # never dropped — a missed sync is silent memory drift.
-            if not self._pending.get(key):
-                self._pending[key] = True
-                t = threading.Timer(2.0 - elapsed + 0.1, self._trailing_sync, args=(p, key))
-                t.daemon = True
-                t.start()
+        with self._lock:
+            elapsed = now - self._last_sync.get(key, 0)
+            if elapsed < 2.0:
+                # Inside the debounce window this is either the tail of the same
+                # save burst or a real follow-up edit. Schedule one trailing sync
+                # just after the window closes so a genuine quick second edit is
+                # never dropped — a missed sync is silent memory drift.
+                if not self._pending.get(key):
+                    self._pending[key] = True
+                    t = threading.Timer(2.0 - elapsed + 0.1, self._trailing_sync, args=(p, key))
+                    t.daemon = True
+                    t.start()
+                return
+            self._last_sync[key] = now
+        try:
+            rel = p.relative_to(self.root)
+        except ValueError:
             return
-        self._last_sync[key] = now
-        logger.info("watcher detected change: %s", p.relative_to(self.root))
+        logger.info("watcher detected change: %s", rel)
         _sync_file(p, self.root, self.store)
 
     def _trailing_sync(self, p: Path, key: str):
-        self._pending.pop(key, None)
-        self._last_sync[key] = time.time()
-        logger.info("watcher trailing sync: %s", p.relative_to(self.root))
+        with self._lock:
+            self._pending.pop(key, None)
+            self._last_sync[key] = time.time()
+        try:
+            rel = p.relative_to(self.root)
+        except ValueError:
+            return
+        logger.info("watcher trailing sync: %s", rel)
         _sync_file(p, self.root, self.store)
 
     def on_created(self, event):
@@ -186,15 +221,34 @@ def start_watcher(project_root: Optional[Path] = None, store: Optional[MemorySto
                 while True:
                     try:
                         for ext in WATCHED_EXTS:
-                            for p in root.rglob(f"*{ext}"):
-                                if not _should_watch(p, root):
+                            try:
+                                candidates = list(root.rglob(f"*{ext}"))
+                            except OSError as e:
+                                logger.debug("watcher poll rglob failed %s: %r", ext, e)
+                                continue
+                            for p in candidates:
+                                try:
+                                    if not _should_watch(p, root):
+                                        if not p.exists():
+                                            seen.pop(str(p), None)
+                                        continue
+                                    mtime = p.stat().st_mtime
+                                except (OSError, FileNotFoundError) as e:
+                                    logger.debug("watcher poll stat failed %s: %r", p, e)
+                                    seen.pop(str(p), None)
                                     continue
-                                mtime = p.stat().st_mtime
                                 key = str(p)
                                 if key not in seen or seen[key] != mtime:
                                     if not first_scan:
                                         _sync_file(p, root, store)
                                     seen[key] = mtime
+                        # Evict deleted paths so `seen` stays bounded.
+                        for key in list(seen.keys()):
+                            try:
+                                if not Path(key).exists():
+                                    seen.pop(key, None)
+                            except OSError:
+                                seen.pop(key, None)
                         first_scan = False
                         time.sleep(30)
                     except Exception as e:
