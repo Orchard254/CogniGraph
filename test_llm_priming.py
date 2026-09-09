@@ -25,6 +25,12 @@ def temp_store():
     temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
     temp_db.close()
     store = MemoryStore(db_path=temp_db.name)
+    # Temp DBs live under %TEMP%, outside any git repo: every
+    # _current_git_commit probe is pure waste (~0.054s x5 per seed).
+    # Neutralize at the instance level; real-repo stores (e.g.
+    # TestGitCommitAnchoring._store_in) are unaffected. test_no_repo_means_no_sha
+    # still passes since it asserts the sha is None.
+    store._current_git_commit = lambda: None
     yield store
     store.close()
     try:
@@ -35,22 +41,58 @@ def temp_store():
 
 @pytest.fixture
 def seeded_store(temp_store):
-    """Store with realistic test facts seeded."""
+    """Store with realistic test facts seeded (cheap: no embeds, no dedup scan)."""
     temp_store.write(category='constraint', content='All API endpoints must validate JWT tokens',
                      importance=5, tags='security,api,critical',
-                     file_path='api/auth.py', line_start=10, line_end=15)
+                     file_path='api/auth.py', line_start=10, line_end=15,
+                     embed=False, force=True)
     temp_store.write(category='decision', content='Use PostgreSQL for production database',
                      importance=4, tags='database,architecture',
-                     file_path='config/database.py', line_start=20, line_end=25)
+                     file_path='config/database.py', line_start=20, line_end=25,
+                     embed=False, force=True)
     temp_store.write(category='component', content='User authentication service handles login and logout flows',
                      importance=3, tags='auth,service',
-                     file_path='services/auth_service.py', line_start=5, line_end=30)
+                     file_path='services/auth_service.py', line_start=5, line_end=30,
+                     embed=False, force=True)
     temp_store.write(category='constraint', content='Database queries must use parameterized queries',
                      importance=5, tags='security,critical',
-                     file_path='models/user.py', line_start=8, line_end=12)
+                     file_path='models/user.py', line_start=8, line_end=12,
+                     embed=False, force=True)
     temp_store.write(category='decision', content='Implement rate limiting at 100 requests per minute',
                      importance=4, tags='api,performance',
-                     file_path='config/rate_limiting.py', line_start=15, line_end=20)
+                     file_path='config/rate_limiting.py', line_start=15, line_end=20,
+                     embed=False, force=True)
+    return temp_store
+
+
+@pytest.fixture
+def semantic_seeded_store(temp_store):
+    """Small seed WITH real vectors, for semantic-ranking tests only.
+
+    Same content as seeded_store so ordering assertions hold unchanged;
+    force=True skips the dedup-scan encode, embed=True (default) keeps the
+    store encode so the semantic lane is populated.
+    """
+    temp_store.write(category='constraint', content='All API endpoints must validate JWT tokens',
+                     importance=5, tags='security,api,critical',
+                     file_path='api/auth.py', line_start=10, line_end=15,
+                     force=True)
+    temp_store.write(category='decision', content='Use PostgreSQL for production database',
+                     importance=4, tags='database,architecture',
+                     file_path='config/database.py', line_start=20, line_end=25,
+                     force=True)
+    temp_store.write(category='component', content='User authentication service handles login and logout flows',
+                     importance=3, tags='auth,service',
+                     file_path='services/auth_service.py', line_start=5, line_end=30,
+                     force=True)
+    temp_store.write(category='constraint', content='Database queries must use parameterized queries',
+                     importance=5, tags='security,critical',
+                     file_path='models/user.py', line_start=8, line_end=12,
+                     force=True)
+    temp_store.write(category='decision', content='Implement rate limiting at 100 requests per minute',
+                     importance=4, tags='api,performance',
+                     file_path='config/rate_limiting.py', line_start=15, line_end=20,
+                     force=True)
     return temp_store
 
 
@@ -168,9 +210,9 @@ class TestIntentAwareRanking:
         results = seeded_store.query_hybrid('fix authentication bug', intent='fix', limit=5)
         assert isinstance(results, list)
 
-    def test_fix_intent_boosts_constraints(self, seeded_store):
-        results_fix = seeded_store.query_hybrid('fix authentication security', intent='fix', limit=5)
-        results_implement = seeded_store.query_hybrid('implement authentication security', intent='implement', limit=5)
+    def test_fix_intent_boosts_constraints(self, semantic_seeded_store):
+        results_fix = semantic_seeded_store.query_hybrid('fix authentication security', intent='fix', limit=5)
+        results_implement = semantic_seeded_store.query_hybrid('implement authentication security', intent='implement', limit=5)
 
         fix_categories = [r['category'] for r in results_fix]
         implement_categories = [r['category'] for r in results_implement]
@@ -322,15 +364,15 @@ class TestIntegration:
         results = seeded_store.query_hybrid(query, intent='fix', limit=5)
         assert len(results) > 0
 
-    def test_implement_workflow(self, seeded_store):
+    def test_implement_workflow(self, semantic_seeded_store):
         """Test priming workflow for implementation tasks."""
         query = 'implement user registration API endpoint'
 
-        intent = seeded_store._detect_intent(query)
-        ctx = seeded_store.get_context(query, intent=intent, limit=5)
+        intent = semantic_seeded_store._detect_intent(query)
+        ctx = semantic_seeded_store.get_context(query, intent=intent, limit=5)
 
         assert 'IMPLEMENT' in ctx
-        results = seeded_store.query_hybrid(query, intent='implement', limit=5)
+        results = semantic_seeded_store.query_hybrid(query, intent='implement', limit=5)
         categories = [r['category'] for r in results]
         assert 'decision' in categories, "Implement tasks should surface decisions"
 

@@ -21,6 +21,10 @@ def temp_store():
     temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
     temp_db.close()
     store = MemoryStore(db_path=temp_db.name)
+    # Temp DBs live under %TEMP%, outside any git repo: every
+    # _current_git_commit probe is pure waste (~0.054s x5 per seed).
+    # Neutralize at the instance level.
+    store._current_git_commit = lambda: None
     yield store
     store.close()
     try:
@@ -31,22 +35,58 @@ def temp_store():
 
 @pytest.fixture
 def seeded_store(temp_store):
-    """Store with realistic test facts seeded."""
+    """Store with realistic test facts seeded (cheap: no embeds, no dedup scan)."""
     temp_store.write(category='constraint', content='All API endpoints must validate JWT tokens',
                      importance=5, tags='security,api,critical',
-                     file_path='api/auth.py', line_start=10, line_end=15)
+                     file_path='api/auth.py', line_start=10, line_end=15,
+                     embed=False, force=True)
     temp_store.write(category='decision', content='Use PostgreSQL for production database',
                      importance=4, tags='database,architecture',
-                     file_path='config/database.py', line_start=20, line_end=25)
+                     file_path='config/database.py', line_start=20, line_end=25,
+                     embed=False, force=True)
     temp_store.write(category='component', content='User authentication service handles login and logout flows',
                      importance=3, tags='auth,service',
-                     file_path='services/auth_service.py', line_start=5, line_end=30)
+                     file_path='services/auth_service.py', line_start=5, line_end=30,
+                     embed=False, force=True)
     temp_store.write(category='constraint', content='Database queries must use parameterized queries',
                      importance=5, tags='security,critical',
-                     file_path='models/user.py', line_start=8, line_end=12)
+                     file_path='models/user.py', line_start=8, line_end=12,
+                     embed=False, force=True)
     temp_store.write(category='decision', content='Implement rate limiting at 100 requests per minute',
                      importance=4, tags='api,performance',
-                     file_path='config/rate_limiting.py', line_start=15, line_end=20)
+                     file_path='config/rate_limiting.py', line_start=15, line_end=20,
+                     embed=False, force=True)
+    return temp_store
+
+
+@pytest.fixture
+def semantic_seeded_store(temp_store):
+    """Small seed WITH real vectors, for semantic-ranking tests only.
+
+    Same content as seeded_store so ordering assertions hold unchanged;
+    force=True skips the dedup-scan encode, embed=True (default) keeps the
+    store encode so the semantic lane is populated.
+    """
+    temp_store.write(category='constraint', content='All API endpoints must validate JWT tokens',
+                     importance=5, tags='security,api,critical',
+                     file_path='api/auth.py', line_start=10, line_end=15,
+                     force=True)
+    temp_store.write(category='decision', content='Use PostgreSQL for production database',
+                     importance=4, tags='database,architecture',
+                     file_path='config/database.py', line_start=20, line_end=25,
+                     force=True)
+    temp_store.write(category='component', content='User authentication service handles login and logout flows',
+                     importance=3, tags='auth,service',
+                     file_path='services/auth_service.py', line_start=5, line_end=30,
+                     force=True)
+    temp_store.write(category='constraint', content='Database queries must use parameterized queries',
+                     importance=5, tags='security,critical',
+                     file_path='models/user.py', line_start=8, line_end=12,
+                     force=True)
+    temp_store.write(category='decision', content='Implement rate limiting at 100 requests per minute',
+                     importance=4, tags='api,performance',
+                     file_path='config/rate_limiting.py', line_start=15, line_end=20,
+                     force=True)
     return temp_store
 
 
@@ -272,22 +312,22 @@ class TestAgentLaneWeights:
 # ============================================================
 
 class TestPhase3Integration:
-    def test_full_learning_loop(self, seeded_store):
+    def test_full_learning_loop(self, semantic_seeded_store):
         """Full loop: query -> log -> learn -> boost."""
         # Query multiple times to build history
         for _ in range(5):
-            seeded_store.query_hybrid("fix authentication bug", intent="fix")
+            semantic_seeded_store.query_hybrid("fix authentication bug", intent="fix")
 
         # Verify logging
-        stats = seeded_store.usage_stats()
+        stats = semantic_seeded_store.usage_stats()
         assert stats["total_retrievals"] >= 5
 
         # Verify learning
-        boosts = seeded_store._usage_boost("fix authentication bug")
+        boosts = semantic_seeded_store._usage_boost("fix authentication bug")
         assert len(boosts) > 0
 
         # Verify boosted query still works
-        results = seeded_store.query_hybrid("fix authentication bug", intent="fix")
+        results = semantic_seeded_store.query_hybrid("fix authentication bug", intent="fix")
         assert len(results) > 0
 
     def test_proactive_after_learning(self, seeded_store):
