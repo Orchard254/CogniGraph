@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} / Node ${{ matrix.node-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu: all Python versions + Node 20 (representative)
+          - os: ubuntu-latest
+            python-version: "3.10"
+            node-version: "20"
+          - os: ubuntu-latest
+            python-version: "3.11"
+            node-version: "20"
+          - os: ubuntu-latest
+            python-version: "3.12"
+            node-version: "20"
+          - os: ubuntu-latest
+            python-version: "3.13"
+            node-version: "20"
+          # Windows: Python 3.11 + Node 20
+          - os: windows-latest
+            python-version: "3.11"
+            node-version: "20"
+          # macOS: Python 3.11 + Node 20
+          - os: macos-latest
+            python-version: "3.11"
+            node-version: "20"
+          # Additional Node versions on Ubuntu
+          - os: ubuntu-latest
+            python-version: "3.11"
+            node-version: "18"
+          - os: ubuntu-latest
+            python-version: "3.11"
+            node-version: "22"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Cache Python virtual environment
+        id: cache-venv
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            venv
+          key: ${{ runner.os }}-venv-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-venv-${{ matrix.python-version }}-
+
+      - name: Create and activate virtual environment
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          python -m venv venv
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            venv\Scripts\pip install -r requirements.txt
+            venv\Scripts\pip install pytest-cov
+          else
+            venv/bin/pip install -r requirements.txt
+            venv/bin/pip install pytest-cov
+          fi
+        shell: bash
+
+      - name: Install Python dependencies (cache hit)
+        if: steps.cache-venv.outputs.cache-hit == 'true'
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            venv\Scripts\pip install -r requirements.txt
+            venv\Scripts\pip install pytest-cov
+          else
+            venv/bin/pip install -r requirements.txt
+            venv/bin/pip install pytest-cov
+          fi
+        shell: bash
+
+      - name: Install Node.js dependencies
+        run: npm ci
+        # No node_modules to install currently, but future-proof
+
+      - name: Run Python tests with coverage
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            venv\Scripts\python -m pytest --cov=memory_store --cov=bootstrap --cov=watcher --cov=wire --cov=pm_common --cov=pm_search --cov=pm_context --cov=pm_lifecycle --cov=pm_structural --cov-report=xml --cov-report=term-missing -q --ignore=scratch
+          else
+            venv/bin/python -m pytest --cov=memory_store --cov=bootstrap --cov=watcher --cov=wire --cov=pm_common --cov=pm_search --cov=pm_context --cov=pm_lifecycle --cov=pm_structural --cov-report=xml --cov-report=term-missing -q --ignore=scratch
+          fi
+        shell: bash
+
+      - name: Run Node.js tests
+        run: npm test
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+        continue-on-error: true
+
+      - name: Print coverage summary
+        if: always()
+        run: |
+          if [ -f coverage.xml ]; then
+            echo "Coverage report generated successfully"
+            # Extract and display key module coverage
+            python3 -c "
+import xml.etree.ElementTree as ET
+tree = ET.parse('coverage.xml')
+root = tree.getroot()
+for package in root.findall('.//package'):
+    name = package.get('name', '')
+    if any(key in name for key in ['memory_store', 'bootstrap', 'watcher', 'wire', 'pm_']):
+        classes = package.findall('classes/class')
+        for cls in classes:
+            filename = cls.get('filename', '')
+            lines = cls.findall('lines/line')
+            if lines:
+                total = len(lines)
+                covered = sum(1 for l in lines if l.get('hits', '0') != '0')
+                pct = (covered / total * 100) if total > 0 else 0
+                print(f'{filename}: {pct:.1f}% ({covered}/{total})')
+"
+          fi
+        shell: bash

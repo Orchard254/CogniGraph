@@ -1,0 +1,114 @@
+{
+  "date": "2026-09-10",
+  "python": "3.14.7",
+  "machine": "AMD64",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "iterations": 50,
+  "benchmarks": [
+    {
+      "name": "MemoryStore init (cold)",
+      "cold_ms": {
+        "median_ms": 138.458,
+        "p95_ms": 223.28,
+        "mean_ms": 150.681,
+        "min_ms": 109.933,
+        "max_ms": 246.349
+      },
+      "warm_ms": {
+        "median_ms": 544.048,
+        "p95_ms": 770.845,
+        "mean_ms": 563.686,
+        "min_ms": 427.733,
+        "max_ms": 848.356
+      }
+    },
+    {
+      "name": "write (embed=True)",
+      "cold_ms": {
+        "median_ms": 208.737,
+        "p95_ms": 297.942,
+        "mean_ms": 222.589,
+        "min_ms": 180.407,
+        "max_ms": 344.777
+      },
+      "warm_ms": null
+    },
+    {
+      "name": "write (embed=False)",
+      "cold_ms": {
+        "median_ms": 155.049,
+        "p95_ms": 221.963,
+        "mean_ms": 160.088,
+        "min_ms": 133.394,
+        "max_ms": 262.118
+      },
+      "warm_ms": null
+    },
+    {
+      "name": "query_hybrid (warm)",
+      "cold_ms": null,
+      "warm_ms": {
+        "median_ms": 544.233,
+        "p95_ms": 663.63,
+        "mean_ms": 552.843,
+        "min_ms": 446.723,
+        "max_ms": 716.766
+      }
+    },
+    {
+      "name": "get_context (warm)",
+      "cold_ms": null,
+      "warm_ms": {
+        "median_ms": 560.728,
+        "p95_ms": 718.323,
+        "mean_ms": 580.573,
+        "min_ms": 466.918,
+        "max_ms": 731.197
+      }
+    },
+    {
+      "name": "_current_git_commit",
+      "cold_ms": {
+        "median_ms": 172.166,
+        "p95_ms": 248.653,
+        "mean_ms": 178.572,
+        "min_ms": 142.781,
+        "max_ms": 263.684
+      },
+      "warm_ms": null
+    },
+    {
+      "name": "sync_structural_nodes",
+      "cold_ms": {
+        "median_ms": 157.293,
+        "p95_ms": 219.628,
+        "mean_ms": 160.914,
+        "min_ms": 123.368,
+        "max_ms": 253.737
+      },
+      "warm_ms": null
+    },
+    {
+      "name": "bootstrap_project (dry_run, full=False)",
+      "cold_ms": {
+        "median_ms": 265.626,
+        "p95_ms": 331.86,
+        "mean_ms": 267.329,
+        "min_ms": 207.646,
+        "max_ms": 361.849
+      },
+      "warm_ms": null
+    },
+    {
+      "name": "bootstrap_project (dry_run, full=True)",
+      "cold_ms": {
+        "median_ms": 543.684,
+        "p95_ms": 746.839,
+        "mean_ms": 570.712,
+        "min_ms": 467.652,
+        "max_ms": 796.542
+      },
+      "warm_ms": null
+    }
+  ]
+}
