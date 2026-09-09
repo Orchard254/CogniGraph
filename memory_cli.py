@@ -167,7 +167,11 @@ def main():
         db_path = str(Path(args.root).resolve() / ".project-memory" / "memory.db")
     db_path = db_path or default_db_path()
 
-    store = MemoryStore(db_path)
+    # Constructed lazily per command: `wire` never touches the DB, and
+    # constructing a store can create the DB file as a side effect.
+    store = None
+    if args.command != "wire":
+        store = MemoryStore(db_path)
     try:
         if args.command == "stats":
             stats = store.stats()
@@ -315,7 +319,8 @@ def main():
             print(json.dumps(res, indent=2))
 
     finally:
-        store.close()
+        if store is not None:
+            store.close()
 
 
 if __name__ == "__main__":

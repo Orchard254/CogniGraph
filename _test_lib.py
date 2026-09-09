@@ -25,6 +25,7 @@ class McpTestClient:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
             env=env,
         )
         # Drain stderr in the background so a verbose server can never
@@ -108,6 +109,19 @@ class McpTestClient:
         except Exception:
             try:
                 self.proc.kill()
+            except Exception:
+                pass
+        finally:
+            # Release pipes and reap the stderr-drain thread so large suites
+            # don't accumulate handles/threads across clients.
+            for stream in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
+                try:
+                    if stream:
+                        stream.close()
+                except Exception:
+                    pass
+            try:
+                self._stderr_thread.join(timeout=5)
             except Exception:
                 pass
 

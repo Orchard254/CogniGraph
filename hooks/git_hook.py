@@ -49,10 +49,20 @@ def main():
         return 0
 
     # Capture every [tag] in the message, not just the first, so multi-tag
-    # commits (e.g. "[decision] X [constraint] Y") keep all facts.
-    matches = re.findall(
-        r"\[(decision|constraint|component|arch|state)\]\s*([^\n\[]*)", msg, re.IGNORECASE
-    )
+    # commits (e.g. "[decision] X [constraint] Y") keep all facts. The body
+    # after a tag runs to the next [tag] or end of message, spanning newlines,
+    # so continuation lines are kept; bracketed prose inside the body
+    # (e.g. "see [docs]") belongs to the enclosing tag only when it is not
+    # itself a known tag — unknown brackets stay part of the text.
+    tag_re = re.compile(r"\[(decision|constraint|component|arch|state)\]", re.IGNORECASE)
+    bounds = [m.start() for m in tag_re.finditer(msg)] + [len(msg)]
+    matches = []
+    for i, m in enumerate(tag_re.finditer(msg)):
+        raw_tag = m.group(1).lower()
+        body = msg[m.end():bounds[i + 1]].strip()
+        # Drop a trailing unknown-bracket fragment? No — keep it: trimming
+        # loses context, and keeping is harmless for auto-capture.
+        matches.append((raw_tag, body))
     if not matches:
         return 0
 

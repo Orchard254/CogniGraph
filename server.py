@@ -54,6 +54,22 @@ def _clamp_chars(max_chars: int, default: int = 8000, maximum: int = 128000) -> 
         return default
     return max(256, min(maximum, max_chars))
 
+def _clamp_ttl(ttl_seconds: int, default: int = 60, maximum: int = 86400) -> int:
+    """Clamp a lock TTL: non-numeric falls back, negatives become 1s."""
+    try:
+        ttl_seconds = int(ttl_seconds)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(maximum, ttl_seconds))
+
+def _clamp_importance(importance: int, default: int = 3) -> int:
+    """Clamp fact importance into 1..5; garbage defaults instead of raising."""
+    try:
+        importance = int(importance)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(5, importance))
+
 def _ensure_first_time_setup():
     """Run automatic first-time setup (bootstrap) on first tool call."""
     global _first_time_setup_done
@@ -74,8 +90,9 @@ def _ensure_first_time_setup():
             
             # Check if database is empty (new database)
             import sqlite3
-            conn = sqlite3.connect(store.db_path)
+            conn = sqlite3.connect(store.db_path, timeout=5.0)
             try:
+                conn.execute("PRAGMA busy_timeout=5000")
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM memory")
                 count = cursor.fetchone()[0]
@@ -189,7 +206,7 @@ def memory_write(category: str, content: str, rationale: str = "",
             session_id=session_id or None,
             file_path=file_path or None,
             tags=tags or None,
-            importance=importance,
+            importance=_clamp_importance(importance),
             line_start=line_start or None,
             line_end=line_end or None,
             code_hash=code_hash or None,
@@ -666,7 +683,7 @@ def memory_acquire_lock(resource: str, locked_by: str, ttl_seconds: int = 60) ->
     Acquire an advisory lock on a named resource for multi-turn multi-agent operations.
     """
     with _store() as _s:
-        success = _s.acquire_lock(resource, locked_by, ttl_seconds)
+        success = _s.acquire_lock(resource, locked_by, _clamp_ttl(ttl_seconds))
     return {"resource": resource, "locked_by": locked_by, "acquired": success}
 
 
