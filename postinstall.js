@@ -10,20 +10,17 @@
  * 4. Verify the installation
  */
 
-const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
-
-console.log('🚀 Setting up project-memory MCP server...');
+const lib = require('./lib');
 
 async function main() {
+  console.log('🚀 Setting up project-memory MCP server...');
+
   const markIncomplete = (reason) => {
     // npm postinstall must stay best-effort (exit 0), but a silent success
     // hides broken installs. Leave a marker index.js picks up on startup.
-    try {
-      fs.writeFileSync(path.join(__dirname, '.postinstall-incomplete'), reason + '\n');
-    } catch (e) { /* ignore */ }
+    lib.writeIncompleteMarker(__dirname, reason);
     console.warn(`⚠️  POSTINSTALL INCOMPLETE (${reason}) — recorded in .postinstall-incomplete; index.js will re-verify on startup.`);
   };
 
@@ -44,17 +41,7 @@ async function main() {
     console.log(`📁 Package directory: ${packageDir}`);
 
     // Step 3: Check for required Python files (must mirror package.json "files")
-    const requiredFiles = [
-      'server.py', 'memory_store.py', 'pm_common.py', 'pm_search.py',
-      'pm_context.py', 'pm_lifecycle.py', 'pm_structural.py', 'bootstrap.py',
-      'structural_extract.py', 'branch_promotion.py', 'genesis_migrate.py',
-      'watcher.py', 'wire.py', 'memory_cli.py', '__init__.py',
-      'requirements.txt',
-      'phase0_schema.sql', 'phase1_episodic.sql',
-      'phase1_episodic_embeddings.sql', 'phase2_branch_admin.sql',
-      'episodic_fts.sql', 'legacy_provenance.sql',
-      'hooks/git_hook.py',
-    ];
+    const requiredFiles = lib.getRequiredFiles();
     for (const file of requiredFiles) {
       if (!fs.existsSync(path.join(packageDir, file))) {
         console.warn(`⚠️  Required file missing: ${file}`);
@@ -66,13 +53,7 @@ async function main() {
     console.log('✅ All required Python files present');
 
     // Step 4: Set up virtual environment
-    const platform = os.platform();
-    let venvPath;
-    if (platform === 'win32') {
-      venvPath = path.join(packageDir, 'venv', 'Scripts', 'python.exe');
-    } else {
-      venvPath = path.join(packageDir, 'venv', 'bin', 'python');
-    }
+    const venvPath = lib.getVenvPythonPath(packageDir);
 
     if (!fs.existsSync(venvPath)) {
       console.log('🔧 Creating Python virtual environment...');
@@ -104,16 +85,8 @@ async function main() {
 
     // Step 6: Verify installation (hard dep fails the gate; soft lanes warn)
     console.log('🔍 Verifying installation...');
-    const hardImports = ['mcp'];
-    const softLanes = {
-      'sqlite_vec': 'vec KNN lane (falls back to brute-force scan)',
-      'tree_sitter': 'structural lane',
-      'tree_sitter_python': 'structural lane (Python)',
-      'tree_sitter_javascript': 'structural lane (JavaScript)',
-      'tree_sitter_typescript': 'structural lane (TypeScript)',
-      'fastembed': 'semantic embeddings lane (falls back to tokenized matching)',
-      'numpy': 'semantic embeddings lane',
-    };
+    const hardImports = lib.HARD_REQUIRED_DEPS;
+    const softLanes = lib.SOFT_DEP_LANES;
     let verifyOk = true;
     for (const mod of hardImports) {
       try {
@@ -137,7 +110,7 @@ async function main() {
       markIncomplete('dependency-verification-gaps');
     } else {
       console.log('✅ Installation verified successfully');
-      try { fs.unlinkSync(path.join(packageDir, '.postinstall-incomplete')); } catch (e) { /* ignore */ }
+      lib.clearIncompleteMarker(packageDir);
     }
 
     console.log('🎉 Setup complete! The project-memory MCP server is ready to use.');
@@ -158,56 +131,13 @@ async function main() {
 }
 
 async function findPythonCommand() {
-  const candidates = ['python3', 'python', 'python3.8', 'python3.9', 'python3.10', 'python3.11', 'python3.12'];
-
-  for (const cmd of candidates) {
-    try {
-      const { stdout } = await runCommand(cmd, ['--version'], { stdio: 'pipe' });
-      const m = /Python\s+(\d+)\.(\d+)/.exec(stdout || '');
-      if (m && (parseInt(m[1], 10) > 3 || (parseInt(m[1], 10) === 3 && parseInt(m[2], 10) >= 8))) {
-        return cmd;
-      }
-      // Version unparseable or < 3.8: try next candidate
-    } catch (error) {
-      // Try next candidate
-    }
-  }
-
-  return null;
+  return lib.findPythonCommand(runCommand);
 }
 
 function runCommand(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      ...options,
-      stdio: options.stdio || 'inherit'
-    });
-    
-    let stdout = '';
-    let stderr = '';
-    
-    if (child.stdout) {
-      child.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-    }
-    
-    if (child.stderr) {
-      child.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-    }
-    
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        reject(new Error(`Command failed with code ${code}: ${stderr}`));
-      }
-    });
-    
-    child.on('error', reject);
-  });
+  // postinstall.js historically defaults to stdio 'inherit' (verbose setup
+  // output); lib defaults to 'pipe', so keep the inherit default here.
+  return lib.runCommand(command, args, { stdio: 'inherit', ...options });
 }
 
 // Run the post-install script

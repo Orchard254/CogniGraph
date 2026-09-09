@@ -12,14 +12,13 @@
  * Usage: npx -y @project-memory/mcp-server
  */
 
-const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
+const lib = require('./lib');
 
 // Configuration
-const PACKAGE_VERSION = '1.0.0';
-const PYTHON_MIN_VERSION = '3.8';
+const PACKAGE_VERSION = lib.PACKAGE_VERSION;
+const PYTHON_MIN_VERSION = lib.PYTHON_MIN_VERSION;
 
 async function main() {
   try {
@@ -106,13 +105,7 @@ async function setupPythonEnvironment() {
   const packageDir = __dirname;
   
   // Check for virtual environment
-  let venvPath;
-  const platform = os.platform();
-  if (platform === 'win32') {
-    venvPath = path.join(packageDir, 'venv', 'Scripts', 'python.exe');
-  } else {
-    venvPath = path.join(packageDir, 'venv', 'bin', 'python');
-  }
+  const venvPath = lib.getVenvPythonPath(packageDir);
   
   // Create venv if it doesn't exist (race-safe: two starters may race here)
   if (!fs.existsSync(venvPath)) {
@@ -144,28 +137,11 @@ async function setupPythonEnvironment() {
 }
 
 function parsePythonVersion(output) {
-  const m = /Python\s+(\d+)\.(\d+)/.exec(output || '');
-  if (!m) return null;
-  return { major: parseInt(m[1], 10), minor: parseInt(m[2], 10) };
+  return lib.parsePythonVersion(output);
 }
 
 async function findPythonCommand() {
-  const candidates = ['python3', 'python', 'python3.8', 'python3.9', 'python3.10', 'python3.11', 'python3.12'];
-
-  for (const cmd of candidates) {
-    try {
-      const { stdout } = await runCommand(cmd, ['--version'], { stdio: 'pipe' });
-      const v = parsePythonVersion(stdout);
-      if (v && (v.major > 3 || (v.major === 3 && v.minor >= 8))) {
-        return cmd;
-      }
-      // Version below PYTHON_MIN_VERSION (3.8) or unparseable: keep looking
-    } catch (error) {
-      // Try next candidate
-    }
-  }
-
-  return null;
+  return lib.findPythonCommand(runCommand);
 }
 
 async function installDependencies(pythonSetup) {
@@ -190,16 +166,8 @@ async function installDependencies(pythonSetup) {
   // Check if dependencies are already installed.
   // Only 'mcp' is hard-required (the server cannot run without it); every
   // other lane degrades gracefully, so those are warnings, not failures.
-  const hardRequired = ['mcp'];
-  const softLanes = {
-    'sqlite_vec': 'vec KNN lane (falls back to brute-force scan)',
-    'tree_sitter': 'structural lane',
-    'tree_sitter_python': 'structural lane (Python)',
-    'tree_sitter_javascript': 'structural lane (JavaScript)',
-    'tree_sitter_typescript': 'structural lane (TypeScript)',
-    'fastembed': 'semantic embeddings lane (falls back to tokenized matching)',
-    'numpy': 'semantic embeddings lane',
-  };
+  const hardRequired = lib.HARD_REQUIRED_DEPS;
+  const softLanes = lib.SOFT_DEP_LANES;
   let missing = [];
   for (const mod of hardRequired) {
     try {
@@ -232,95 +200,11 @@ async function installDependencies(pythonSetup) {
 }
 
 async function launchMCPServer(pythonSetup, dbPath) {
-  // Set environment variable for database path
-  const env = {
-    ...process.env,
-    MEMORY_DB_PATH: dbPath
-  };
-  
-  console.error(`[project-memory] Starting MCP server with database: ${dbPath}`);
-  console.error(`[project-memory] Python: ${pythonSetup.python}`);
-  console.error(`[project-memory] Server script: ${pythonSetup.serverScript}`);
-
-  // Pre-spawn gate: a corrupt/incomplete install must fail here with a clear
-  // message, not hang or crash-loop after spawn.
-  try {
-    await runCommand(pythonSetup.python, ['-m', 'py_compile', pythonSetup.serverScript], { stdio: 'pipe' });
-  } catch (error) {
-    console.error(`[project-memory] Server script failed to compile: ${error.message}`);
-    process.exit(1);
-  }
-
-  // Launch the Python MCP server
-  let serverProcess;
-  try {
-    serverProcess = spawn(pythonSetup.python, [pythonSetup.serverScript], {
-      env,
-      stdio: 'inherit' // Pass through stdin/stdout/stderr for MCP communication
-    });
-  } catch (error) {
-    console.error('[project-memory] Failed to spawn server process:', error.message);
-    process.exit(1);
-  }
-
-  // Startup watchdog: exit within the grace window means crash-loop, not ready.
-  const STARTUP_GRACE_MS = 5000;
-  const startTime = Date.now();
-
-  serverProcess.on('error', (error) => {
-    console.error('[project-memory] Failed to start server process:', error);
-    process.exit(1);
-  });
-
-  serverProcess.on('exit', (code, signal) => {
-    if (Date.now() - startTime < STARTUP_GRACE_MS) {
-      console.error(
-        `[project-memory] Server died during startup (code ${code}, signal ${signal}). ` +
-        `Likely a broken Python install — rerun setup or check requirements.`
-      );
-    } else {
-      console.error(`[project-memory] Server exited with code ${code}, signal ${signal}`);
-    }
-    process.exit(code || 1);
-  });
-  
-  // Forward signals to the server process
-  process.on('SIGINT', () => serverProcess.kill('SIGINT'));
-  process.on('SIGTERM', () => serverProcess.kill('SIGTERM'));
+  return lib.launchMCPServer(pythonSetup, dbPath);
 }
 
 function runCommand(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      ...options,
-      stdio: options.stdio || 'pipe'
-    });
-    
-    let stdout = '';
-    let stderr = '';
-    
-    if (child.stdout) {
-      child.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-    }
-    
-    if (child.stderr) {
-      child.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-    }
-    
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        reject(new Error(`Command failed with code ${code}: ${stderr}`));
-      }
-    });
-    
-    child.on('error', reject);
-  });
+  return lib.runCommand(command, args, options);
 }
 
 // Start the server
