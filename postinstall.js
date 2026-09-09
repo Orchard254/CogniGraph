@@ -15,6 +15,13 @@ const fs = require('fs');
 const lib = require('./lib');
 
 async function main() {
+  // In CI the Node test job must not provision a Python venv; the Python
+  // suite is set up separately in the Python job. Exit before any venv work.
+  if (process.env.CI) {
+    console.log('CI environment detected — skipping Python environment setup.');
+    return;
+  }
+
   console.log('🚀 Setting up project-memory MCP server...');
 
   const markIncomplete = (reason) => {
