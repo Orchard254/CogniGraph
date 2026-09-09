@@ -1,7 +1,7 @@
 mcp==1.9.4
-fastembed
-scikit-learn
-numpy
+fastembed==0.8.0
+scikit-learn==1.9.0
+numpy==2.5.3
 sqlite-vec==0.1.9
 
 # Tree-sitter packages: pinned to recent releases using the modern constructor-based API.

@@ -23,9 +23,18 @@ const PYTHON_MIN_VERSION = '3.8';
 
 async function main() {
   try {
-    // Step 1: Determine project root and database path
-    const projectRoot = await findProjectRoot();
-    const dbPath = path.join(projectRoot, '.project-memory', 'memory.db');
+    // Step 1: Determine project root and database path.
+  // MEMORY_DB_PATH is the single source of truth when set (e.g. by the
+  // caller or tests); otherwise fall back to CWD-based project detection.
+  let projectRoot;
+  let dbPath;
+  if (process.env.MEMORY_DB_PATH) {
+    dbPath = process.env.MEMORY_DB_PATH;
+    projectRoot = path.dirname(path.dirname(dbPath));
+  } else {
+    projectRoot = await findProjectRoot();
+    dbPath = path.join(projectRoot, '.project-memory', 'memory.db');
+  }
     
     // Step 2: Ensure database directory exists
     await ensureDatabaseDirectory(dbPath);
@@ -77,7 +86,11 @@ async function findProjectRoot() {
 async function ensureDatabaseDirectory(dbPath) {
   const dbDir = path.dirname(dbPath);
   if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true });
+    try {
+      fs.mkdirSync(dbDir, { recursive: true });
+    } catch (error) {
+      throw new Error(`Cannot create database directory ${dbDir}: ${error.message}`);
+    }
     console.error(`[project-memory] Created database directory: ${dbDir}`);
   }
 }
@@ -106,26 +119,41 @@ async function setupPythonEnvironment() {
     console.error('[project-memory] Creating Python virtual environment...');
     await runCommand(pythonCmd, ['-m', 'venv', 'venv'], { cwd: packageDir });
   }
-  
+
+  const serverScript = path.join(packageDir, 'server.py');
+  if (!fs.existsSync(serverScript)) {
+    throw new Error(`Server script missing: ${serverScript}. The npm package install is incomplete.`);
+  }
+
   return {
     python: venvPath,
     packageDir,
-    serverScript: path.join(packageDir, 'server.py')
+    serverScript
   };
 }
 
+function parsePythonVersion(output) {
+  const m = /Python\s+(\d+)\.(\d+)/.exec(output || '');
+  if (!m) return null;
+  return { major: parseInt(m[1], 10), minor: parseInt(m[2], 10) };
+}
+
 async function findPythonCommand() {
-  const candidates = ['python3', 'python', 'python3.8', 'python3.9', 'python3.10', 'python3.11'];
-  
+  const candidates = ['python3', 'python', 'python3.8', 'python3.9', 'python3.10', 'python3.11', 'python3.12'];
+
   for (const cmd of candidates) {
     try {
-      await runCommand(cmd, ['--version'], { stdio: 'pipe' });
-      return cmd;
+      const { stdout } = await runCommand(cmd, ['--version'], { stdio: 'pipe' });
+      const v = parsePythonVersion(stdout);
+      if (v && (v.major > 3 || (v.major === 3 && v.minor >= 8))) {
+        return cmd;
+      }
+      // Version below PYTHON_MIN_VERSION (3.8) or unparseable: keep looking
     } catch (error) {
       // Try next candidate
     }
   }
-  
+
   return null;
 }
 
@@ -137,14 +165,21 @@ async function installDependencies(pythonSetup) {
     return;
   }
   
-  // Check if dependencies are already installed (basic check)
-  try {
-    await runCommand(pythonSetup.python, ['-c', 'import mcp'], { stdio: 'pipe' });
+  // Check if dependencies are already installed (every hard runtime dep)
+  const requiredImports = ['mcp', 'sqlite_vec', 'tree_sitter'];
+  let missing = [];
+  for (const mod of requiredImports) {
+    try {
+      await runCommand(pythonSetup.python, ['-c', `import ${mod}`], { stdio: 'pipe' });
+    } catch (error) {
+      missing.push(mod);
+    }
+  }
+  if (missing.length === 0) {
     console.error('[project-memory] Dependencies already installed');
     return;
-  } catch (error) {
-    // Dependencies not installed, proceed with installation
   }
+  console.error(`[project-memory] Missing dependencies: ${missing.join(', ')}`);
   
   console.error('[project-memory] Installing Python dependencies...');
   await runCommand(

@@ -6,11 +6,14 @@ JSON-RPC response per request, and exits non-zero on any protocol error so
 the scripts can be run unattended.
 """
 import json
+import os
+import queue
 import subprocess
 import sys
+import threading
 
-SERVER = r"C:/PROJECT/project-memory/server.py"
-PYTHON = r"C:/PROJECT/project-memory/venv/Scripts/python.exe"
+SERVER = os.environ.get("PROJECT_MEMORY_SERVER") or r"C:/PROJECT/project-memory/server.py"
+PYTHON = os.environ.get("PROJECT_MEMORY_PYTHON") or r"C:/PROJECT/project-memory/venv/Scripts/python.exe"
 
 
 class McpTestClient:
@@ -24,14 +27,43 @@ class McpTestClient:
             text=True,
             env=env,
         )
+        # Drain stderr in the background so a verbose server can never
+        # block on a full pipe buffer while we wait on stdout.
+        self._stderr_lines = []
+        self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._stderr_thread.start()
         self._next_id = 1
+
+    def _drain_stderr(self):
+        try:
+            for line in self.proc.stderr:
+                self._stderr_lines.append(line)
+        except Exception:
+            pass
 
     def _send(self, msg):
         self.proc.stdin.write(json.dumps(msg) + "\n")
         self.proc.stdin.flush()
 
     def _recv(self):
-        line = self.proc.stdout.readline()
+        # readline() blocks forever on a hung server; enforce self.timeout
+        # with a reader thread (select() doesn't work on Windows pipes).
+        q = queue.Queue()
+
+        def _read():
+            try:
+                q.put(self.proc.stdout.readline())
+            except Exception as e:  # noqa: BLE001
+                q.put(e)
+
+        t = threading.Thread(target=_read, daemon=True)
+        t.start()
+        t.join(self.timeout)
+        if t.is_alive():
+            raise RuntimeError(f"server did not respond within {self.timeout}s")
+        line = q.get()
+        if isinstance(line, Exception):
+            raise RuntimeError(f"failed reading server stdout: {line!r}")
         if not line:
             raise RuntimeError("server closed stdout without a response")
         return json.loads(line)
@@ -44,8 +76,9 @@ class McpTestClient:
         if resp.get("id") != rid:
             raise RuntimeError(f"expected response id {rid}, got {resp.get('id')}")
         if "error" in resp:
-            raise RuntimeError(f"{method} failed: {resp['error']}")
-        return resp["result"]
+            err = resp["error"]
+            raise RuntimeError(f"{method} failed: {err}")
+        return resp.get("result", {})
 
     def notify(self, method, params=None):
         msg = {"jsonrpc": "2.0", "method": method}
@@ -81,9 +114,10 @@ class McpTestClient:
 
 def tool_payload_text(call_result):
     """Extract the first text payload from a tools/call result and parse as JSON."""
-    content = call_result.get("content", [])
-    if content and content[0].get("type") == "text":
-        return json.loads(content[0]["text"])
+    content = call_result.get("content", []) if isinstance(call_result, dict) else []
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == "text":
+            return json.loads(item["text"])
     raise RuntimeError(f"no text content in tools/call result: {call_result}")
 
 

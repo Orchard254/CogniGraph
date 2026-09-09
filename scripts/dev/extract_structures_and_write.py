@@ -86,11 +86,14 @@ def main():
     p.add_argument('--root', default='.', help='Project root')
     p.add_argument('--apply', action='store_true', help='Write facts (default: dry-run)')
     p.add_argument('--max', type=int, default=10000, help='Max files to process')
+    p.add_argument('--db', default=None, help='Target DB for --apply (required with --apply; never defaults to the live store)')
     args = p.parse_args()
 
     root = Path(args.root).resolve()
     print(f"Root: {root}")
-    store = MemoryStore()
+    # NOTE: dev-only script. --apply requires an explicit --db so spike runs
+    # can never silently write into the live store.
+    store = MemoryStore(args.db) if args.db else None
     planned = []
     count = 0
     for fp in iter_py_files(root):
@@ -102,7 +105,7 @@ def main():
         entries = extract_structures_from_source(text)
         for e in entries:
             fact = {
-                'category': 'structure',
+                'category': 'component',
                 'content': e['content'],
                 'file_path': str(rel).replace('\\', '/'),
                 'tags': 'phase-b,ast-extracted,python',
@@ -122,8 +125,15 @@ def main():
             print(f"{i:4}: {f['file_path']}:{f['line_start']}-{f['line_end']} {f['content']}")
         print('Dry-run complete. Use --apply to write facts.')
     else:
+        if not args.db:
+            print('Refusing --apply without --db: pass an explicit target DB.')
+            return
         ids = store.write_batch(planned, force=False)
         print(f"Wrote {len(ids)} results (some may be negative sentinels for duplicates)")
+        try:
+            store.close()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

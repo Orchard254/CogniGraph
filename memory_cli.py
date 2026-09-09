@@ -101,6 +101,7 @@ def main():
     scan_p = subparsers.add_parser("scan-provenance", help="Bulk provenance health check across all anchored facts")
     scan_p.add_argument("--root", help="Project root directory to resolve relative paths")
     scan_p.add_argument("--auto-deprecate", action="store_true", help="Auto-deprecate facts whose files were deleted")
+    scan_p.add_argument("--auto-heal", action="store_true", help="Auto-update code_hash for low-importance drifted facts")
     scan_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
 
     # backfill
@@ -201,16 +202,20 @@ def main():
         elif args.command == "export":
             md = store.export_markdown(category=args.category)
             if args.out:
-                Path(args.out).write_text(md, encoding="utf-8")
+                out_path = Path(args.out)
+                if out_path.parent != Path("."):
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(md, encoding="utf-8")
                 print(f"Exported memory to {args.out}")
             else:
                 print(md)
 
         elif args.command == "query":
+            limit = max(1, min(100, args.limit or 10))
             if args.hybrid:
-                results = store.query_hybrid(args.text, category=args.category, tag=args.tag, limit=args.limit)
+                results = store.query_hybrid(args.text, category=args.category, tag=args.tag, limit=limit)
             else:
-                results = store.query(args.text, category=args.category, tag=args.tag, limit=args.limit)
+                results = store.query(args.text, category=args.category, tag=args.tag, limit=limit)
             print(f"Found {len(results)} matching facts:")
             for r in results:
                 print(f"[{r['id']}] ({r['category']}) {r['content']}")
@@ -222,7 +227,8 @@ def main():
             print(f"Linked fact {args.source_id} -[{args.relation}]-> fact {args.target_id} (edge ID: {edge_id})")
 
         elif args.command == "graph":
-            edges = store.get_graph(args.root_id, max_depth=args.depth)
+            depth = max(1, min(10, args.depth or 3))
+            edges = store.get_graph(args.root_id, max_depth=depth)
             print(f"=== Knowledge Graph from Fact {args.root_id} ({len(edges)} edges) ===")
             for e in edges:
                 indent = "  " * e['depth']
@@ -238,7 +244,7 @@ def main():
             print("Consolidation result:", json.dumps(res, indent=2))
 
         elif args.command == "context":
-            ctx = store.get_context(args.query, limit=args.limit)
+            ctx = store.get_context(args.query, limit=max(1, min(50, args.limit or 5)))
             print(ctx)
 
         elif args.command == "file-context":
@@ -266,7 +272,8 @@ def main():
                 for f in facts:
                     print(f"[{f['id']}] ({f['category']}) [{f['confidence']}] {f['content']}")
         elif args.command == "scan-provenance":
-            res = store.scan_provenance(project_root=args.root, auto_deprecate=args.auto_deprecate)
+            res = store.scan_provenance(project_root=args.root, auto_deprecate=args.auto_deprecate,
+                                        auto_heal=getattr(args, "auto_heal", False))
             print(json.dumps(res, indent=2))
         elif args.command == "backfill":
             res = store.backfill_embeddings()
@@ -289,14 +296,15 @@ def main():
                 res = list_branches(db_path, repo_id=args.repo, status=args.status)
                 print(json.dumps(res, indent=2))
         elif args.command == "prune":
-            res = store.prune_stale(days_inactive=args.days, dry_run=not args.apply)
+            res = store.prune_stale(days_inactive=max(1, args.days or 90), dry_run=not args.apply)
             print(json.dumps(res, indent=2))
         elif args.command == "prepare-task":
-            print(store.prepare_task(args.intent, file_paths=args.files or None, limit=args.limit))
+            print(store.prepare_task(args.intent, file_paths=args.files or None,
+                                     limit=max(1, min(50, args.limit or 5))))
         elif args.command == "bootstrap":
             from bootstrap import bootstrap_project
             res = bootstrap_project(args.root, store=store, dry_run=not args.apply,
-                                    full=args.full, max_facts=args.max_facts,
+                                    full=args.full, max_facts=max(1, min(1000, args.max_facts or 150)),
                                     install_hook=not args.no_hook,
                                     drop_protocol=not args.no_protocol)
             print(json.dumps(res, indent=2))
