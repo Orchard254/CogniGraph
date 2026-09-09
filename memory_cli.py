@@ -338,9 +338,13 @@ def main():
                     )
                     sys.exit(1)
                 agent = agent_norm
-            res = wire_agent(agent, project_root=args.root,
-                             drop_protocol=not args.no_protocol)
-            print(json.dumps(res, indent=2))
+            try:
+                res = wire_agent(agent, project_root=args.root,
+                                 drop_protocol=not args.no_protocol)
+                print(json.dumps(res, indent=2))
+            except ValueError as e:
+                sys.stderr.write(f"Error: {e}\n")
+                sys.exit(1)
 
     finally:
         if store is not None:
