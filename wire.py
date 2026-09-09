@@ -179,7 +179,10 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
     elif agent == "zed":
         cfg = proj_root / ".zed" / "settings.json"
-        _safe_merge(cfg, "context_servers", {"command": py, "args": [server], "settings": {"env": env}})
+        # Zed custom servers take env vars TOP-LEVEL ("env": {...}); `settings`
+        # holds server init options, not process env. Verified against
+        # https://zed.dev/docs/context-servers (2026-09-09).
+        _safe_merge(cfg, "context_servers", {"command": py, "args": [server], "env": env})
     else:  # generic — print standard MCP snippet, write nothing
         written.append("(none — paste the snippet below into your agent's MCP config)")
 
