@@ -72,7 +72,12 @@ class StructuralMixin:
             # File doesn't exist or is not a file — skip this sync (defensive)
             return {"upserted": 0, "pruned": 0, "nodes": [], "scan_timestamp": scan_ts,
                     "edges_calls": 0, "edges_imports": 0}
-        file_lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        try:
+            file_lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        except (OSError, FileNotFoundError):
+            # Replaced or deleted between the exists check and the read.
+            return {"upserted": 0, "pruned": 0, "nodes": [], "scan_timestamp": scan_ts,
+                    "edges_calls": 0, "edges_imports": 0}
         
         # Derive language from file suffix
         suffix = full_path.suffix.lower()
@@ -84,63 +89,76 @@ class StructuralMixin:
             ".tsx": "typescript",
         }
         language = lang_map.get(suffix, "unknown")
-        
-        for node in nodes:
-            node_type = node.get("type")
-            name = node.get("name", "")
-            class_name = node.get("class_name", "")  # default '' per schema
-            line_start = node.get("line_start")
-            line_end = node.get("line_end")
-            
-            if not node_type or not name or line_start is None or line_end is None:
-                continue
-            
-            # Compute code_hash the same way verify_provenance does
-            l_start = max(0, line_start - 1)
-            l_end = min(len(file_lines), line_end)
-            snippet = "".join(file_lines[l_start:l_end])
-            code_hash = hashlib.sha256(snippet.encode("utf-8")).hexdigest()
-            
-            # UPSERT by natural key
-            self.conn.execute(
-                """
-                INSERT INTO structural_nodes (node_type, name, class_name, file_path, line_start, line_end,
-                                             language, code_hash, created_at, last_seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(file_path, node_type, name, class_name) DO UPDATE SET
-                    line_start = excluded.line_start,
-                    line_end = excluded.line_end,
-                    code_hash = excluded.code_hash,
-                    last_seen_at = excluded.last_seen_at,
-                    language = excluded.language
-                """,
-                (node_type, name, class_name, clean_path, line_start, line_end,
-                 language, code_hash, scan_ts, scan_ts),
+
+        # Upsert + prune + edge rebuild must be atomic: two concurrent syncs
+        # for the same file (watcher thread + bootstrap scan) use different
+        # scan_ts values, and a prune from one must not delete the other's
+        # just-upserted rows. BEGIN IMMEDIATE serializes same-file syncs.
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            for node in nodes:
+                node_type = node.get("type")
+                name = node.get("name", "")
+                class_name = node.get("class_name", "")  # default '' per schema
+                line_start = node.get("line_start")
+                line_end = node.get("line_end")
+
+                if not node_type or not name or line_start is None or line_end is None:
+                    continue
+
+                # Compute code_hash the same way verify_provenance does
+                l_start = max(0, line_start - 1)
+                l_end = min(len(file_lines), line_end)
+                snippet = "".join(file_lines[l_start:l_end])
+                code_hash = hashlib.sha256(snippet.encode("utf-8")).hexdigest()
+
+                # UPSERT by natural key
+                self.conn.execute(
+                    """
+                    INSERT INTO structural_nodes (node_type, name, class_name, file_path, line_start, line_end,
+                                                  language, code_hash, created_at, last_seen_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(file_path, node_type, name, class_name) DO UPDATE SET
+                        line_start = excluded.line_start,
+                        line_end = excluded.line_end,
+                        code_hash = excluded.code_hash,
+                        last_seen_at = excluded.last_seen_at,
+                        language = excluded.language
+                    """,
+                    (node_type, name, class_name, clean_path, line_start, line_end,
+                     language, code_hash, scan_ts, scan_ts),
+                )
+
+                # Resolve node_id via SELECT — cur.lastrowid is unreliable for ON CONFLICT DO UPDATE
+                # (returns last inserted rowid, not the updated row's id)
+                row = self.conn.execute(
+                    "SELECT id FROM structural_nodes WHERE file_path = ? AND node_type = ? AND name = ? AND class_name = ?",
+                    (clean_path, node_type, name, class_name)
+                ).fetchone()
+                node_id = row["id"] if row else None
+
+                if node_id:
+                    node_ids.append(node_id)
+                    upserted += 1
+
+            # Stale pruning: delete rows for this file not seen in this scan.
+            # module_ref rows are created by OTHER files' import resolution, so
+            # they must survive this file's own prune pass.
+            cur = self.conn.execute(
+                "DELETE FROM structural_nodes WHERE file_path = ? AND last_seen_at != ? AND node_type != 'module_ref'",
+                (clean_path, scan_ts)
             )
-            
-            # Resolve node_id via SELECT — cur.lastrowid is unreliable for ON CONFLICT DO UPDATE
-            # (returns last inserted rowid, not the updated row's id)
-            row = self.conn.execute(
-                "SELECT id FROM structural_nodes WHERE file_path = ? AND node_type = ? AND name = ? AND class_name = ?",
-                (clean_path, node_type, name, class_name)
-            ).fetchone()
-            node_id = row["id"] if row else None
+            pruned = cur.rowcount
 
-            if node_id:
-                node_ids.append(node_id)
-                upserted += 1
-
-        # Stale pruning: delete rows for this file not seen in this scan.
-        # module_ref rows are created by OTHER files' import resolution, so
-        # they must survive this file's own prune pass.
-        cur = self.conn.execute(
-            "DELETE FROM structural_nodes WHERE file_path = ? AND last_seen_at != ? AND node_type != 'module_ref'",
-            (clean_path, scan_ts)
-        )
-        pruned = cur.rowcount
-
-        edges_calls, edges_imports = self._sync_structural_edges(
-            clean_path, nodes, project_root, scan_ts)
+            edges_calls, edges_imports = self._sync_structural_edges(
+                clean_path, nodes, project_root, scan_ts)
+            self.conn.execute("COMMIT")
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
 
         return {
             "upserted": upserted,

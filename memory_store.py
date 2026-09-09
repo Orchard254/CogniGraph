@@ -826,29 +826,45 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         now_dt = datetime.datetime.now(datetime.timezone.utc)
         now_str = now_dt.isoformat()
         expires_str = (now_dt + datetime.timedelta(seconds=ttl_seconds)).isoformat()
-        
-        # Remove expired locks
-        self.conn.execute("DELETE FROM memory_locks WHERE expires_at <= ?", (now_str,))
-        row = self.conn.execute("SELECT * FROM memory_locks WHERE resource = ?", (resource,)).fetchone()
-        if row:
-            if row["locked_by"] == locked_by:
 
-                # Extend lease
-                self.conn.execute(
-                    "UPDATE memory_locks SET locked_at = ?, expires_at = ? WHERE resource = ?",
-                    (now_str, expires_str, resource),
-                )
-                return True
-            return False
-        
+        # Delete-check-insert must be atomic: two agents racing here must not
+        # both observe "no row" and both INSERT. BEGIN IMMEDIATE serializes.
+        self.conn.execute("BEGIN IMMEDIATE")
         try:
-            self.conn.execute(
-                "INSERT INTO memory_locks (resource, locked_by, locked_at, expires_at) VALUES (?, ?, ?, ?)",
-                (resource, locked_by, now_str, expires_str),
-            )
-            return True
-        except sqlite3.IntegrityError:
-            return False
+            # Remove expired locks
+            self.conn.execute("DELETE FROM memory_locks WHERE expires_at <= ?", (now_str,))
+            row = self.conn.execute("SELECT * FROM memory_locks WHERE resource = ?", (resource,)).fetchone()
+            if row:
+                if row["locked_by"] == locked_by:
+                    # Extend lease
+                    self.conn.execute(
+                        "UPDATE memory_locks SET locked_at = ?, expires_at = ? WHERE resource = ?",
+                        (now_str, expires_str, resource),
+                    )
+                    self.conn.execute("COMMIT")
+                    return True
+                self.conn.execute("COMMIT")
+                return False
+
+            try:
+                self.conn.execute(
+                    "INSERT INTO memory_locks (resource, locked_by, locked_at, expires_at) VALUES (?, ?, ?, ?)",
+                    (resource, locked_by, now_str, expires_str),
+                )
+                self.conn.execute("COMMIT")
+                return True
+            except sqlite3.IntegrityError:
+                try:
+                    self.conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                return False
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
 
     def release_lock(self, resource: str, locked_by: str) -> bool:
         cur = self.conn.execute(
