@@ -1069,17 +1069,33 @@ class RevisionTransaction:
 
 import threading
 
-_GLOBAL_STORE: Optional[MemoryStore] = None
 _GLOBAL_STORE_LOCK = threading.Lock()
+_THREAD_STORES = threading.local()
 
 
 def get_store(db_path: Optional[str] = None) -> MemoryStore:
-    """Returns a singleton MemoryStore instance for easy access across agent sessions."""
-    global _GLOBAL_STORE
-    with _GLOBAL_STORE_LOCK:
-        if _GLOBAL_STORE is None or (db_path and _GLOBAL_STORE.db_path != db_path):
-            _GLOBAL_STORE = MemoryStore(db_path)
-        return _GLOBAL_STORE
+    """Returns a per-thread MemoryStore for the requested DB path.
+
+    sqlite3 connections are bound to their creating thread, so a single
+    process-wide singleton raises ProgrammingError the moment a second
+    thread touches it. Each thread gets its own connection on the same WAL
+    database (per decision: separate connections serialize via SQLite
+    itself); same-thread callers still share one instance.
+    """
+    from pm_common import default_db_path as _default_db_path
+    key = db_path or _default_db_path()
+    cache = getattr(_THREAD_STORES, "stores", None)
+    if cache is None:
+        cache = {}
+        _THREAD_STORES.stores = cache
+    store = cache.get(key)
+    if store is None:
+        with _GLOBAL_STORE_LOCK:
+            store = cache.get(key)
+            if store is None:
+                store = MemoryStore(key)
+                cache[key] = store
+    return store
 
 
 def remember(category: str, content: str, rationale: Optional[str] = None, **kwargs) -> int:
