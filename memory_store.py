@@ -599,8 +599,15 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                     best_sim, best_id = sim, row["id"]
         return best_id if best_sim >= threshold else None
 
-    def write_batch(self, facts: List[Dict[str, Any]], force: bool = False, embed: bool = True) -> List[int]:
-        """Atomically write multiple facts into the live `memory` table (see write() intake contract)."""
+    def write_batch(self, facts: List[Dict[str, Any]], force: bool = False, embed: bool = True,
+                    embed_errors: Optional[List[int]] = None) -> List[int]:
+        """Atomically write multiple facts into the live `memory` table (see write() intake contract).
+
+        Args:
+            embed_errors: optional list that receives the IDs of facts whose
+                post-commit embedding failed, so callers can report (and heal
+                via backfill) instead of silently missing semantic coverage.
+        """
         if not facts:
             return []
         new_ids = []
@@ -608,6 +615,17 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         # held across slow model inference. Inserts stay atomic; embeddings are
         # best-effort per fact, matching write(embed=True) semantics.
         pending_embeddings: List[Tuple[int, str]] = []
+        # Resolve the git HEAD once, BEFORE the transaction: one subprocess
+        # instead of one per anchored fact, and no process spawn under lock.
+        batch_sha: Optional[str] = None
+        if any(
+            not f.get("git_commit_sha") and f.get("file_path") and f.get("line_start") is not None
+            for f in facts if isinstance(f, dict)
+        ):
+            try:
+                batch_sha = self._current_git_commit()
+            except Exception:
+                batch_sha = None
         try:
             self.conn.execute("BEGIN IMMEDIATE")
             for f in facts:
@@ -623,7 +641,7 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                     line_start=f.get("line_start"),
                     line_end=f.get("line_end"),
                     code_hash=f.get("code_hash"),
-                    git_commit_sha=f.get("git_commit_sha"),
+                    git_commit_sha=f.get("git_commit_sha") or batch_sha,
                     force=force,
                     embed=False,
                 )
@@ -642,6 +660,8 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                     self._store_embedding(nid, text)
                 except Exception as e:
                     logger.warning("memory embedding failed for fact_id %s: %r", nid, e)
+                    if embed_errors is not None:
+                        embed_errors.append(nid)
         return new_ids
 
     def supersede(self, old_id: int, new_content: str, rationale: Optional[str] = None,

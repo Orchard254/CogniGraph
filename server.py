@@ -215,8 +215,9 @@ def memory_write_batch(facts: List[Dict[str, Any]]) -> dict:
     Record multiple new facts atomically in a single transaction.
     """
     _ensure_first_time_setup()  # Auto-bootstrap on first use
+    unembedded: List[int] = []
     with _store() as _s:
-        new_ids = _s.write_batch(facts if isinstance(facts, list) else [])
+        new_ids = _s.write_batch(facts if isinstance(facts, list) else [], embed_errors=unembedded)
     return {
         "count": len(new_ids),
         "written": sum(1 for i in new_ids if i > 0),
@@ -224,6 +225,8 @@ def memory_write_batch(facts: List[Dict[str, Any]]) -> dict:
         "duplicate_of_existing_ids": [-i for i in new_ids if i < 0],
         "ids": new_ids,
         "status": "written_batch",
+        # Facts committed but missing semantic coverage (heal via memory_backfill_embeddings)
+        "unembedded_ids": unembedded,
     }
 
 
@@ -950,12 +953,9 @@ def memory_bootstrap_project(project_root: str = "", dry_run: bool = True,
     from bootstrap import bootstrap_project
     max_facts = _clamp_limit(max_facts, default=150, maximum=1000)
     with _store() as _s:
-        try:
-            return bootstrap_project(project_root or None, store=_s, dry_run=dry_run,
-                                     full=full, max_facts=max_facts,
-                                     install_hook=install_hook, drop_protocol=drop_protocol)
-        finally:
-            pass  # _store() closes the handle
+        return bootstrap_project(project_root or None, store=_s, dry_run=dry_run,
+                                 full=full, max_facts=max_facts,
+                                 install_hook=install_hook, drop_protocol=drop_protocol)
 
 
 @mcp.tool()

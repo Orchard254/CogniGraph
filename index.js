@@ -187,14 +187,32 @@ async function installDependencies(pythonSetup) {
     return;
   }
 
-  // Check if dependencies are already installed (every hard runtime dep)
-  const requiredImports = ['mcp', 'sqlite_vec', 'tree_sitter'];
+  // Check if dependencies are already installed.
+  // Only 'mcp' is hard-required (the server cannot run without it); every
+  // other lane degrades gracefully, so those are warnings, not failures.
+  const hardRequired = ['mcp'];
+  const softLanes = {
+    'sqlite_vec': 'vec KNN lane (falls back to brute-force scan)',
+    'tree_sitter': 'structural lane',
+    'tree_sitter_python': 'structural lane (Python)',
+    'tree_sitter_javascript': 'structural lane (JavaScript)',
+    'tree_sitter_typescript': 'structural lane (TypeScript)',
+    'fastembed': 'semantic embeddings lane (falls back to tokenized matching)',
+    'numpy': 'semantic embeddings lane',
+  };
   let missing = [];
-  for (const mod of requiredImports) {
+  for (const mod of hardRequired) {
     try {
       await runCommand(pythonSetup.python, ['-c', `import ${mod}`], { stdio: 'pipe' });
     } catch (error) {
       missing.push(mod);
+    }
+  }
+  for (const [mod, lane] of Object.entries(softLanes)) {
+    try {
+      await runCommand(pythonSetup.python, ['-c', `import ${mod}`], { stdio: 'pipe' });
+    } catch (error) {
+      console.error(`[project-memory] Optional dependency '${mod}' missing — ${lane} degraded`);
     }
   }
   if (missing.length === 0) {
@@ -248,15 +266,13 @@ async function launchMCPServer(pythonSetup, dbPath) {
   // Startup watchdog: exit within the grace window means crash-loop, not ready.
   const STARTUP_GRACE_MS = 5000;
   const startTime = Date.now();
-  let running = true;
-  
+
   serverProcess.on('error', (error) => {
     console.error('[project-memory] Failed to start server process:', error);
     process.exit(1);
   });
-  
+
   serverProcess.on('exit', (code, signal) => {
-    running = false;
     if (Date.now() - startTime < STARTUP_GRACE_MS) {
       console.error(
         `[project-memory] Server died during startup (code ${code}, signal ${signal}). ` +

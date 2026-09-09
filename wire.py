@@ -150,35 +150,36 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
 
     written: List[str] = []
     backups: List[str] = []
+    config_errors: List[str] = []
+
+    def _safe_merge(cfg: Path, top_key: str, entry: Dict[str, Any]) -> None:
+        # A corrupt/unwritable config must surface as a report entry, never
+        # as a traceback: the refusal backup already preserved the evidence.
+        try:
+            b = _backup(cfg)
+            if b:
+                backups.append(b)
+            _merge_json(cfg, top_key, entry)
+            written.append(str(cfg))
+        except Exception as e:
+            config_errors.append(f"{cfg}: {e}")
 
     if agent == "opencode":
         cfg = proj_root / "opencode.json"
-        b = _backup(cfg)
-        if b: backups.append(b)
-        _merge_json(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
-        written.append(str(cfg))
+        _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
     elif agent == "cursor":
         cfg = proj_root / ".cursor" / "mcp.json"
-        b = _backup(cfg)
-        if b: backups.append(b)
-        _merge_json(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
-        written.append(str(cfg))
+        _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
     elif agent == "claude":
         appdata = os.environ.get("APPDATA")
         if appdata:
             cfg = Path(appdata) / "Claude" / "claude_desktop_config.json"
         else:
             cfg = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
-        b = _backup(cfg)
-        if b: backups.append(b)
-        _merge_json(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
-        written.append(str(cfg))
+        _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
     elif agent == "zed":
         cfg = proj_root / ".zed" / "settings.json"
-        b = _backup(cfg)
-        if b: backups.append(b)
-        _merge_json(cfg, "context_servers", {"command": py, "args": [server], "settings": {"env": env}})
-        written.append(str(cfg))
+        _safe_merge(cfg, "context_servers", {"command": py, "args": [server], "settings": {"env": env}})
     else:  # generic — print standard MCP snippet, write nothing
         written.append("(none — paste the snippet below into your agent's MCP config)")
 
@@ -201,17 +202,18 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         }
     }
     return {
-        "status": "WIRED",
+        "status": "WIRED_WITH_ERRORS" if config_errors else "WIRED",
         "agent": agent,
         "project_root": str(proj_root),
         "db_path": db_path,
         "config_files": written,
         "backups": backups,
+        "config_errors": config_errors,
         "agents_md": agents_md_status,
         "mcp_snippet": snippet,
         "next_steps": [
             f'"{py}" "{cli}" bootstrap --root "{proj_root}"   # dry-run preview',
             f'"{py}" "{cli}" bootstrap --root "{proj_root}" --apply   # ingest into memory',
             "Restart your coding agent so it loads the new MCP configuration.",
-        ],
+        ] + ([f"Fix config errors first: {e}" for e in config_errors] if config_errors else []),
     }

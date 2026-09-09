@@ -100,7 +100,13 @@ def promote_branch(
         if tgt is None or tgt["is_root"] != 1 or tgt["repo_id"] != repo_id:
             raise ValueError("target must be root in same repo")
         base_rev = src["base_revision"]
-        result: Dict = {"added": 0, "convergent": 0, "unchanged": 0, "new_memory_ids": []}
+        result: Dict = {"added": 0, "convergent": 0, "unchanged": 0, "new_memory_ids": [],
+                        "embedding_failed": []}
+        # Embeddings are deferred until after COMMIT: model inference must not
+        # hold the revision transaction's write lock (same rationale as
+        # MemoryStore.write_batch). Rows are committed first; a failed embed
+        # is reported, never rolled back.
+        pending_embeds: List[tuple] = []
 
         with store.revision_transaction(repo_id) as rt:
             R = rt.revision
@@ -164,10 +170,7 @@ def promote_branch(
                     if inject_failure_after is not None and inserts_done >= inject_failure_after:
                         raise RuntimeError("injected failure mid-copy for atomicity test")
                     # episodic embeddings are isolated from memory embeddings (separate ID space)
-                    try:
-                        store._store_episodic_embedding(new_id, f"{bl['content']} {bl['category'] or ''} {bl['tags'] or ''}")
-                    except Exception as e:
-                        logger.warning("episodic embedding failed for new_memory_id %s: %r", new_id, e)
+                    pending_embeds.append((new_id, f"{bl['content']} {bl['category'] or ''} {bl['tags'] or ''}"))
                 else:
                     # CONVERGENT: logical identity matches but different memory_id
                     # Under KEEP_BOTH, still insert new row and keep both
@@ -196,10 +199,7 @@ def promote_branch(
                     inserts_done += 1
                     if inject_failure_after is not None and inserts_done >= inject_failure_after:
                         raise RuntimeError("injected failure mid-copy for atomicity test")
-                    try:
-                        store._store_episodic_embedding(new_id, f"{bl['content']} {bl['category'] or ''} {bl['tags'] or ''}")
-                    except Exception as e:
-                        logger.warning("episodic embedding failed for new_memory_id %s: %r", new_id, e)
+                    pending_embeds.append((new_id, f"{bl['content']} {bl['category'] or ''} {bl['tags'] or ''}"))
 
             # Insert promotion ledger
             promo_id = store.conn.execute(
@@ -213,6 +213,13 @@ def promote_branch(
             )
             # Mark source branch PROMOTED — must be in same revision as ledger (enforced by trg_branches_promotion_requires_ledger)
             store.conn.execute("UPDATE memory_branches SET status='PROMOTED' WHERE branch_id=?", (source_branch_id,))
+
+        for new_id, text in pending_embeds:
+            try:
+                store._store_episodic_embedding(new_id, text)
+            except Exception as e:
+                logger.warning("episodic embedding failed for new_memory_id %s: %r", new_id, e)
+                result["embedding_failed"].append(new_id)
 
         return result
     finally:

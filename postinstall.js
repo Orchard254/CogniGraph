@@ -48,10 +48,12 @@ async function main() {
       'server.py', 'memory_store.py', 'pm_common.py', 'pm_search.py',
       'pm_context.py', 'pm_lifecycle.py', 'pm_structural.py', 'bootstrap.py',
       'structural_extract.py', 'branch_promotion.py', 'genesis_migrate.py',
-      'watcher.py', 'wire.py', 'memory_cli.py', 'requirements.txt',
+      'watcher.py', 'wire.py', 'memory_cli.py', '__init__.py',
+      'requirements.txt',
       'phase0_schema.sql', 'phase1_episodic.sql',
       'phase1_episodic_embeddings.sql', 'phase2_branch_admin.sql',
-      'episodic_fts.sql',
+      'episodic_fts.sql', 'legacy_provenance.sql',
+      'hooks/git_hook.py',
     ];
     for (const file of requiredFiles) {
       if (!fs.existsSync(path.join(packageDir, file))) {
@@ -100,17 +102,34 @@ async function main() {
       console.log('💡 Dependencies will be installed on first use');
     }
 
-    // Step 6: Verify installation (every hard runtime dep, not just mcp)
+    // Step 6: Verify installation (hard dep fails the gate; soft lanes warn)
     console.log('🔍 Verifying installation...');
-    const verifyImports = ['mcp', 'sqlite_vec', 'tree_sitter'];
+    const hardImports = ['mcp'];
+    const softLanes = {
+      'sqlite_vec': 'vec KNN lane (falls back to brute-force scan)',
+      'tree_sitter': 'structural lane',
+      'tree_sitter_python': 'structural lane (Python)',
+      'tree_sitter_javascript': 'structural lane (JavaScript)',
+      'tree_sitter_typescript': 'structural lane (TypeScript)',
+      'fastembed': 'semantic embeddings lane (falls back to tokenized matching)',
+      'numpy': 'semantic embeddings lane',
+    };
     let verifyOk = true;
-    for (const mod of verifyImports) {
+    for (const mod of hardImports) {
       try {
         await runCommand(venvPath, ['-c', `import ${mod}`], { stdio: 'pipe' });
         console.log(`✅ Verified dependency: ${mod}`);
       } catch (error) {
-        console.warn(`⚠️  Missing dependency '${mod}': install failed or incomplete`);
+        console.warn(`⚠️  Missing hard dependency '${mod}': install failed or incomplete`);
         verifyOk = false;
+      }
+    }
+    for (const [mod, lane] of Object.entries(softLanes)) {
+      try {
+        await runCommand(venvPath, ['-c', `import ${mod}`], { stdio: 'pipe' });
+        console.log(`✅ Verified optional dependency: ${mod}`);
+      } catch (error) {
+        console.warn(`⚠️  Optional dependency '${mod}' missing — ${lane} degraded`);
       }
     }
     if (!verifyOk) {
