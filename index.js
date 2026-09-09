@@ -114,10 +114,21 @@ async function setupPythonEnvironment() {
     venvPath = path.join(packageDir, 'venv', 'bin', 'python');
   }
   
-  // Create venv if it doesn't exist
+  // Create venv if it doesn't exist (race-safe: two starters may race here)
   if (!fs.existsSync(venvPath)) {
     console.error('[project-memory] Creating Python virtual environment...');
-    await runCommand(pythonCmd, ['-m', 'venv', 'venv'], { cwd: packageDir });
+    try {
+      await runCommand(pythonCmd, ['-m', 'venv', 'venv'], { cwd: packageDir });
+    } catch (error) {
+      if (fs.existsSync(venvPath)) {
+        console.error('[project-memory] venv appeared concurrently, continuing');
+      } else {
+        throw new Error(
+          `Failed to create virtual environment: ${error.message}. ` +
+          `Check disk space and write permission for ${packageDir}.`
+        );
+      }
+    }
   }
 
   const serverScript = path.join(packageDir, 'server.py');
@@ -159,12 +170,23 @@ async function findPythonCommand() {
 
 async function installDependencies(pythonSetup) {
   const requirementsFile = path.join(pythonSetup.packageDir, 'requirements.txt');
-  
+  const incompleteMarker = path.join(pythonSetup.packageDir, '.postinstall-incomplete');
+
+  if (fs.existsSync(incompleteMarker)) {
+    let reason = '';
+    try { reason = fs.readFileSync(incompleteMarker, 'utf-8').trim(); } catch (e) { /* ignore */ }
+    console.error(`[project-memory] WARNING: npm postinstall did not complete${reason ? ` (${reason})` : ''}. Verifying install now.`);
+  }
+
+  const markComplete = () => {
+    try { if (fs.existsSync(incompleteMarker)) fs.unlinkSync(incompleteMarker); } catch (e) { /* ignore */ }
+  };
+
   if (!fs.existsSync(requirementsFile)) {
     console.error('[project-memory] No requirements.txt found, skipping dependency installation');
     return;
   }
-  
+
   // Check if dependencies are already installed (every hard runtime dep)
   const requiredImports = ['mcp', 'sqlite_vec', 'tree_sitter'];
   let missing = [];
@@ -177,16 +199,18 @@ async function installDependencies(pythonSetup) {
   }
   if (missing.length === 0) {
     console.error('[project-memory] Dependencies already installed');
+    markComplete();
     return;
   }
   console.error(`[project-memory] Missing dependencies: ${missing.join(', ')}`);
-  
+
   console.error('[project-memory] Installing Python dependencies...');
   await runCommand(
-    pythonSetup.python, 
+    pythonSetup.python,
     ['-m', 'pip', 'install', '-r', 'requirements.txt'],
     { cwd: pythonSetup.packageDir }
   );
+  markComplete();
 }
 
 async function launchMCPServer(pythonSetup, dbPath) {
@@ -199,12 +223,32 @@ async function launchMCPServer(pythonSetup, dbPath) {
   console.error(`[project-memory] Starting MCP server with database: ${dbPath}`);
   console.error(`[project-memory] Python: ${pythonSetup.python}`);
   console.error(`[project-memory] Server script: ${pythonSetup.serverScript}`);
-  
+
+  // Pre-spawn gate: a corrupt/incomplete install must fail here with a clear
+  // message, not hang or crash-loop after spawn.
+  try {
+    await runCommand(pythonSetup.python, ['-m', 'py_compile', pythonSetup.serverScript], { stdio: 'pipe' });
+  } catch (error) {
+    console.error(`[project-memory] Server script failed to compile: ${error.message}`);
+    process.exit(1);
+  }
+
   // Launch the Python MCP server
-  const serverProcess = spawn(pythonSetup.python, [pythonSetup.serverScript], {
-    env,
-    stdio: 'inherit' // Pass through stdin/stdout/stderr for MCP communication
-  });
+  let serverProcess;
+  try {
+    serverProcess = spawn(pythonSetup.python, [pythonSetup.serverScript], {
+      env,
+      stdio: 'inherit' // Pass through stdin/stdout/stderr for MCP communication
+    });
+  } catch (error) {
+    console.error('[project-memory] Failed to spawn server process:', error.message);
+    process.exit(1);
+  }
+
+  // Startup watchdog: exit within the grace window means crash-loop, not ready.
+  const STARTUP_GRACE_MS = 5000;
+  const startTime = Date.now();
+  let running = true;
   
   serverProcess.on('error', (error) => {
     console.error('[project-memory] Failed to start server process:', error);
@@ -212,7 +256,15 @@ async function launchMCPServer(pythonSetup, dbPath) {
   });
   
   serverProcess.on('exit', (code, signal) => {
-    console.error(`[project-memory] Server exited with code ${code}, signal ${signal}`);
+    running = false;
+    if (Date.now() - startTime < STARTUP_GRACE_MS) {
+      console.error(
+        `[project-memory] Server died during startup (code ${code}, signal ${signal}). ` +
+        `Likely a broken Python install — rerun setup or check requirements.`
+      );
+    } else {
+      console.error(`[project-memory] Server exited with code ${code}, signal ${signal}`);
+    }
     process.exit(code || 1);
   });
   

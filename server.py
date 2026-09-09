@@ -179,6 +179,7 @@ def memory_write(category: str, content: str, rationale: str = "",
     tags: optional comma-separated tags
     importance: 1 (low) to 5 (critical)
     """
+    _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         new_id = _s.write(
             category=category,
@@ -213,6 +214,7 @@ def memory_write_batch(facts: List[Dict[str, Any]]) -> dict:
     """
     Record multiple new facts atomically in a single transaction.
     """
+    _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         new_ids = _s.write_batch(facts if isinstance(facts, list) else [])
     return {
@@ -584,6 +586,7 @@ def memory_supersede(old_id: int, new_content: str, rationale: str = "",
     Replace an outdated fact with a corrected or updated one.
     Use expected_version > 0 for optimistic concurrency control.
     """
+    _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         new_id = _s.supersede(
             old_id=old_id,
@@ -603,6 +606,7 @@ def memory_deprecate(id: int, reason: str = "") -> dict:
     """
     Mark a fact as no longer valid without replacing it.
     """
+    _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         _s.deprecate(id, reason or None)
     return {"id": id, "status": "deprecated"}
@@ -624,6 +628,7 @@ def memory_link_facts(source_id: int, target_id: int, relation: str) -> dict:
     Create a directed graph edge between two facts.
     relation: depends_on | implements | conflicts_with | relates_to
     """
+    _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         edge_id = _s.link_facts(source_id, target_id, relation)
     return {"edge_id": edge_id, "source_id": source_id, "target_id": target_id, "relation": relation, "status": "linked"}
@@ -634,6 +639,7 @@ def memory_unlink_facts(source_id: int, target_id: int, relation: str) -> dict:
     """
     Remove a directed graph edge between two facts.
     """
+    _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         _s.unlink_facts(source_id, target_id, relation)
     return {"source_id": source_id, "target_id": target_id, "relation": relation, "status": "unlinked"}
@@ -777,6 +783,7 @@ def memory_checkpoint_task(
         dict with content (what was tried) and rationale (why it failed).
         Stored as constraints so future agents do not re-derive the dead end.
     """
+    _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         result = _s.checkpoint_task(
             summary=summary,

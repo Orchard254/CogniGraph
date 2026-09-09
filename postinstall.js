@@ -18,6 +18,15 @@ const os = require('os');
 console.log('🚀 Setting up project-memory MCP server...');
 
 async function main() {
+  const markIncomplete = (reason) => {
+    // npm postinstall must stay best-effort (exit 0), but a silent success
+    // hides broken installs. Leave a marker index.js picks up on startup.
+    try {
+      fs.writeFileSync(path.join(__dirname, '.postinstall-incomplete'), reason + '\n');
+    } catch (e) { /* ignore */ }
+    console.warn(`⚠️  POSTINSTALL INCOMPLETE (${reason}) — recorded in .postinstall-incomplete; index.js will re-verify on startup.`);
+  };
+
   try {
     // Step 1: Check Python availability
     console.log('📋 Checking Python availability...');
@@ -25,6 +34,7 @@ async function main() {
     if (!pythonCmd) {
       console.warn('⚠️  Python 3.8+ not found. The system will attempt to auto-install Python dependencies on first use.');
       console.log('💡 For best performance, install Python 3.8+ from python.org');
+      markIncomplete('python-3.8+-not-found');
       return;
     }
     console.log(`✅ Found Python: ${pythonCmd}`);
@@ -47,6 +57,7 @@ async function main() {
       if (!fs.existsSync(path.join(packageDir, file))) {
         console.warn(`⚠️  Required file missing: ${file}`);
         console.log('💡 The npm package may not have been built correctly');
+        markIncomplete(`required-file-missing:${file}`);
         return;
       }
     }
@@ -104,8 +115,10 @@ async function main() {
     }
     if (!verifyOk) {
       console.warn('⚠️  Installation verification found gaps, but system should work on first use');
+      markIncomplete('dependency-verification-gaps');
     } else {
       console.log('✅ Installation verified successfully');
+      try { fs.unlinkSync(path.join(packageDir, '.postinstall-incomplete')); } catch (e) { /* ignore */ }
     }
 
     console.log('🎉 Setup complete! The project-memory MCP server is ready to use.');
