@@ -49,9 +49,9 @@ The `MemoryStore` class is composed from focused mixins, one per architectural l
 # 1. One-time setup: venv + dependencies + test suite
 .\setup.ps1
 
-# 2. Wire your project to your coding agent (run from anywhere)
-.\venv\Scripts\python.exe memory_cli.py wire cursor --root C:\path\to\your\project
-#    supported agents: opencode | cursor | claude | zed | generic
+# 2. Wire your project to your coding agent (interactive menu if agent is omitted)
+.\venv\Scripts\python.exe memory_cli.py wire --root C:\path\to\your\project
+#    or specify directly: antigravity | cursor | windsurf | claude | zed | roo | cline | opencode | generic
 
 # 3. Ingest your project's context into memory
 .\venv\Scripts\python.exe memory_cli.py bootstrap --root C:\path\to\your\project --apply

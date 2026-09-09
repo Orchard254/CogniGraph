@@ -154,7 +154,8 @@ def main():
 
     # wire
     wire_p = subparsers.add_parser("wire", help="Generate MCP config for a coding agent on a target project")
-    wire_p.add_argument("agent", choices=["opencode", "cursor", "claude", "zed", "generic"], help="Target coding agent")
+    wire_p.add_argument("agent", nargs="?", default=None,
+                        help="Target coding agent (antigravity, cursor, windsurf, claude, zed, roo, cline, opencode, generic). Omit for interactive menu.")
     wire_p.add_argument("--root", help="Project root to wire (default: CWD)")
     wire_p.add_argument("--no-protocol", action="store_true", help="Skip AGENTS.md drop")
     wire_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
@@ -313,8 +314,31 @@ def main():
                                     drop_protocol=not args.no_protocol)
             print(json.dumps(res, indent=2))
         elif args.command == "wire":
-            from wire import wire_agent
-            res = wire_agent(args.agent, project_root=args.root,
+            from wire import wire_agent, detect_agent, prompt_agent_choice, SUPPORTED_AGENTS, AGENT_ALIASES
+            agent = args.agent
+            if agent is None:
+                detected = detect_agent(Path(args.root) if args.root else None)
+                if sys.stdin.isatty():
+                    agent = prompt_agent_choice(detected)
+                elif detected:
+                    sys.stderr.write(f"Auto-detected IDE/agent: {detected}\n")
+                    agent = detected
+                else:
+                    sys.stderr.write(
+                        f"Error: No agent specified and could not auto-detect. "
+                        f"Choose one of: {', '.join(SUPPORTED_AGENTS)}\n"
+                    )
+                    sys.exit(1)
+            else:
+                agent_norm = AGENT_ALIASES.get(agent.lower().strip(), agent.lower().strip())
+                if agent_norm not in SUPPORTED_AGENTS:
+                    sys.stderr.write(
+                        f"Error: Invalid agent '{agent}'. "
+                        f"Choose one of: {', '.join(SUPPORTED_AGENTS)}\n"
+                    )
+                    sys.exit(1)
+                agent = agent_norm
+            res = wire_agent(agent, project_root=args.root,
                              drop_protocol=not args.no_protocol)
             print(json.dumps(res, indent=2))
 

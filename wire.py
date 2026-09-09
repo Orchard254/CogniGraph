@@ -19,7 +19,33 @@ import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-SUPPORTED_AGENTS = ("opencode", "cursor", "claude", "zed", "generic")
+SUPPORTED_AGENTS = (
+    "antigravity",
+    "cursor",
+    "windsurf",
+    "claude",
+    "zed",
+    "roo",
+    "cline",
+    "opencode",
+    "generic",
+)
+AGENT_ALIASES = {
+    "gemini": "antigravity",
+    "roo-code": "roo",
+    "roocode": "roo",
+}
+AGENT_DISPLAY_NAMES = {
+    "antigravity": "Google Antigravity (~/.gemini/config/mcp_config.json)",
+    "cursor": "Cursor (.cursor/mcp.json)",
+    "windsurf": "Windsurf (~/.codeium/windsurf/mcp_config.json)",
+    "claude": "Claude Desktop (global config)",
+    "zed": "Zed (.zed/settings.json)",
+    "roo": "Roo Code (.roo/mcp.json)",
+    "cline": "Cline (.cline/mcp.json)",
+    "opencode": "OpenCode (opencode.json)",
+    "generic": "Generic (display JSON snippet only)",
+}
 ENTRY_NAME = "project-memory"
 
 
@@ -131,6 +157,7 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
     if not isinstance(agent, str):
         raise ValueError(f"agent must be one of {SUPPORTED_AGENTS}, got {type(agent).__name__}")
     agent = agent.lower().strip()
+    agent = AGENT_ALIASES.get(agent, agent)
     if agent not in SUPPORTED_AGENTS:
         raise ValueError(f"agent must be one of {SUPPORTED_AGENTS}, got {agent!r}")
 
@@ -170,10 +197,24 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
     elif agent == "cursor":
         cfg = proj_root / ".cursor" / "mcp.json"
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
+    elif agent == "antigravity":
+        cfg = Path.home() / ".gemini" / "config" / "mcp_config.json"
+        _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
+    elif agent == "windsurf":
+        cfg = Path.home() / ".codeium" / "windsurf" / "mcp_config.json"
+        _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
+    elif agent == "roo":
+        cfg = proj_root / ".roo" / "mcp.json"
+        _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
+    elif agent == "cline":
+        cfg = proj_root / ".cline" / "mcp.json"
+        _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
     elif agent == "claude":
         appdata = os.environ.get("APPDATA")
         if appdata:
             cfg = Path(appdata) / "Claude" / "claude_desktop_config.json"
+        elif sys.platform == "darwin":
+            cfg = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
         else:
             cfg = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
@@ -220,3 +261,88 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
             "Restart your coding agent so it loads the new MCP configuration.",
         ] + ([f"Fix config errors first: {e}" for e in config_errors] if config_errors else []),
     }
+
+
+def detect_agent(project_root: Optional[Path] = None,
+                 env: Optional[Dict[str, str]] = None,
+                 home: Optional[Path] = None) -> Optional[str]:
+    """Auto-detect the developer's IDE / coding agent from environment and filesystem."""
+    proj = Path(project_root or Path.cwd()).resolve()
+    environ = os.environ if env is None else env
+    user_home = Path.home() if home is None else home
+
+    # 1. Project-level indicators (highest specificity for target repo)
+    if (proj / ".cursor").is_dir():
+        return "cursor"
+    if (proj / ".roo").is_dir():
+        return "roo"
+    if (proj / ".cline").is_dir():
+        return "cline"
+    if (proj / ".zed").is_dir():
+        return "zed"
+    if (proj / "opencode.json").is_file():
+        return "opencode"
+    if (proj / ".agents").is_dir():
+        return "antigravity"
+
+    # 2. Active environment variables
+    if any(k in environ for k in ("ANTIGRAVITY_PID", "GEMINI_CLI", "ANTIGRAVITY_AGENT")):
+        return "antigravity"
+    if any(k in environ for k in ("CURSOR_PROJECT_DIR", "CURSOR_AGENT", "CURSOR_TRACE_ID")):
+        return "cursor"
+    if any(k in environ for k in ("WINDSURF_PID", "CODEIUM_API_KEY", "WINDSURF_AGENT")):
+        return "windsurf"
+    if any(k in environ for k in ("ZED_TERM", "ZED_SERVER_URL")):
+        return "zed"
+    if any(k in environ for k in ("CLAUDE_PROJECT_DIR", "CLAUDE_DESKTOP")):
+        return "claude"
+    if any(k in environ for k in ("OPENCODE", "OPENCODE_PID")):
+        return "opencode"
+
+    # 3. System / Home directory installations (lower confidence fallback)
+    if (user_home / ".gemini").is_dir():
+        return "antigravity"
+    if (user_home / ".codeium" / "windsurf").is_dir():
+        return "windsurf"
+
+    return None
+
+
+def prompt_agent_choice(detected: Optional[str] = None,
+                        input_fn=input,
+                        print_fn=print) -> str:
+    """Prompt the user interactively to select their IDE / coding agent."""
+    options = list(AGENT_DISPLAY_NAMES.keys())
+    print_fn("\nSelect your IDE / Coding Agent for MCP server setup:\n")
+    default_idx = None
+    for idx, key in enumerate(options, 1):
+        label = AGENT_DISPLAY_NAMES[key]
+        is_default = (key == detected)
+        tag = " (detected)" if is_default else ""
+        if is_default:
+            default_idx = idx
+        print_fn(f"  [{idx}] {label}{tag}")
+
+    prompt = f"\nChoice [1-{len(options)}]"
+    if default_idx:
+        prompt += f" (default: [{default_idx}] {detected}): "
+    else:
+        prompt += ": "
+
+    while True:
+        try:
+            choice = input_fn(prompt).strip()
+        except (EOFError, KeyboardInterrupt):
+            print_fn()
+            raise SystemExit(1)
+        if not choice and default_idx:
+            return options[default_idx - 1]
+        if choice.isdigit():
+            val = int(choice)
+            if 1 <= val <= len(options):
+                return options[val - 1]
+        choice_lower = choice.lower()
+        choice_lower = AGENT_ALIASES.get(choice_lower, choice_lower)
+        if choice_lower in options:
+            return choice_lower
+        print_fn(f"Please enter a number between 1 and {len(options)}, or an agent name.")

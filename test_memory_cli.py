@@ -179,6 +179,25 @@ def test_wire_never_constructs_store(cli, monkeypatch, tmp_path):
     assert seen == {"agent": "zed", "root": str(tmp_path), "drop": False}
 
 
+def test_wire_auto_detect_dispatched(cli, monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr("wire.wire_agent",
+                        lambda agent, project_root=None, drop_protocol=True:
+                        seen.update(agent=agent, root=project_root) or {"status": "WIRED"})
+    monkeypatch.setattr("wire.detect_agent", lambda proj: "antigravity")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys, "argv", ["memory_cli.py", "wire", "--root", str(tmp_path)])
+    memory_cli.main()
+    assert seen["agent"] == "antigravity"
+
+
+def test_wire_invalid_agent_exits(cli, monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "argv", ["memory_cli.py", "wire", "not-an-agent", "--root", str(tmp_path)])
+    with pytest.raises(SystemExit) as exc:
+        memory_cli.main()
+    assert exc.value.code == 1
+
+
 # --------------------------------------------------------------------------
 # read commands
 # --------------------------------------------------------------------------

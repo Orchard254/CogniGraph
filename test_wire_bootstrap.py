@@ -15,7 +15,7 @@ import pytest
 
 import bootstrap
 import wire
-from wire import _backup, _merge_json, _python_exe, wire_agent
+from wire import _backup, _merge_json, _python_exe, wire_agent, detect_agent, prompt_agent_choice
 
 
 # --------------------------------------------------------------------------
@@ -266,6 +266,127 @@ def test_wire_protocol_no_template(tmp_path):
     proj = _make_proj(tmp_path)
     res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm))
     assert res["agents_md"] == "skipped_no_template"
+
+
+def test_wire_antigravity_home_config(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setattr(wire.Path, "home", lambda: fake_home)
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    res = wire_agent("antigravity", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    cfg = fake_home / ".gemini" / "config" / "mcp_config.json"
+    assert cfg.exists()
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert "project-memory" in data["mcpServers"]
+    assert data["mcpServers"]["project-memory"]["env"]["MEMORY_DB_PATH"].endswith(".project-memory/memory.db")
+
+
+def test_wire_windsurf_home_config(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setattr(wire.Path, "home", lambda: fake_home)
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    res = wire_agent("windsurf", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    cfg = fake_home / ".codeium" / "windsurf" / "mcp_config.json"
+    assert cfg.exists()
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert "project-memory" in data["mcpServers"]
+
+
+def test_wire_roo_and_cline_config(tmp_path):
+    pm = _make_pm_root(tmp_path)
+    proj_roo = _make_proj(tmp_path, "roo_proj")
+    res_roo = wire_agent("roo", project_root=str(proj_roo), project_memory_root=str(pm),
+                         drop_protocol=False)
+    assert res_roo["status"] == "WIRED"
+    assert (proj_roo / ".roo" / "mcp.json").exists()
+
+    proj_cline = _make_proj(tmp_path, "cline_proj")
+    res_cline = wire_agent("cline", project_root=str(proj_cline), project_memory_root=str(pm),
+                           drop_protocol=False)
+    assert res_cline["status"] == "WIRED"
+    assert (proj_cline / ".cline" / "mcp.json").exists()
+
+
+def test_wire_alias_normalization(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setattr(wire.Path, "home", lambda: fake_home)
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    res = wire_agent("gemini", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["agent"] == "antigravity"
+    assert (fake_home / ".gemini" / "config" / "mcp_config.json").exists()
+
+
+def test_detect_agent_from_env(tmp_path):
+    proj = _make_proj(tmp_path)
+    assert detect_agent(proj, env={"ANTIGRAVITY_PID": "1234"}, home=tmp_path / "empty_home") == "antigravity"
+    assert detect_agent(proj, env={"CURSOR_PROJECT_DIR": str(proj)}, home=tmp_path / "empty_home") == "cursor"
+    assert detect_agent(proj, env={"WINDSURF_PID": "5678"}, home=tmp_path / "empty_home") == "windsurf"
+    assert detect_agent(proj, env={"ZED_TERM": "true"}, home=tmp_path / "empty_home") == "zed"
+    assert detect_agent(proj, env={"CLAUDE_DESKTOP": "1"}, home=tmp_path / "empty_home") == "claude"
+    assert detect_agent(proj, env={"OPENCODE": "1"}, home=tmp_path / "empty_home") == "opencode"
+
+
+def test_detect_agent_from_project_dirs(tmp_path):
+    proj = _make_proj(tmp_path)
+    empty_home = tmp_path / "empty_home"
+    empty_home.mkdir(exist_ok=True)
+    (proj / ".roo").mkdir()
+    assert detect_agent(proj, env={}, home=empty_home) == "roo"
+
+    shutil.rmtree(proj / ".roo")
+    (proj / ".cursor").mkdir()
+    assert detect_agent(proj, env={}, home=empty_home) == "cursor"
+
+    shutil.rmtree(proj / ".cursor")
+    (proj / ".cline").mkdir()
+    assert detect_agent(proj, env={}, home=empty_home) == "cline"
+
+    shutil.rmtree(proj / ".cline")
+    (proj / ".zed").mkdir()
+    assert detect_agent(proj, env={}, home=empty_home) == "zed"
+
+    shutil.rmtree(proj / ".zed")
+    (proj / "opencode.json").write_text("{}", encoding="utf-8")
+    assert detect_agent(proj, env={}, home=empty_home) == "opencode"
+
+    (proj / "opencode.json").unlink()
+    (proj / ".agents").mkdir()
+    assert detect_agent(proj, env={}, home=empty_home) == "antigravity"
+
+
+def test_detect_agent_from_home_fallback(tmp_path):
+    proj = _make_proj(tmp_path)
+    fake_gemini_home = tmp_path / "gemini_home"
+    (fake_gemini_home / ".gemini").mkdir(parents=True)
+    assert detect_agent(proj, env={}, home=fake_gemini_home) == "antigravity"
+
+    fake_windsurf_home = tmp_path / "windsurf_home"
+    (fake_windsurf_home / ".codeium" / "windsurf").mkdir(parents=True)
+    assert detect_agent(proj, env={}, home=fake_windsurf_home) == "windsurf"
+
+
+def test_prompt_agent_choice():
+    # 1. User accepts default detected choice by pressing Enter
+    got = prompt_agent_choice(detected="antigravity", input_fn=lambda _: "", print_fn=lambda *a: None)
+    assert got == "antigravity"
+
+    # 2. User types a numeric choice
+    got2 = prompt_agent_choice(detected=None, input_fn=lambda _: "2", print_fn=lambda *a: None)
+    assert got2 == "cursor"
+
+    # 3. User types an agent alias
+    got3 = prompt_agent_choice(detected=None, input_fn=lambda _: "gemini", print_fn=lambda *a: None)
+    assert got3 == "antigravity"
 
 
 # --------------------------------------------------------------------------
