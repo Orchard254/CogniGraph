@@ -333,6 +333,9 @@ def test_start_missing_root_returns_none():
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 def test_poll_first_scan_silent_second_syncs(root, pyfile, monkeypatch):
     """First poll only records mtimes; a file touched afterwards is synced."""
+    monkeypatch.setattr(watcher, "_WATCHDOG_AVAILABLE", False)  # force polling path
+    sleeps = []
+    """First poll only records mtimes; a file touched afterwards is synced."""
     sleeps = []
 
     def fake_sleep(s):
@@ -377,3 +380,49 @@ def test_stop_watcher_with_handle_and_without(monkeypatch):
     assert closed == ["X", None]
     stop_watcher(None)
     assert closed == ["X", None, None]
+
+
+# --------------------------------------------------------------------------
+# watchdog observer branch (runs only when watchdog is installed)
+# --------------------------------------------------------------------------
+
+watchdog = pytest.importorskip("watchdog")
+
+
+def test_observer_detects_change_and_stop(root, monkeypatch):
+    """End-to-end through the real Observer: file change → sync → stop."""
+    store = FakeStore()
+    monkeypatch.setattr(watcher, "_thread_store", lambda db: store)
+    monkeypatch.setattr(watcher, "extract_structures", lambda p: [])
+    assert watcher._WATCHDOG_AVAILABLE is True
+    handle = start_watcher(project_root=root, store=store)
+    assert handle is not None
+    try:
+        target = root / "live.py"
+        target.write_text("x = 1\n")
+        deadline = time.time() + 10
+        while not store.writes and time.time() < deadline:
+            time.sleep(0.1)
+        assert len(store.writes) == 1
+        assert store.writes[0]["file_path"] == "live.py"
+        time.sleep(2.5)  # drain trailing-sync timers while this test's patches hold
+    finally:
+        closed = []
+        monkeypatch.setattr(watcher, "close_thread_stores",
+                            lambda db=None: closed.append(db))
+        stop_watcher(handle, db_path="D")
+    assert not handle.is_alive()
+    assert closed == ["D"]
+
+
+def test_observer_ignores_unwatched_extensions(root, monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(watcher, "_thread_store", lambda db: store)
+    handle = start_watcher(project_root=root, store=store)
+    assert handle is not None
+    try:
+        (root / "notes.txt").write_text("hello\n")
+        time.sleep(2.5)  # past the debounce window: any sync would have fired
+        assert store.writes == []
+    finally:
+        stop_watcher(handle)
