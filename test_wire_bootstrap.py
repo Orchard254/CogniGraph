@@ -141,6 +141,14 @@ def test_merge_json_nondict_top_key_reset(tmp_path):
     assert data["mcpServers"]["project-memory"] == {"command": "py"}
 
 
+def test_merge_json_empty_or_whitespace_file(tmp_path):
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text("   \n\t  ", encoding="utf-8")
+    _merge_json(cfg, "mcpServers", {"command": "py"})
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert data["mcpServers"]["project-memory"] == {"command": "py"}
+
+
 # --------------------------------------------------------------------------
 # wire._python_exe
 # --------------------------------------------------------------------------

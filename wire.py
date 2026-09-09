@@ -98,22 +98,24 @@ def _merge_json(path: Path, top_key: str, entry: Dict[str, Any]) -> None:
     """
     data: Dict[str, Any] = {}
     if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as e:
-            corrupt_backup = path.with_name(
-                f"{path.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}.bak"
-            )
+        raw = path.read_text(encoding="utf-8").strip()
+        if raw:
             try:
-                shutil.copy2(path, corrupt_backup)
-            except Exception:
-                corrupt_backup = None
-            raise ValueError(
-                f"existing config {path} is not valid JSON ({e}); "
-                f"preserved as {corrupt_backup}, refusing to overwrite"
-                if corrupt_backup is not None
-                else f"existing config {path} is not valid JSON ({e}); refusing to overwrite"
-            )
+                data = json.loads(raw)
+            except Exception as e:
+                corrupt_backup = path.with_name(
+                    f"{path.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}.bak"
+                )
+                try:
+                    shutil.copy2(path, corrupt_backup)
+                except Exception:
+                    corrupt_backup = None
+                raise ValueError(
+                    f"existing config {path} is not valid JSON ({e}); "
+                    f"preserved as {corrupt_backup}, refusing to overwrite"
+                    if corrupt_backup is not None
+                    else f"existing config {path} is not valid JSON ({e}); refusing to overwrite"
+                )
     if not isinstance(data, dict):
         data = {}
 
