@@ -26,7 +26,7 @@ While working:
 7. Never store secrets, tokens, or credentials. The store refuses them automatically.
 
 At the end of every session:
-8. Call `memory_checkpoint_task(summary, components, decisions, test_baseline)` with the verified test output.
+8. Call `memory_checkpoint_task` with the verified test output: `summary` (string), `test_baseline` (string), plus optional `components` and `decisions` (each a list of dicts with a required `content` key and optional `rationale`, `confidence`, `file_path`, `line_start`, `line_end`, `code_hash`, `tags`, `importance`), and optional `failures` (list of dicts with a required `content` key and optional `rationale`) for approaches that did not work.
 
 Maintenance (weekly or when drift is suspected) runs via CLI/background, not MCP:
 - `backup`, `scan-provenance`, `audit`, `prune`, `optimize`, `backfill`, `export`, `bootstrap`, `branch` via `memory_cli.py`; auto-maintenance also runs on server startup and takes a timestamped full-DB backup first (keep 8). Migration scripts snapshot automatically before mutating.

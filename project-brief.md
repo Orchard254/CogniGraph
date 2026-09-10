@@ -76,7 +76,6 @@ C:\PROJECT\project-memory
 ├── legacy_provenance.sql              # SQL migration helper for anchoring legacy facts
 ├── lib.js                             # Node.js utility library: Python version detection, venv resolution, spawn configuration
 ├── memory_cli.py                      # Comprehensive CLI utility (22 subcommands: stats, query, wire, bootstrap, etc.)
-├── MEMORY_SNAPSHOT.md                 # Archived memory export from earlier development milestone
 ├── memory_store.py                    # Storage engine facade: DB initialization, CRUD, OCC, locks, and mixin aggregation
 ├── package.json                       # npm manifest for cognigraph
 ├── phase0_schema.sql                  # Canonical schema DDL: memory, memory_fts, memory_edges, memory_locks
@@ -444,9 +443,6 @@ Every documentation file present in the repository, its purpose, and any noted c
 5. **[cognigraph_master_engineering_blueprint_v2_3_0.md](file:///C:/PROJECT/project-memory/cognigraph_master_engineering_blueprint_v2_3_0.md):**
    - *Description:* Definitive Phase 0 architectural specification defining the canonical substrate, two-table model, revision invariants, and Phase IV deferrals.
    - *Status:* Accurate architectural baseline reconciling live Tree-sitter implementation with episodic storage.
-6. **[MEMORY_SNAPSHOT.md](file:///C:/PROJECT/project-memory/MEMORY_SNAPSHOT.md):**
-   - *Description:* Static Markdown export of 258 memory entries generated on 2026-08-17.
-   - *Outdated / Historical Notice:* Contains legacy snapshot data from an earlier test harness / prior project (`evaluate_web_trust.py`, `backend/tools/web_confidence.py`). Does not represent the current `CogniGraph` repository state, serving instead as an example of `memory_export_markdown` output.
-7. **[scripts/dev/PHASE_B_RECON_REPORT.md](file:///C:/PROJECT/project-memory/scripts/dev/PHASE_B_RECON_REPORT.md):**
+6. **[scripts/dev/PHASE_B_RECON_REPORT.md](file:///C:/PROJECT/project-memory/scripts/dev/PHASE_B_RECON_REPORT.md):**
    - *Description:* Historical development reconnaissance report documenting `bootstrap.py` and `wire.py` prior to the Phase B Tree-sitter integration.
    - *Outdated Notice:* Describes `scan_file_tree()` as lacking an AST extraction loop, which has since been fully implemented via `structural_extract.py`.
