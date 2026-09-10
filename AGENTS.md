@@ -6,6 +6,7 @@
    Then STOP — no read/TodoWrite before memory_stats → memory_query(intent) → memory_prepare_task(intent, file_paths)
 
 At the start of EVERY session:
+0. If cognigraph tools are not available at session start, STOP and tell the user the memory server is not connected. Do not proceed without memory.
 1. Call `memory_stats` to confirm the database location and counts.
 2. Call `memory_query` BEFORE reading or editing any file. If memory has the answer, trust it — do not re-explore code you already know. Pass `intent` (fix/implement/refactor/optimize/...) so ranking boosts the right categories; it is auto-detected from the text if omitted.
 3. Call `memory_prepare_task(intent, file_paths)` before writing any code.
