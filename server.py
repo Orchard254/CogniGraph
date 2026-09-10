@@ -184,18 +184,7 @@ def memory_write(category: str, content: str, rationale: str = "",
                  file_path: str = "", tags: str = "", importance: int = 3,
                  line_start: int = 0, line_end: int = 0, code_hash: str = "",
                  git_commit_sha: str = "") -> dict:
-    """
-    Record a new fact in project memory.
-
-    category: component | decision | constraint | state | other
-    content: one atomic claim sentence
-    rationale: why this is true or why decision was made
-    confidence: confirmed | assumed | uncertain
-    session_id: optional session identifier
-    file_path: optional source file relative/absolute path
-    tags: optional comma-separated tags
-    importance: 1 (low) to 5 (critical)
-    """
+    """Record a durable fact this session learned that future sessions will need: decisions, constraints, gotchas, where components live. Secrets are refused."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         new_id = _s.write(
@@ -228,9 +217,7 @@ def memory_write(category: str, content: str, rationale: str = "",
 
 @mcp.tool()
 def memory_write_batch(facts: List[Dict[str, Any]]) -> dict:
-    """
-    Record multiple new facts atomically in a single transaction.
-    """
+    """Atomic batch form of memory_write for several related facts."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     unembedded: List[int] = []
     with _store() as _s:
@@ -249,7 +236,7 @@ def memory_write_batch(facts: List[Dict[str, Any]]) -> dict:
 
 @mcp.tool()
 def memory_query(text: str, category: str = "", tag: str = "", limit: int = 10, expand_graph: bool = True, session_id: str = "", repo_id: Optional[int] = None, intent: str = "", agent_type: str = "") -> dict:
-    """Hybrid RRF search combining lexical BM25 matching and term vector similarity, with intent-aware ranking and usage-pattern learning. Automatically includes graph-linked dependency facts when expand_graph=True. repo_id: optional - if omitted, defaults to the store's own repo (first repo) for episodic filtering. intent: optional task intent ('fix', 'implement', 'refactor', etc.) that boosts category-relevant facts in ranking; auto-detected from text if omitted. agent_type: optional ('cursor', 'claude', 'opencode', 'zed', 'default') to apply agent-specific retrieval-lane weights. Every retrieval is logged for usage-pattern learning."""
+    """Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     limit = _clamp_limit(limit, default=10)
     # Derive repo_id for episodic filtering if not provided (single-repo deployment)
@@ -262,13 +249,7 @@ def memory_query(text: str, category: str = "", tag: str = "", limit: int = 10, 
 
 @mcp.tool()
 def memory_get_context(query: str, agent_type: str = "default", max_tokens: int = 2000, limit: int = 5, intent: str = "") -> dict:
-    """High-precision context retriever with intent-based expansion and LLM optimization.
-
-    Runs hybrid search, expands graph relationships, and returns a clean, fully-formatted Markdown Context block
-    optimized for AI coding agents. Automatically detects intent from query or accepts explicit intent parameter.
-    Agent-tuned via agent_type (cursor | claude | opencode | zed | default); token budget via max_tokens
-    (converted to chars internally, capped per-agent).
-    """
+    """Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
 
     # Agent-specific formatting configuration (caps below are char budgets,
@@ -346,7 +327,7 @@ def memory_get_context(query: str, agent_type: str = "default", max_tokens: int 
 
 @mcp.tool()
 def memory_get_file_context(file_path: str) -> dict:
-    """Get file context before editing."""
+    """Call BEFORE editing a file: its symbols, anchored facts, callers, and call-graph edges."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         briefing_md = _s.get_file_context(file_path)
@@ -355,7 +336,7 @@ def memory_get_file_context(file_path: str) -> dict:
 
 @mcp.tool()
 def memory_check_safety(file_paths: List[str]) -> dict:
-    """Multi-File Refactor Safety Matrix. Call this BEFORE modifying a batch of multiple files! Analyzes cross-file dependencies, shared constraints, and breaking change risks across all target files."""
+    """Call before a multi-file refactor: dependency risk matrix across the files you're about to change."""
     with _store() as _s:
         return _s.check_safety(file_paths if isinstance(file_paths, list) else [])
 
@@ -364,10 +345,7 @@ def memory_check_safety(file_paths: List[str]) -> dict:
 def memory_supersede(old_id: int, new_content: str, rationale: str = "",
                       confidence: str = "assumed", session_id: str = "",
                       file_path: str = "", tags: str = "", expected_version: int = 0) -> dict:
-    """
-    Replace an outdated fact with a corrected or updated one.
-    Use expected_version > 0 for optimistic concurrency control.
-    """
+    """Replace an outdated fact with corrected content. Use when you discover memory that is wrong."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         new_id = _s.supersede(
@@ -385,9 +363,7 @@ def memory_supersede(old_id: int, new_content: str, rationale: str = "",
 
 @mcp.tool()
 def memory_deprecate(id: int, reason: str = "") -> dict:
-    """
-    Mark a fact as no longer valid without replacing it.
-    """
+    """Mark a fact obsolete without replacement."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         _s.deprecate(id, reason or None)
@@ -396,9 +372,7 @@ def memory_deprecate(id: int, reason: str = "") -> dict:
 
 @mcp.tool()
 def memory_stats() -> dict:
-    """
-    Overview of memory database statistics, categories, edges, and location.
-    """
+    """Memory health: active/deprecated counts, category breakdown, edges. Call at session start per AGENTS.md."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         return _s.stats()
@@ -406,17 +380,7 @@ def memory_stats() -> dict:
 
 @mcp.tool()
 def memory_prepare_task(intent: str, file_paths: List[str] | None = None, limit: int = 5) -> dict:
-    """PRE-CODING FLIGHT BRIEFING - Call this at the START of every coding task.
-    
-    Returns a complete Markdown briefing containing:
-    1. Architectural context and prior decisions relevant to your intent
-    2. File impact analysis for each file you plan to edit
-    3. Cross-file dependency warnings and breaking change risks
-    4. Latest verified test baseline and state checkpoint
-
-    intent: Short description of what you are about to implement or fix
-    file_paths: List of files you plan to edit (optional but recommended)
-    """
+    """REQUIRED before writing or modifying any code in this repository. Returns the task briefing: relevant decisions, constraints, component facts, file-level impacts, cross-file dependency risks, and the current verified test baseline."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     limit = _clamp_limit(limit, default=5, maximum=50)
     with _store() as _s:
@@ -432,20 +396,7 @@ def memory_checkpoint_task(
     test_baseline: str = "",
     failures: List[Dict[str, Any]] | None = None,
 ) -> dict:
-    """
-    POST-CODING CHECKPOINT - Call this at the END of every coding task.
-
-    Atomically writes all newly learned components, design decisions, and the
-    verified test baseline as a state checkpoint into project memory.
-
-    summary: One-paragraph summary of what was implemented and why
-    components: List of dicts with keys: content, file_path, line_start, line_end, importance
-    decisions: List of dicts with keys: content, rationale
-    test_baseline: Output from pytest/vitest e.g. '701 passed, 32 skipped'
-    failures: NEGATIVE KNOWLEDGE - approaches tried that did NOT work, each a
-        dict with content (what was tried) and rationale (why it failed).
-        Stored as constraints so future agents do not re-derive the dead end.
-    """
+    """Call immediately after a task is verified complete (tests green). Records new components, decisions, the test baseline, and failed approaches as durable memory for future sessions."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         result = _s.checkpoint_task(
@@ -474,37 +425,21 @@ def memory_checkpoint_task(
 
 @mcp.tool()
 def memory_who_calls(symbol: str) -> dict:
-    """ONE-HOP CODE GRAPH QUERY - ask this mid-reasoning instead of re-reading files.
-
-    Returns where a symbol is defined, every caller of it (name, class, file,
-    line ranges), and which files import its file. Accepts a bare name
-    ('query_hybrid') or Class.method ('MemoryStore.write'). Every edge is
-    ground truth extracted from the tree-sitter AST, not LLM output.
-    """
+    """Where a symbol is defined, every call site, and importing files. Call before renaming or changing a signature."""
     with _store() as _s:
         return _s.who_calls(symbol)
 
 
 @mcp.tool()
 def memory_project_shape() -> dict:
-    """PROJECT ORIENTATION - indexed file inventory and code-graph size.
-
-    Call once early in a session to ground yourself: how many files are
-    indexed, which modules carry the most definitions, and how large the
-    call/import graph is.
-    """
+    """Lay of the land: indexed files, top modules by definition density, call/import edge totals."""
     with _store() as _s:
         return {"markdown": _s.project_shape()}
 
 
 @mcp.tool()
 def memory_flag_fact(fact_id: int, note: str = "", flag_type: str = "misleading") -> dict:
-    """CORRECTION HOOK - fire this the moment a served fact turns out wrong.
-
-    Records a flag that future briefings print next to the fact, so the same
-    bad context is never silently consumed again. Prefer memory_supersede when
-    you know the corrected content; use this when you only know it misled you.
-    """
+    """Flag a fact as misleading or unverified so future briefings carry a warning. Use when memory looks wrong but you lack the correction."""
     with _store() as _s:
         return _s.flag_fact(fact_id, note=note, flag_type=flag_type)
 
