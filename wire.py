@@ -240,7 +240,8 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
 
     if agent == "opencode":
         cfg = proj_root / "opencode.json"
-        _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
+        _safe_merge(cfg, "mcp", {"type": "local", "command": [py, server],
+                                 "environment": env, "enabled": True})
     elif agent == "cursor":
         cfg = proj_root / ".cursor" / "mcp.json"
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
@@ -287,11 +288,19 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
             else:
                 agents_md_status = "skipped_no_template"
 
-    snippet = {
-        "mcpServers": {
-            ENTRY_NAME: {"command": py, "args": [server], "env": env}
+    if agent == "opencode":
+        snippet = {
+            "mcp": {
+                ENTRY_NAME: {"type": "local", "command": [py, server],
+                             "environment": env, "enabled": True}
+            }
         }
-    }
+    else:
+        snippet = {
+            "mcpServers": {
+                ENTRY_NAME: {"command": py, "args": [server], "env": env}
+            }
+        }
     return {
         "status": "WIRED_WITH_ERRORS" if config_errors else "WIRED",
         "agent": agent,
