@@ -257,13 +257,13 @@ def test_write_batch_reports_duplicates(fake_store):
 
 def test_query_clamps_limit(fake_store):
     server.memory_query("x", limit=9999)
-    assert _last_call(fake_store, "query")["limit"] == 100
+    assert _last_call(fake_store, "query_hybrid")["limit"] == 100
     server.memory_query("x", limit=0)
-    assert _last_call(fake_store, "query")["limit"] == 1
+    assert _last_call(fake_store, "query_hybrid")["limit"] == 1
 
 
-def test_query_hybrid_clamps_and_derives_repo(fake_store):
-    out = server.memory_query_hybrid("x", limit=500)
+def test_query_clamps_and_derives_repo(fake_store):
+    out = server.memory_query("x", limit=500)
     call = _last_call(fake_store, "query_hybrid")
     assert call["limit"] == 100
     assert call["repo_id"] == 7  # FakeStore._derive_default_repo_id()
@@ -271,32 +271,29 @@ def test_query_hybrid_clamps_and_derives_repo(fake_store):
 
 
 def test_get_context_clamps_and_detects_intent(fake_store):
-    out = server.memory_get_context("fix the bug", limit=999, max_chars=10**9)
+    out = server.memory_get_context("fix the bug", limit=999, max_tokens=10**9)
     call = _last_call(fake_store, "get_context")
     assert call["limit"] == 50
-    assert call["max_chars"] == 128000
+    # max_tokens=1e9 clamps to 128000 chars, then per-agent cap (default 8000) applies
+    assert call["max_chars"] == 8000
     assert out["detected_intent"] == "fix"  # FakeStore._detect_intent()
     assert "canned context" in out["context_markdown"]
 
 
-def test_get_context_optimized_unknown_agent_falls_back(fake_store):
-    out = server.memory_get_context_optimized("q", agent_type="nonsense")
+def test_get_context_unknown_agent_falls_back(fake_store):
+    out = server.memory_get_context("q", agent_type="nonsense")
     assert out["agent_type"] == "default"
     assert out["format_info"].get("auto_selected") is None  # plain tool, no _tag
     call = _last_call(fake_store, "get_context")
     assert call["agent_type"] == "default"
 
 
-def test_supersede_deprecate_get_state_shapes(fake_store):
+def test_supersede_deprecate_shapes(fake_store):
     sup = server.memory_supersede(old_id=1, new_content="new")
     assert sup == {"new_id": 9, "old_id": 1, "status": "superseded"}
 
     dep = server.memory_deprecate(id=2, reason="stale")
     assert dep == {"id": 2, "status": "deprecated"}
-
-    st = server.memory_get_state()
-    assert st["count"] == 1
-    assert st["facts"][0]["content"] == "canned-state"
 
 
 # ---------------------------------------------------------------------------
