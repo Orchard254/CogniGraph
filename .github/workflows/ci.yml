@@ -140,23 +140,24 @@ jobs:
         run: |
           if [ -f coverage.xml ]; then
             echo "Coverage report generated successfully"
-            # Extract and display key module coverage
-            python3 -c "
-import xml.etree.ElementTree as ET
-tree = ET.parse('coverage.xml')
-root = tree.getroot()
-for package in root.findall('.//package'):
-    name = package.get('name', '')
-    if any(key in name for key in ['memory_store', 'bootstrap', 'watcher', 'wire', 'pm_']):
-        classes = package.findall('classes/class')
-        for cls in classes:
-            filename = cls.get('filename', '')
-            lines = cls.findall('lines/line')
-            if lines:
-                total = len(lines)
-                covered = sum(1 for l in lines if l.get('hits', '0') != '0')
-                pct = (covered / total * 100) if total > 0 else 0
-                print(f'{filename}: {pct:.1f}% ({covered}/{total})')
-"
+            # Extract and display key module coverage. Heredoc (not python -c)
+            # so the script lines stay inside the YAML block scalar.
+            python - <<'PY'
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('coverage.xml')
+          root = tree.getroot()
+          for package in root.findall('.//package'):
+              name = package.get('name', '')
+              if any(key in name for key in ['memory_store', 'bootstrap', 'watcher', 'wire', 'pm_']):
+                  classes = package.findall('classes/class')
+                  for cls in classes:
+                      filename = cls.get('filename', '')
+                      lines = cls.findall('lines/line')
+                      if lines:
+                          total = len(lines)
+                          covered = sum(1 for l in lines if l.get('hits', '0') != '0')
+                          pct = (covered / total * 100) if total > 0 else 0
+                          print(f'{filename}: {pct:.1f}% ({covered}/{total})')
+          PY
           fi
         shell: bash
