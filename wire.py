@@ -1,5 +1,5 @@
 """
-Agent wiring module for project-memory.
+Agent wiring module for CogniGraph.
 
 Generates the correct MCP server configuration for a given coding agent,
 pinned to the target project's own .cognigraph/memory.db (legacy
@@ -47,7 +47,12 @@ AGENT_DISPLAY_NAMES = {
     "opencode": "OpenCode (opencode.json)",
     "generic": "Generic (display JSON snippet only)",
 }
-ENTRY_NAME = "project-memory"
+ENTRY_NAME = "cognigraph"
+# Phase 1.9 rebrand: entries matching any of these are legacy orphans and get
+# replaced (not duplicated) when merging existing IDE configs.
+LEGACY_ENTRY_NAMES = ("project-memory",)
+LEGACY_NPX_PACKAGES = ("@project-memory/mcp-server",)
+LEGACY_DATA_DIR_FRAGMENT = ".project-memory"
 
 
 def _python_exe(pm_root: Path) -> str:
@@ -86,6 +91,32 @@ def _backup(path: Path) -> Optional[str]:
     newest = candidates[0]
     shutil.copy2(path, newest)
     return str(newest)
+
+
+def _is_legacy_entry(name: str, value: Any) -> bool:
+    """True when a sibling MCP entry is a pre-rebrand CogniGraph orphan.
+
+    Legacy signatures: the old server name, the old npx package command, or a
+    MEMORY_DB_PATH still pointing inside legacy `.project-memory/`.
+    """
+    if name in LEGACY_ENTRY_NAMES and name != ENTRY_NAME:
+        return True
+    if not isinstance(value, dict):
+        return False
+    if value.get("command") == "npx":
+        args = value.get("args") or []
+        try:
+            if any(any(pkg in str(a) for pkg in LEGACY_NPX_PACKAGES) for a in args):
+                return True
+        except Exception:
+            pass
+    try:
+        env = value.get("env") or {}
+        if LEGACY_DATA_DIR_FRAGMENT in str(env.get("MEMORY_DB_PATH") or ""):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _merge_json(path: Path, top_key: str, entry: Dict[str, Any]) -> None:
@@ -132,6 +163,13 @@ def _merge_json(path: Path, top_key: str, entry: Dict[str, Any]) -> None:
     data.setdefault(top_key, {})
     if not isinstance(data[top_key], dict):
         data[top_key] = {}
+    # CogniGraph rebrand: replace legacy orphans instead of leaving duplicates.
+    for legacy_key in LEGACY_ENTRY_NAMES:
+        if legacy_key != ENTRY_NAME:
+            data[top_key].pop(legacy_key, None)
+    for name in [n for n, v in data[top_key].items()
+                 if n != ENTRY_NAME and _is_legacy_entry(n, v)]:
+        del data[top_key][name]
     data[top_key][ENTRY_NAME] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(data, indent=2, ensure_ascii=False)
@@ -154,7 +192,7 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
                project_memory_root: Optional[str] = None,
                drop_protocol: bool = True) -> Dict[str, Any]:
     """
-    Wire a target project to project-memory for the given coding agent.
+    Wire a target project to CogniGraph for the given coding agent.
     Returns a report with config file paths, backups, and exact next-step commands.
     """
     if not isinstance(agent, str):

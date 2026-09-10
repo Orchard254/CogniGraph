@@ -106,7 +106,7 @@ def test_merge_json_fresh_write(tmp_path):
     cfg = tmp_path / "sub" / "mcp.json"
     _merge_json(cfg, "mcpServers", {"command": "py", "args": [], "env": {}})
     data = json.loads(cfg.read_text(encoding="utf-8"))
-    assert data == {"mcpServers": {"project-memory": {"command": "py", "args": [], "env": {}}}}
+    assert data == {"mcpServers": {"cognigraph": {"command": "py", "args": [], "env": {}}}}
     assert not list(tmp_path.rglob("*.tmp"))  # no atomic-write leftovers
 
 
@@ -119,7 +119,7 @@ def test_merge_json_preserves_and_removes_deprecated(tmp_path):
     assert "mcp" not in data  # deprecated key removed
     assert data["other"] == 1  # unrelated content preserved
     assert data["mcpServers"]["prior"] == {"x": 1}  # sibling entries preserved
-    assert data["mcpServers"]["project-memory"] == {"command": "py"}
+    assert data["mcpServers"]["cognigraph"] == {"command": "py"}
 
 
 def test_merge_json_corrupt_preserved_not_clobbered(tmp_path):
@@ -138,7 +138,7 @@ def test_merge_json_nondict_top_key_reset(tmp_path):
     cfg.write_text(json.dumps({"mcpServers": ["not", "a", "dict"]}), encoding="utf-8")
     _merge_json(cfg, "mcpServers", {"command": "py"})
     data = json.loads(cfg.read_text(encoding="utf-8"))
-    assert data["mcpServers"]["project-memory"] == {"command": "py"}
+    assert data["mcpServers"]["cognigraph"] == {"command": "py"}
 
 
 def test_merge_json_empty_or_whitespace_file(tmp_path):
@@ -146,7 +146,7 @@ def test_merge_json_empty_or_whitespace_file(tmp_path):
     cfg.write_text("   \n\t  ", encoding="utf-8")
     _merge_json(cfg, "mcpServers", {"command": "py"})
     data = json.loads(cfg.read_text(encoding="utf-8"))
-    assert data["mcpServers"]["project-memory"] == {"command": "py"}
+    assert data["mcpServers"]["cognigraph"] == {"command": "py"}
 
 
 # --------------------------------------------------------------------------
@@ -188,7 +188,7 @@ def test_wire_opencode_entry(tmp_path):
     assert res["agents_md"] == "created"
     assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "# Protocol\n"
     cfg = json.loads((proj / "opencode.json").read_text(encoding="utf-8"))
-    entry = cfg["mcpServers"]["project-memory"]
+    entry = cfg["mcpServers"]["cognigraph"]
     assert entry["args"][0].endswith("server.py")
     assert entry["env"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
     assert (proj / ".cognigraph").is_dir()
@@ -205,8 +205,52 @@ def test_wire_cursor_nested_and_existing_backup(tmp_path):
     assert res["status"] == "WIRED"
     assert len(res["backups"]) == 1
     data = json.loads(existing.read_text(encoding="utf-8"))
-    assert "other" in data["mcpServers"] and "project-memory" in data["mcpServers"]
+    assert "other" in data["mcpServers"] and "cognigraph" in data["mcpServers"]
     assert res["agents_md"] == "skipped_disabled"
+
+
+def test_wire_legacy_server_name_replaced_not_duplicated(tmp_path):
+    """A config containing the legacy 'project-memory' entry gets rewritten."""
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    (proj / ".cursor").mkdir()
+    existing = proj / ".cursor" / "mcp.json"
+    existing.write_text(json.dumps({"mcpServers": {
+        "project-memory": {"command": "py", "args": ["server.py"],
+                           "env": {"MEMORY_DB_PATH": "x/.project-memory/memory.db"}},
+        "other": {"command": "other"},
+    }}), encoding="utf-8")
+    res = wire_agent("cursor", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    data = json.loads(existing.read_text(encoding="utf-8"))
+    assert "project-memory" not in data["mcpServers"]  # orphan replaced, not duplicated
+    assert "cognigraph" in data["mcpServers"]
+    assert data["mcpServers"]["other"] == {"command": "other"}  # unrelated preserved
+    assert data["mcpServers"]["cognigraph"]["env"]["MEMORY_DB_PATH"].endswith(
+        ".cognigraph/memory.db")
+
+
+def test_wire_legacy_npx_and_path_entries_replaced(tmp_path):
+    """Legacy npx-command and legacy-path siblings are removed; others stay."""
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    (proj / ".cursor").mkdir()
+    existing = proj / ".cursor" / "mcp.json"
+    existing.write_text(json.dumps({"mcpServers": {
+        "my-memory": {"command": "npx", "args": ["-y", "@project-memory/mcp-server"]},
+        "stale-paths": {"command": "py", "args": ["s.py"],
+                        "env": {"MEMORY_DB_PATH": "y/.project-memory/memory.db"}},
+        "unrelated": {"command": "node", "args": ["server.js"]},
+    }}), encoding="utf-8")
+    res = wire_agent("cursor", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    data = json.loads(existing.read_text(encoding="utf-8"))
+    assert "my-memory" not in data["mcpServers"]
+    assert "stale-paths" not in data["mcpServers"]
+    assert data["mcpServers"]["unrelated"] == {"command": "node", "args": ["server.js"]}
+    assert "cognigraph" in data["mcpServers"]
 
 
 def test_wire_zed_top_level_env_regression(tmp_path):
@@ -217,7 +261,7 @@ def test_wire_zed_top_level_env_regression(tmp_path):
                      drop_protocol=False)
     assert res["status"] == "WIRED"
     entry = json.loads((proj / ".zed" / "settings.json").read_text(encoding="utf-8"))
-    pm_entry = entry["context_servers"]["project-memory"]
+    pm_entry = entry["context_servers"]["cognigraph"]
     assert "MEMORY_DB_PATH" in pm_entry["env"]
     assert "settings" not in pm_entry
 
@@ -229,7 +273,7 @@ def test_wire_generic_writes_nothing(tmp_path):
                      drop_protocol=False)
     assert res["status"] == "WIRED"
     assert res["config_files"] == ["(none — paste the snippet below into your agent's MCP config)"]
-    assert "project-memory" in res["mcp_snippet"]["mcpServers"]
+    assert "cognigraph" in res["mcp_snippet"]["mcpServers"]
     assert not (proj / "opencode.json").exists()
 
 
@@ -245,7 +289,7 @@ def test_wire_claude_redirected_appdata(tmp_path, monkeypatch):
     assert res["status"] == "WIRED"
     cfg_path = fake_appdata / "Claude" / "claude_desktop_config.json"
     assert cfg_path.exists()
-    assert "project-memory" in json.loads(cfg_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert "cognigraph" in json.loads(cfg_path.read_text(encoding="utf-8"))["mcpServers"]
 
 
 def test_wire_corrupt_config_reports_not_raises(tmp_path):
@@ -288,8 +332,8 @@ def test_wire_antigravity_home_config(tmp_path, monkeypatch):
     cfg = fake_home / ".gemini" / "config" / "mcp_config.json"
     assert cfg.exists()
     data = json.loads(cfg.read_text(encoding="utf-8"))
-    assert "project-memory" in data["mcpServers"]
-    assert data["mcpServers"]["project-memory"]["env"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
+    assert "cognigraph" in data["mcpServers"]
+    assert data["mcpServers"]["cognigraph"]["env"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
 
 
 def test_wire_windsurf_home_config(tmp_path, monkeypatch):
@@ -304,7 +348,7 @@ def test_wire_windsurf_home_config(tmp_path, monkeypatch):
     cfg = fake_home / ".codeium" / "windsurf" / "mcp_config.json"
     assert cfg.exists()
     data = json.loads(cfg.read_text(encoding="utf-8"))
-    assert "project-memory" in data["mcpServers"]
+    assert "cognigraph" in data["mcpServers"]
 
 
 def test_wire_roo_and_cline_config(tmp_path):
