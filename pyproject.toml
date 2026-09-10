@@ -110,9 +110,12 @@ hooks = ["*.py"]
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+addopts = "--ignore=scratch"
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "stress_heavy: marks tests as heavy stress tests (skipped by default unless explicitly run with -m stress_heavy)",
+]
 
 [tool.coverage.run]
 source = ["."]
