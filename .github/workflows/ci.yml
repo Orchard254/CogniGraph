@@ -14,33 +14,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu: all Python versions + Node 20 (representative)
-          - os: ubuntu-latest
-            python-version: "3.10"
-            node-version: "20"
-          - os: ubuntu-latest
-            python-version: "3.11"
-            node-version: "20"
+          # numpy==2.5.3 requires Python >=3.12, so that is the matrix floor.
+          # Ubuntu: supported Python versions + Node 20 (representative)
           - os: ubuntu-latest
             python-version: "3.12"
             node-version: "20"
           - os: ubuntu-latest
             python-version: "3.13"
             node-version: "20"
-          # Windows: Python 3.11 + Node 20
+          # Windows: Python 3.12 + Node 20
           - os: windows-latest
-            python-version: "3.11"
+            python-version: "3.12"
             node-version: "20"
-          # macOS: Python 3.11 + Node 20
+          # macOS: Python 3.12 + Node 20
           - os: macos-latest
-            python-version: "3.11"
+            python-version: "3.12"
             node-version: "20"
           # Additional Node versions on Ubuntu
           - os: ubuntu-latest
-            python-version: "3.11"
+            python-version: "3.12"
             node-version: "18"
           - os: ubuntu-latest
-            python-version: "3.11"
+            python-version: "3.12"
             node-version: "22"
 
     steps:
@@ -102,7 +97,7 @@ jobs:
         shell: bash
 
       - name: Check README tool table is up to date
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && matrix.node-version == '20'
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.node-version == '20'
         run: |
           venv/bin/python scripts/gen_tool_table.py
           if ! git diff --exit-code README.md; then
