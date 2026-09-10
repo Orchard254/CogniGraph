@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "created": "2026-09-10",
+  "source": "live .cognigraph/memory.db after corpus_hygiene (306 active facts)",
+  "description": "Holdout split (~1/3) of golden_set.json, stratified by category. NEVER used to pick constants - only to validate the winner.",
+  "items": [
+    {
+      "fact_id": 265,
+      "category": "component",
+      "query": "do we have a live end-to-end test that the watcher keeps the graph fresh",
+      "content_prefix": "scratch/live_watcher_test.py: live end-to-end freshness test using the real watc"
+    },
+    {
+      "fact_id": 323,
+      "category": "component",
+      "query": "which tests cover wire.py and the bootstrap dry/apply paths",
+      "content_prefix": "test_wire_bootstrap.py covers wire.py, bootstrap.py dry/apply paths, and hooks/g"
+    },
+    {
+      "fact_id": 343,
+      "category": "component",
+      "query": "where did the testable JS helpers from index.js go",
+      "content_prefix": "lib.js extracts testable JS helpers from index.js/postinstall.js with 26 node:te"
+    },
+    {
+      "fact_id": 422,
+      "category": "component",
+      "query": "where is the memory-workflow skill defined across scopes",
+      "content_prefix": "memory-workflow skill (global + project scopes, SKILL.md 50 lines)"
+    },
+    {
+      "fact_id": 173,
+      "category": "decision",
+      "query": "what cap do usage-learning boosts have and what triggers them",
+      "content_prefix": "Usage learning boosts are capped at 1.15x and require at least 2 overlapping que"
+    },
+    {
+      "fact_id": 221,
+      "category": "decision",
+      "query": "why do access_count bumps share the log_usage flag",
+      "content_prefix": "Gate access_count updates behind the same log_usage flag as usage logging rather"
+    },
+    {
+      "fact_id": 379,
+      "category": "decision",
+      "query": "what is the python floor and why",
+      "content_prefix": "Python matrix floor raised to 3.12 because numpy==2.5.3 requires >=3.12 and scik"
+    },
+    {
+      "fact_id": 227,
+      "category": "decision",
+      "query": "when does the code graph actually create a call edge",
+      "content_prefix": "Call edges resolve conservatively: an edge is only created when the callee is un"
+    },
+    {
+      "fact_id": 395,
+      "category": "decision",
+      "query": "which function owns the legacy data-dir migration",
+      "content_prefix": "Single migration owner pm_common.maybe_migrate_legacy_data_dir; Node wrapper pas"
+    },
+    {
+      "fact_id": 321,
+      "category": "constraint",
+      "query": "what must we never do to the pytest suite or index.js stdio",
+      "content_prefix": "Do not split pytest suite by slow marker and do not change index.js stdio inheri"
+    },
+    {
+      "fact_id": 378,
+      "category": "constraint",
+      "query": "how do we talk to the GitHub API on this machine without gh",
+      "content_prefix": "gh CLI not available on this machine; GitHub API polled via curl + git credentia"
+    },
+    {
+      "fact_id": 428,
+      "category": "state",
+      "query": "what was broken in the opencode wire config",
+      "content_prefix": "Fixed OpenCode wire format (mcpServers→mcp), re-wired opencode.json, full suite "
+    },
+    {
+      "fact_id": 189,
+      "category": "state",
+      "query": "is the episodic intake contract work finished",
+      "content_prefix": "Completed all remaining non-priming work. (1) Episodic intake contract: formally"
+    },
+    {
+      "fact_id": 266,
+      "category": "state",
+      "query": "what did the live watcher freshness test catch",
+      "content_prefix": "Live-tested watcher-driven graph freshness end to end and caught two real bugs t"
+    },
+    {
+      "fact_id": 193,
+      "category": "state",
+      "query": "what happened in the memory_store corruption recovery",
+      "content_prefix": "memory_store.py corruption recovery completed on 2026-05-29. The nine methods lo"
+    },
+    {
+      "fact_id": 219,
+      "category": "state",
+      "query": "what did the auto-tagging priming backlog item do",
+      "content_prefix": "Implemented the remaining 3-item priming backlog. (1) Auto-tagging in memory_sto"
+    }
+  ]
+}

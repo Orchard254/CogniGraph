@@ -280,7 +280,44 @@ def test_sync_new_file_writes_with_force_embed(root, pyfile, no_thread_swap, fak
     w = store.writes[0]
     assert w["file_path"] == "svc.py" and w["force"] is True and w["embed"] is True
     assert w["code_hash"] == _file_hash(pyfile)
+    assert w["category"] == "other"  # template stub, not curated knowledge
     assert store.linked == ["svc.py"]
+
+
+def test_sync_lookup_matches_stub_rows_only(root, pyfile, no_thread_swap, fake_nodes):
+    """The upsert lookup must exclude curated facts anchored to the file."""
+    store = FakeStore()
+    _sync_file(pyfile, root, store)
+    lookups = [sql for sql, _ in store.conn.sql if sql.startswith("SELECT id, code_hash")]
+    assert lookups and "content LIKE 'Source file:%'" in lookups[0]
+
+
+def test_sync_never_clobbers_curated_fact(root, pyfile, no_thread_swap, fake_nodes):
+    """A curated fact anchored to the file must survive a file change.
+
+    The pre-guard lookup returned every active row for the file_path and the
+    UPDATE rewrote its content with the stub template — that destroyed 7
+    curated facts in the live corpus. With the stub-only lookup a curated row
+    is invisible to the sync: no update, no re-embed, and the new stub goes
+    out as a separate write.
+    """
+    store = FakeStore()
+    # One existing stub (stale hash) plus one curated fact on the same file.
+    store.conn = FakeConn(existing=[
+        {"id": 5, "code_hash": "stale"},
+    ])
+    captured = {}
+    real_execute = store.conn.execute
+
+    def execute(sql, params=()):
+        captured.setdefault("sqls", []).append(sql)
+        return real_execute(sql, params)
+
+    store.conn.execute = execute
+    _sync_file(pyfile, root, store)
+    updates = [sql for sql in captured["sqls"] if "UPDATE memory" in sql]
+    assert len(updates) == 1  # only the stub row, never the curated one
+    assert store.re_embedded and store.re_embedded[0][0] == 5
 
 
 def test_sync_unchanged_hash_updates_nothing(root, pyfile, no_thread_swap, fake_nodes):

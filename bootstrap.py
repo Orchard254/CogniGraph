@@ -80,7 +80,11 @@ def _small_enough(p: Path, limit: int = 1_000_000) -> bool:
 
 def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dry_run: bool = False) -> Tuple[List[Dict[str, Any]], int]:
     """Directory summary facts + key-file facts. `full=True` adds per-file facts.
-    
+
+    Template-derived facts (key-file, per-file stubs, directory summaries) are
+    filed under "other": they carry no curated knowledge and must not ride the
+    intent category boosts that apply to component/decision/constraint.
+
     If store is provided and not dry_run, also extracts and syncs structural nodes
     (functions, classes, methods, imports) per file.
     """
@@ -106,7 +110,7 @@ def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dr
                     data = p.read_bytes()
                     h = hashlib.sha256(data).hexdigest()
                     facts.append({
-                        "category": "component",
+                        "category": "other",
                         "content": f"Key file: {str(rel).replace(os.sep, '/')} (hash {h[:8]})",
                         "tags": "bootstrap, key-file",
                         "importance": 3,
@@ -115,7 +119,7 @@ def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dr
                     })
                 else:
                     facts.append({
-                        "category": "component",
+                        "category": "other",
                         "content": f"Key file: {str(rel).replace(os.sep, '/')}",
                         "tags": "bootstrap, key-file",
                         "importance": 3,
@@ -123,7 +127,7 @@ def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dr
                     })
             except OSError:
                 facts.append({
-                    "category": "component",
+                    "category": "other",
                     "content": f"Key file: {str(rel).replace(os.sep, '/')}",
                     "tags": "bootstrap, key-file",
                     "importance": 3,
@@ -137,7 +141,7 @@ def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dr
                     h = hashlib.sha256(data).hexdigest()
                     lines = data.decode('utf-8', errors='replace').count('\n') + 1
                     facts.append({
-                        "category": "component",
+                        "category": "other",
                         "content": f"Source file: {str(rel).replace(os.sep, '/')} ({CODE_LANGS[p.suffix.lower()]}, {lines} lines, hash {h[:8]})",
                         "tags": "bootstrap, file",
                         "importance": 2,
@@ -148,7 +152,7 @@ def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dr
                     })
                 else:
                     facts.append({
-                        "category": "component",
+                        "category": "other",
                         "content": f"Source file: {str(rel).replace(os.sep, '/')} ({CODE_LANGS[p.suffix.lower()]}, large file)",
                         "tags": "bootstrap, file",
                         "importance": 2,
@@ -156,7 +160,7 @@ def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dr
                     })
             except OSError:
                 facts.append({
-                    "category": "component",
+                    "category": "other",
                     "content": f"Source file: {str(rel).replace(os.sep, '/')} ({CODE_LANGS[p.suffix.lower()]})",
                     "tags": "bootstrap, file",
                     "importance": 2,
@@ -215,7 +219,7 @@ def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dr
     
     for top, st in sorted(dir_stats.items()):
         facts.append({
-            "category": "component",
+            "category": "other",
             "content": f"Directory '{top}/': {st['files']} files, ~{st['lines']} code lines",
             "tags": "bootstrap, structure",
             "importance": 2,

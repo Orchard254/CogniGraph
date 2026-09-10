@@ -1,4 +1,11 @@
-"""Priming evaluation harness.
+"""DEPRECATED — Priming evaluation harness.
+
+DEPRECATED since Phase 4 (2026-09-10): this harness scores a perfect 1.0 on
+the live corpus where the golden set measures recall@5 ≈ 0.62. It cannot
+detect rank regressions — a fact at rank 1 and a fact at rank 5 both count
+as PASS, and the 4 cases are too few to exercise the decision/constraint
+lanes. Use eval/eval_golden.py (golden_set.json / golden_tuning.json /
+golden_holdout.json) as the real retrieval-quality gate.
 
 Scores retrieval quality for realistic coding tasks against the live database:
 whether the facts an LLM actually needs (expected facts + their files) land in
