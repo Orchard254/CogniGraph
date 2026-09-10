@@ -71,7 +71,7 @@ jobs:
         run: |
           python -m venv venv
           if [ "$RUNNER_OS" = "Windows" ]; then
-            venv\Scripts\pip install -e ".[dev]"
+            venv/Scripts/pip install -e ".[dev]"
           else
             venv/bin/pip install -e ".[dev]"
           fi
@@ -81,7 +81,7 @@ jobs:
         if: steps.cache-venv.outputs.cache-hit == 'true'
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            venv\Scripts\pip install -e ".[dev]"
+            venv/Scripts/pip install -e ".[dev]"
           else
             venv/bin/pip install -e ".[dev]"
           fi
@@ -90,7 +90,7 @@ jobs:
       - name: Lint with Ruff
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            venv\Scripts\ruff check . --output-format=github
+            venv/Scripts/ruff check . --output-format=github
           else
             venv/bin/ruff check . --output-format=github
           fi
@@ -113,7 +113,7 @@ jobs:
       - name: Run Python tests with coverage
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            venv\Scripts\python -m pytest --cov=memory_store --cov=bootstrap --cov=watcher --cov=wire --cov=pm_common --cov=pm_search --cov=pm_context --cov=pm_lifecycle --cov=pm_structural --cov-report=xml --cov-report=term-missing -q --ignore=scratch
+            venv/Scripts/python -m pytest --cov=memory_store --cov=bootstrap --cov=watcher --cov=wire --cov=pm_common --cov=pm_search --cov=pm_context --cov=pm_lifecycle --cov=pm_structural --cov-report=xml --cov-report=term-missing -q --ignore=scratch
           else
             venv/bin/python -m pytest --cov=memory_store --cov=bootstrap --cov=watcher --cov=wire --cov=pm_common --cov=pm_search --cov=pm_context --cov=pm_lifecycle --cov=pm_structural --cov-report=xml --cov-report=term-missing -q --ignore=scratch
           fi
