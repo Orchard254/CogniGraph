@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from memory_store import MemoryStore  # noqa: E402
-from pm_common import default_db_path  # noqa: E402
+from pm_common import default_db_path, _blob_to_vec  # noqa: E402
 from pm_search import PINNED_NOW_ENV, _parse_iso_instant  # noqa: E402
 
 GOLDEN_PATH = Path(__file__).resolve().parent / "golden_set.json"
@@ -89,8 +89,34 @@ def stale_facts(db_path: str, items: List[Dict[str, Any]]) -> List[int]:
         conn.close()
 
 
+def load_query_embeddings(store: MemoryStore) -> Optional[Dict[str, Any]]:
+    """Precomputed golden-query vectors frozen into the fixture, or None.
+
+    Only fixture DBs (scripts/freeze_eval_fixture.py) carry the
+    eval_query_embeddings table. Swapping _query_encode for a lookup keeps
+    fixture evals fully offline — CI never downloads the fastembed model —
+    and pins the semantic lane's input, so runs reproduce exactly.
+    """
+    try:
+        rows = store.conn.execute(
+            "SELECT query_text, embedding FROM eval_query_embeddings"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return None
+    return {r["query_text"]: _blob_to_vec(r["embedding"]) for r in rows}
+
+
 def run_once(copy_path: str, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     store = MemoryStore(copy_path)
+    query_vecs = load_query_embeddings(store)
+    if query_vecs is not None:
+        def _frozen_lookup(text: str):
+            if text not in query_vecs:
+                raise RuntimeError(
+                    f"fixture lacks a precomputed query embedding for: {text!r}; "
+                    "re-run scripts/freeze_eval_fixture.py")
+            return query_vecs[text]
+        store._query_encode = _frozen_lookup
     per_item: List[Dict[str, Any]] = []
     try:
         for item in items:

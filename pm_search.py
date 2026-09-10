@@ -226,6 +226,15 @@ class SearchMixin:
         access_boost = min((access_count or 0) * 0.01, 0.15)
         return max(0.7, min(1.3, recency + access_boost))
 
+    def _query_encode(self, text: str):
+        """Embed a query for the semantic lane.
+
+        Default is pm_common._encode (fastembed). Eval harnesses swap this
+        for a lookup over precomputed vectors frozen into the fixture, so
+        retrieval never loads — or downloads — the embedding model.
+        """
+        return _encode(text)
+
     def _log_usage(self, query_text, intent, agent_type, retrieved_fact_ids, result_count, session_id=None):
         """Record one retrieval event for usage-pattern learning."""
         try:
@@ -600,7 +609,7 @@ class SearchMixin:
         tok_top = tok_scores[:50]
 
         # --- Memory Lane 3: Semantic cosine ---
-        query_vec = _encode(text)
+        query_vec = self._query_encode(text)
         if getattr(self, '_vec_available', False) and query_vec is not None:
             sem_scores = self._semantic_scores_vec(query_vec, session_id=session_id)
         else:
