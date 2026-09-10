@@ -54,7 +54,6 @@ CASES: List[Dict[str, Any]] = [
 def run_case(store: MemoryStore, case: Dict[str, Any], top_k: int) -> Dict[str, Any]:
     results = store.query_hybrid(case["task"], intent=case.get("intent", ""), limit=top_k,
                                  log_usage=False)
-    retrieved_ids = [r["id"] for r in results if r.get("source") == "memory"]
     retrieved_files = {
         (r.get("file_path") or "").replace("\\", "/").lower()
         for r in results if r.get("file_path")

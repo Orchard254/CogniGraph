@@ -6,7 +6,6 @@ updates memory: re-extracts structural nodes, re-hashes, and upserts file-level 
 
 Fallback: polling every 30s if watchdog not available. Non-blocking, daemon thread.
 """
-import os
 import time
 import hashlib
 import logging

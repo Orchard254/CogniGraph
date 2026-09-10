@@ -37,7 +37,6 @@ import sqlite3
 from pathlib import Path
 from typing import Dict
 
-from memory_store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +180,6 @@ def genesis_migrate(db_path: str | Path, inject_failure_after: int | None = None
                 from memory_store import _encode, _vec_to_blob, _EMBED_MODEL_NAME
                 vec = _encode(text)
                 if vec is not None:
-                    import numpy as np
                     blob = _vec_to_blob(vec)
                     conn.execute(
                         "INSERT OR REPLACE INTO episodic_embeddings (memory_id, model, embedding) VALUES (?, ?, ?)",
@@ -284,7 +282,6 @@ def genesis_migrate(db_path: str | Path, inject_failure_after: int | None = None
                 from memory_store import _encode, _vec_to_blob, _EMBED_MODEL_NAME
                 vec = _encode(text)
                 if vec is not None:
-                    import numpy as np
                     blob = _vec_to_blob(vec)
                     conn.execute(
                         "INSERT OR REPLACE INTO episodic_embeddings (memory_id, model, embedding) VALUES (?, ?, ?)",

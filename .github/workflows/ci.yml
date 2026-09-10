@@ -76,11 +76,9 @@ jobs:
         run: |
           python -m venv venv
           if [ "$RUNNER_OS" = "Windows" ]; then
-            venv\Scripts\pip install -r requirements.txt
-            venv\Scripts\pip install pytest-cov
+            venv\Scripts\pip install -e ".[dev]"
           else
-            venv/bin/pip install -r requirements.txt
-            venv/bin/pip install pytest-cov
+            venv/bin/pip install -e ".[dev]"
           fi
         shell: bash
 
@@ -88,11 +86,18 @@ jobs:
         if: steps.cache-venv.outputs.cache-hit == 'true'
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            venv\Scripts\pip install -r requirements.txt
-            venv\Scripts\pip install pytest-cov
+            venv\Scripts\pip install -e ".[dev]"
           else
-            venv/bin/pip install -r requirements.txt
-            venv/bin/pip install pytest-cov
+            venv/bin/pip install -e ".[dev]"
+          fi
+        shell: bash
+
+      - name: Lint with Ruff
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            venv\Scripts\ruff check . --output-format=github
+          else
+            venv/bin/ruff check . --output-format=github
           fi
         shell: bash
 

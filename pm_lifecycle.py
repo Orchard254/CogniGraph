@@ -1,19 +1,14 @@
 """Lifecycle layer: provenance verification, maintenance (prune/consolidate/optimize/audit), exports, and the agent prepare/checkpoint hooks."""
-import sqlite3
-import os
-import re
 import datetime
 import hashlib
 import json
-import logging
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
 from pm_common import (
-    logger, tokenize_text, looks_like_secret, MAX_LIMIT,
-    VALID_CATEGORIES, VALID_CONFIDENCE, VALID_RELATIONS,
-    _encode, _blob_to_vec, _cosine_sim, _vec_to_blob, _get_embed_model,
-    _EMBED_MODEL_NAME, _VEC_DIM, _SEMANTIC_AVAILABLE, np,
+    tokenize_text, MAX_LIMIT,
+    _vec_to_blob, _get_embed_model,
+    _EMBED_MODEL_NAME, _SEMANTIC_AVAILABLE, np,
 )
 
 

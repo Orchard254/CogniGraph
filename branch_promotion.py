@@ -99,7 +99,6 @@ def promote_branch(
         ).fetchone()
         if tgt is None or tgt["is_root"] != 1 or tgt["repo_id"] != repo_id:
             raise ValueError("target must be root in same repo")
-        base_rev = src["base_revision"]
         result: Dict = {"added": 0, "convergent": 0, "unchanged": 0, "new_memory_ids": [],
                         "embedding_failed": []}
         # Embeddings are deferred until after COMMIT: model inference must not
@@ -333,7 +332,6 @@ def list_branches(
 
     Returns dict with repo_id, branches (list), count.
     """
-    import sqlite3
 
     store = MemoryStore(db_path=str(db_path))
     try:

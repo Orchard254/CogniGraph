@@ -11,14 +11,9 @@ existing imports (server.py, bootstrap.py, memory_cli.py, tests, hooks)
 keep working unchanged.
 """
 import sqlite3
-import os
 import re
 import datetime
-import hashlib
-import json
-import struct
 import subprocess
-import logging
 import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
@@ -37,6 +32,39 @@ from pm_search import SearchMixin
 from pm_context import ContextMixin
 from pm_lifecycle import LifecycleMixin
 from pm_structural import StructuralMixin
+
+__all__ = [
+    "MemoryStore",
+    "RevisionTransaction",
+    "get_store",
+    "remember",
+    "recall",
+    "file_briefing",
+    "prepare_task",
+    "checkpoint_task",
+    "default_db_path",
+    "find_project_root",
+    "looks_like_secret",
+    "tokenize_text",
+    "SCHEMA",
+    "MAX_LIMIT",
+    "VALID_CATEGORIES",
+    "VALID_CONFIDENCE",
+    "VALID_RELATIONS",
+    "_SECRET_PATTERNS",
+    "_SEMANTIC_AVAILABLE",
+    "_SQLITE_VEC_PKG_AVAILABLE",
+    "_VEC_DIM",
+    "_EMBED_MODEL_NAME",
+    "_get_embed_model",
+    "_encode",
+    "_vec_to_blob",
+    "_blob_to_vec",
+    "_cosine_sim",
+    "_sqlite_vec_pkg",
+    "np",
+    "logger",
+]
 
 
 class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
@@ -1095,8 +1123,6 @@ class RevisionTransaction:
             self.conn.execute("ROLLBACK")
         return False
 
-
-import threading
 
 _GLOBAL_STORE_LOCK = threading.Lock()
 _THREAD_STORES = threading.local()

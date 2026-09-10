@@ -1,19 +1,10 @@
 """Context layer: LLM priming output - context briefings, file briefings, dependency maps, and proactive suggestions."""
 import sqlite3
-import os
-import re
-import datetime
-import hashlib
-import json
-import logging
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 
 from pm_common import (
-    logger, tokenize_text, looks_like_secret, MAX_LIMIT,
-    VALID_CATEGORIES, VALID_CONFIDENCE, VALID_RELATIONS,
-    _encode, _blob_to_vec, _cosine_sim, _vec_to_blob, _get_embed_model,
-    _EMBED_MODEL_NAME, _VEC_DIM, _SEMANTIC_AVAILABLE, np,
+    MAX_LIMIT,
 )
 
 
@@ -564,8 +555,6 @@ class ContextMixin:
                 if self._paths_match(p, fp):
                     facts_by_file[p].append(f)
 
-
-        target_fact_ids = {f["id"] for fl in facts_by_file.values() for f in fl}
         fact_to_file: Dict[int, str] = {}
         for p, fl in facts_by_file.items():
             for f in fl:

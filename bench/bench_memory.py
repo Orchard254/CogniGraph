@@ -12,14 +12,14 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from memory_store import MemoryStore
 from structural_extract import extract_structures
-from bootstrap import bootstrap_project, scan_file_tree, parse_manifests, extract_docs, scan_git
+from bootstrap import bootstrap_project
 
 
 ITERATIONS = 50

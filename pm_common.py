@@ -5,17 +5,11 @@ SQLite-backed, with FTS5 full-text search, graph edge relationships, code proven
 hybrid RRF query ranking (BM25 + tokenized + semantic embeddings), recency decay,
 auto-dedup guard, optimistic concurrency control, and automated consolidation.
 """
-import sqlite3
 import os
 import re
-import datetime
-import hashlib
-import json
-import struct
 import logging
-import threading
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 

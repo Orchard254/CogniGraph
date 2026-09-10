@@ -36,7 +36,14 @@ dependencies = [
     "tree-sitter-javascript==0.25.0",
     "tree-sitter-typescript==0.23.2",
 ]
-optional-dependencies = { watchdog = ["watchdog>=3.0.0"] }
+
+[project.optional-dependencies]
+watchdog = ["watchdog>=3.0.0"]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff==0.9.10",
+]
 
 [project.entry-points]
 console_scripts = { memory_cli = "memory_cli:main" }

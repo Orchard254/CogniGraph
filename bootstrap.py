@@ -243,8 +243,8 @@ def parse_manifests(root: Path) -> List[Dict[str, Any]]:
     rt = root / "requirements.txt"
     if rt.exists():
         try:
-            lines = [l.strip() for l in rt.read_text(encoding="utf-8").splitlines()
-                     if l.strip() and not l.strip().startswith("#")]
+            lines = [line.strip() for line in rt.read_text(encoding="utf-8").splitlines()
+                     if line.strip() and not line.strip().startswith("#")]
             facts.append({
                 "category": "component",
                 "content": f"requirements.txt: {len(lines)} deps: {', '.join(lines[:20])}",
@@ -444,7 +444,7 @@ def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True
         if written:
             try:
                 # Use the store's batched semantic path if available
-                from memory_store import _get_embed_model, _vec_to_blob, _EMBED_MODEL_NAME
+                from memory_store import _get_embed_model, _EMBED_MODEL_NAME
                 model = _get_embed_model()
                 if model is not None:
                     # Fetch texts for written ids in one query
