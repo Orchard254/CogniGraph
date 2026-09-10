@@ -11,9 +11,15 @@ Usage:
     python eval/eval_golden.py             # two runs + determinism gate
     python eval/eval_golden.py --runs 1    # single run (ablation sweeps)
     python eval/eval_golden.py --json      # machine-readable report
+    python eval/eval_golden.py --now 2026-09-11   # pin the recency clock (CI)
+
+The --now flag (or the PROJECT_MEMORY_NOW env var) pins the clock the
+recency lane ages facts against; without it, golden ranks drift day to
+day as facts age and committed baseline numbers rot.
 """
 import argparse
 import json
+import os
 import shutil
 import sqlite3
 import sys
@@ -26,6 +32,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from memory_store import MemoryStore  # noqa: E402
 from pm_common import default_db_path  # noqa: E402
+from pm_search import PINNED_NOW_ENV, _parse_iso_instant  # noqa: E402
 
 GOLDEN_PATH = Path(__file__).resolve().parent / "golden_set.json"
 TOP_K = 10
@@ -144,7 +151,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--runs", type=int, default=2,
                         help="consecutive runs for the determinism gate (default 2)")
     parser.add_argument("--json", action="store_true", help="emit machine-readable report")
+    parser.add_argument("--now", default=None,
+                        help="pin the recency clock (ISO date/datetime, e.g. 2026-09-11) so "
+                             "golden ranks do not drift as facts age; required for CI")
     args = parser.parse_args(argv)
+
+    if args.now is not None:
+        if _parse_iso_instant(args.now) is None:
+            print(f"ERROR: --now is not a valid ISO date/datetime: {args.now}", file=sys.stderr)
+            return 1
+        os.environ[PINNED_NOW_ENV] = args.now
 
     src_db = args.db or default_db_path()
     golden_path = Path(args.golden) if args.golden else GOLDEN_PATH
@@ -174,8 +190,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     agg = aggregate(runs[-1])
     usage_clean = usage_before == usage_after
 
+    pinned = os.environ.get(PINNED_NOW_ENV)
     report = {
         "source_db": src_db,
+        "pinned_now": pinned,
         "golden_pairs": len(items),
         "runs": len(runs),
         "deterministic": deterministic,
@@ -191,7 +209,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
         print(f"Golden eval: {len(items)} pairs, {len(runs)} run(s), source {src_db}, "
-              f"golden {golden_path.name}")
+              f"golden {golden_path.name}, "
+              f"clock {'pinned to ' + pinned if pinned else 'wall time'}")
         print(f"  recall@5  = {agg['recall@5']}")
         print(f"  recall@10 = {agg['recall@10']}")
         print(f"  MRR       = {agg['mrr']}")

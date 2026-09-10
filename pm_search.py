@@ -10,6 +10,30 @@ from pm_common import (
     _encode, _blob_to_vec, _cosine_sim, _vec_to_blob,
 )
 
+# Injectable "now" for time-deterministic evals: _recency_weight normally
+# ages facts against the wall clock, so golden ranks drift as facts age.
+# Eval/fixture tooling pins this env var to a fixed ISO instant so recall
+# numbers reproduce exactly regardless of when CI runs.
+PINNED_NOW_ENV = "PROJECT_MEMORY_NOW"
+
+
+def _parse_iso_instant(value) -> Optional[datetime.datetime]:
+    """Parse an ISO-8601 date/datetime into an aware UTC datetime, or None."""
+    if not value:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(datetime.timezone.utc)
+
+
+def pinned_now() -> Optional[datetime.datetime]:
+    """The pinned eval clock from PROJECT_MEMORY_NOW, or None for wall time."""
+    return _parse_iso_instant(os.environ.get(PINNED_NOW_ENV))
+
 
 class SearchMixin:
     def _semantic_scores(self, query_vec, session_id: Optional[str] = None) -> Dict[int, float]:
@@ -181,23 +205,23 @@ class SearchMixin:
             scores[fid] = max(0.0, 1.0 - (dist ** 2) / 2.0)
         return scores
 
-    def _recency_weight(self, created_at, access_count) -> float:
+    def _recency_weight(self, created_at, access_count,
+                        now: Optional[datetime.datetime] = None) -> float:
         """
         Compute a recency multiplier in [0.7, 1.3].
         Newer facts and frequently-accessed facts rank higher.
         - A fact written today gets ~1.3x; one from 180 days ago gets ~0.7x.
         - Each access adds a small boost capped at 0.15.
+
+        `now` (or the PROJECT_MEMORY_NOW env var) pins the reference instant
+        so evals are time-deterministic; default is the wall clock.
         """
+        ref = now or pinned_now() or datetime.datetime.now(datetime.timezone.utc)
         age_days = 180
         if created_at:
-            try:
-                ts = str(created_at).replace("Z", "+00:00")
-                created = datetime.datetime.fromisoformat(ts)
-                if created.tzinfo is None:
-                    created = created.replace(tzinfo=datetime.timezone.utc)
-                age_days = max(0, (datetime.datetime.now(datetime.timezone.utc) - created).days)
-            except Exception:
-                pass
+            created = _parse_iso_instant(created_at)
+            if created is not None:
+                age_days = max(0, (ref - created).days)
         recency = 1.3 - (min(age_days, 180) / 180.0) * 0.6
         access_boost = min((access_count or 0) * 0.01, 0.15)
         return max(0.7, min(1.3, recency + access_boost))
