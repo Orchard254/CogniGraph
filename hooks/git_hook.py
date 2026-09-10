@@ -37,13 +37,13 @@ def main():
     try:
         from memory_store import MemoryStore
     except Exception as e:
-        print(f"[project-memory] hook disabled (import failed): {e}", file=sys.stderr)
+        print(f"[cognigraph] hook disabled (import failed): {e}", file=sys.stderr)
         return 0
 
     try:
         msg, sha = get_latest_commit_info()
     except Exception as e:
-        print(f"[project-memory] hook skipped (git failed): {e}", file=sys.stderr)
+        print(f"[cognigraph] hook skipped (git failed): {e}", file=sys.stderr)
         return 0
     if not msg:
         return 0
@@ -69,7 +69,7 @@ def main():
     try:
         store = MemoryStore()
     except Exception as e:
-        print(f"[project-memory] hook skipped (db unavailable): {e}", file=sys.stderr)
+        print(f"[cognigraph] hook skipped (db unavailable): {e}", file=sys.stderr)
         return 0
     try:
         for raw_tag, content in matches:
@@ -87,10 +87,10 @@ def main():
                     git_commit_sha=sha,
                     tags=f"git, auto-capture, {raw_tag}",
                 )
-                print(f"[project-memory] Auto-captured Git commit fact #{fact_id} ({category})")
+                print(f"[cognigraph] Auto-captured Git commit fact #{fact_id} ({category})")
             except Exception as e:
                 # One bad tag must not drop the others — and never fail commit.
-                print(f"[project-memory] hook skipped tag [{raw_tag}]: {e}", file=sys.stderr)
+                print(f"[cognigraph] hook skipped tag [{raw_tag}]: {e}", file=sys.stderr)
                 continue
     finally:
         try:

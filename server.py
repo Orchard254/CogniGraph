@@ -12,7 +12,7 @@ from memory_store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("project-memory")
+mcp = FastMCP("CogniGraph")
 # Create a function to get a store instance (not a global singleton)
 # Global flag to track if first-time setup has been done
 _first_time_setup_done = False

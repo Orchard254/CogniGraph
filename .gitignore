@@ -9,6 +9,7 @@ opencode/
 
 # Local memory database and caches (per-project state, never committed)
 .project-memory/
+.cognigraph/
 .pytest_cache/
 
 # Node

@@ -1,5 +1,5 @@
 /**
- * Shared pure helpers for the project-memory npm wrapper.
+ * Shared pure helpers for the CogniGraph npm wrapper.
  *
  * Extracted verbatim-semantics from index.js and postinstall.js so the
  * helpers can be unit-tested with node:test. Behaviour is intentionally
@@ -228,16 +228,16 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
     MEMORY_DB_PATH: dbPath,
   };
 
-  console.error(`[project-memory] Starting MCP server with database: ${dbPath}`);
-  console.error(`[project-memory] Python: ${pythonSetup.python}`);
-  console.error(`[project-memory] Server script: ${pythonSetup.serverScript}`);
+  console.error(`[cognigraph] Starting MCP server with database: ${dbPath}`);
+  console.error(`[cognigraph] Python: ${pythonSetup.python}`);
+  console.error(`[cognigraph] Server script: ${pythonSetup.serverScript}`);
 
   // Pre-spawn gate: a corrupt/incomplete install must fail here with a clear
   // message, not hang or crash-loop after spawn.
   try {
     await runCommandFn(pythonSetup.python, ['-m', 'py_compile', pythonSetup.serverScript], { stdio: 'pipe' });
   } catch (error) {
-    console.error(`[project-memory] Server script failed to compile: ${error.message}`);
+    console.error(`[cognigraph] Server script failed to compile: ${error.message}`);
     process.exit(1);
   }
 
@@ -249,7 +249,7 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
       stdio: 'inherit', // Pass through stdin/stdout/stderr for MCP communication
     });
   } catch (error) {
-    console.error('[project-memory] Failed to spawn server process:', error.message);
+    console.error('[cognigraph] Failed to spawn server process:', error.message);
     process.exit(1);
   }
 
@@ -258,18 +258,18 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
   const startTime = Date.now();
 
   serverProcess.on('error', (error) => {
-    console.error('[project-memory] Failed to start server process:', error);
+    console.error('[cognigraph] Failed to start server process:', error);
     process.exit(1);
   });
 
   serverProcess.on('exit', (code, signal) => {
     if (Date.now() - startTime < STARTUP_GRACE_MS) {
       console.error(
-        `[project-memory] Server died during startup (code ${code}, signal ${signal}). ` +
+        `[cognigraph] Server died during startup (code ${code}, signal ${signal}). ` +
         `Likely a broken Python install — rerun setup or check requirements.`
       );
     } else {
-      console.error(`[project-memory] Server exited with code ${code}, signal ${signal}`);
+      console.error(`[cognigraph] Server exited with code ${code}, signal ${signal}`);
     }
     process.exit(code || 1);
   });

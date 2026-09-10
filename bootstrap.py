@@ -22,7 +22,7 @@ from structural_extract import extract_structures
 logger = logging.getLogger(__name__)
 
 IGNORE_DIRS = {
-    ".git", "venv", ".venv", "node_modules", "__pycache__", ".project-memory",
+    ".git", "venv", ".venv", "node_modules", "__pycache__", ".project-memory", ".cognigraph",
     "dist", "build", "target", ".next", ".cache", ".idea", ".vscode",
     "site-packages", ".pytest_cache", ".mypy_cache", "coverage", ".opencode",
 }

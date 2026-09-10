@@ -1,5 +1,5 @@
 """
-project-memory: Persistent memory and knowledge graph system for AI coding agents.
+CogniGraph: Persistent memory and knowledge graph system for AI coding agents.
 """
 from memory_store import (
     MemoryStore,

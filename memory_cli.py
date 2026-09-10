@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI utility for project-memory.
+CLI utility for CogniGraph.
 Allows human developers or scripts to inspect, audit, query, export, link graph edges, verify code provenance, and consolidate project memory.
 """
 import sys
@@ -13,7 +13,7 @@ from memory_store import MemoryStore, default_db_path
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    parser = argparse.ArgumentParser(description="Project Memory CLI Utility")
+    parser = argparse.ArgumentParser(description="CogniGraph CLI Utility")
     parser.add_argument("--db", default=None, help="Path to SQLite database file")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -176,7 +176,7 @@ def main():
     try:
         if args.command == "stats":
             stats = store.stats()
-            print("=== Project Memory Statistics ===")
+            print("=== CogniGraph Statistics ===")
             print(f"Database Path    : {stats['db_path']}")
             print(f"Total Active     : {stats['total_active']}")
             print(f"Active post-genesis (live)  : {stats.get('active_post_genesis_count', stats.get('active_post_genesis', 0))}  (memory table is the live intake store by contract)")
@@ -192,7 +192,7 @@ def main():
 
         elif args.command == "audit":
             res = store.audit()
-            print("=== Project Memory Audit ===")
+            print("=== CogniGraph Audit ===")
             print(f"Total Active Checked : {res['total_active_checked']}")
             print(f"Potential Duplicates : {res['potential_duplicates_count']}")
             if res['potential_duplicates']:

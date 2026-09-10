@@ -205,7 +205,7 @@ def test_wire_invalid_agent_exits(cli, monkeypatch, tmp_path):
 def test_stats_output(cli, capsys):
     cli("stats")
     out = capsys.readouterr().out
-    assert "=== Project Memory Statistics ===" in out
+    assert "=== CogniGraph Statistics ===" in out
     assert "Total Active" in out
 
 
