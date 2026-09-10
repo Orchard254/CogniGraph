@@ -101,6 +101,16 @@ jobs:
           fi
         shell: bash
 
+      - name: Check README tool table is up to date
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && matrix.node-version == '20'
+        run: |
+          venv/bin/python scripts/gen_tool_table.py
+          if ! git diff --exit-code README.md; then
+            echo "::error::README tool table is stale — run scripts/gen_tool_table.py and commit"
+            exit 1
+          fi
+        shell: bash
+
       - name: Install Node.js dependencies
         run: npm ci
         # No node_modules to install currently, but future-proof

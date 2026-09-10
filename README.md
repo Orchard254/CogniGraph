@@ -57,7 +57,7 @@ The `MemoryStore` class is composed from focused mixins, one per architectural l
 .\venv\Scripts\python.exe memory_cli.py bootstrap --root C:\path\to\your\project --apply
 ```
 
-Setup detail: setup.ps1 creates venv/, installs requirements.txt, then runs the full suite (setup.ps1:16-29). Re-run manually with .\venv\Scripts\python.exe -m pytest -q --ignore=scratch. 14 test_*.py files are present at repo root (test_call_tool, test_env, test_env2, test_final, test_list, test_list2, test_llm_priming, test_memory_cli, test_methods, test_phase3_priming, test_server_tools, test_tools_call, test_watcher, test_wire_bootstrap); pytest --collect-only -q --ignore=scratch collected 190 tests as of 2026-09-10, contributed by test_llm_priming, test_phase3_priming, test_wire_bootstrap, test_memory_cli, test_watcher and test_server_tools (remaining test_*.py files are manual/helper scripts; scratch/ holds a live-watcher probe excluded from the suite).
+Setup detail: setup.ps1 creates venv/, installs requirements.txt, then runs the full suite (setup.ps1:16-29). Re-run manually with .\venv\Scripts\python.exe -m pytest -q --ignore=scratch. 14 test_*.py files are present at repo root (test_call_tool, test_env, test_env2, test_final, test_list, test_list2, test_llm_priming, test_memory_cli, test_methods, test_phase3_priming, test_server_tools, test_tools_call, test_watcher, test_wire_bootstrap); pytest --collect-only -q --ignore=scratch collected 205 tests as of 2026-09-10, contributed by test_llm_priming, test_phase3_priming, test_wire_bootstrap, test_memory_cli, test_watcher and test_server_tools (remaining test_*.py files are manual/helper scripts; scratch/ holds a live-watcher probe excluded from the suite).
 
 Restart your coding agent. It now starts every session with full project context.
 
@@ -118,42 +118,53 @@ At the start of every session:
 
 ## 3. Exposed MCP Tools
 
+<!-- tool-table:start auto-generated -->
+The server registers 41 tools.
+
 | Tool | Parameters | Description |
 |---|---|---|
-| `memory_write` | `category`, `content`, `rationale?`, `confidence?`, `file_path?`, `tags?`, `importance?` | Record a new fact with source provenance; tags are auto-derived from category, file anchor, and content when omitted |
-| `memory_write_batch` | `facts: list` | Record multiple facts atomically in one transaction |
-| `memory_query` | `text`, `category?`, `tag?`, `limit?` | FTS5 BM25 keyword search over active facts |
-| `memory_query_hybrid` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `intent?`, `agent_type?` | Hybrid RRF lexical + vector search with graph expansion, intent-aware category boosting, per-agent lane weights, file-anchor boosting, and usage-pattern learning (every retrieval is logged and boosts frequently-needed facts on similar future queries; cold start seeds boosts from `access_count` until usage history accrues) |
-| `memory_get_context` | `query`, `limit?`, `intent?` | High-precision Markdown context briefing for LLM priming; auto-detects task intent (fix/implement/refactor/...) to prioritize constraints vs decisions |
-| `memory_get_context_optimized` | `query`, `agent_type?`, `limit?`, `intent?` | Agent-specific context formatting with per-agent token budgets and priority orders (cursor, claude, opencode, zed, default) |
-| `memory_get_context_for_agent` | `query`, `agent_type?`, `max_tokens?` | Smart context generation that auto-selects the best format for the target agent |
-| `memory_get_file_context` | `file_path` | Pre-edit file impact briefing listing components, constraints, linked files, code structure (functions/classes/imports), and call-graph edges; unmapped files are flagged, and flagged/unverified facts are stamped inline |
-| `memory_check_safety` | `file_paths: list` | Multi-file refactor risk matrix across a batch of target files |
-| `memory_get_dependency_map` | `file_paths: list` | Cross-file dependency map showing internal edges, external dependents, shared constraints, and high-risk files |
-| `memory_usage_stats` | `top_facts?` | Usage-pattern insights: total retrievals, intent distribution, most-retrieved facts, recent queries |
-| `memory_suggest_context` | `current_fact_ids: list`, `limit?` | Proactive context suggestions from co-retrieval patterns: predicts what facts you will need next based on what was retrieved together in the past |
-| `memory_who_calls` | `symbol` | One-hop code graph query: definitions, all callers, and importing files for a symbol (bare name or Class.method), from tree-sitter AST ground truth |
-| `memory_project_shape` | — | Project orientation: indexed file inventory, definition counts, and code-graph size |
-| `memory_flag_fact` | `fact_id`, `note?`, `flag_type?` | Correction hook: flag a fact that misled you so future briefings stamp the warning inline |
-| `memory_supersede` | `old_id`, `new_content`, `expected_version?` | Atomically replace an outdated fact with OCC version check |
-| `memory_deprecate` | `id`, `reason?` | Mark a fact as obsolete without replacement |
-| `memory_link_facts` | `source_id`, `target_id`, `relation` | Add a directed graph edge (`depends_on`, `implements`, etc.) |
-| `memory_unlink_facts` | `source_id`, `target_id`, `relation` | Remove a directed graph edge |
-| `memory_get_graph` | `root_id`, `max_depth?` | Traverse knowledge graph starting from root_id via SQLite CTEs |
-| `memory_acquire_lock` | `resource`, `locked_by`, `ttl_seconds?` | Acquire advisory lock for multi-agent swarm operations |
-| `memory_release_lock` | `resource`, `locked_by` | Release advisory lock |
-| `memory_verify_provenance`| `fact_id`, `project_root?` | SHA256 code hash check with line-shift self-healing |
-| `memory_consolidate` | `session_id?`, `category?` | Compress itemized micro-state facts into milestone summaries |
-| `memory_audit` | `None` | Scan active memory for near-duplicates or conflicting facts |
-| `memory_export_markdown` | `category?` | Export full active memory snapshot as structured Markdown |
-| `memory_export_ui` | `out_path?` | Generate standalone interactive 2D HTML Knowledge Graph file |
-| `memory_optimize_db` | `None` | Run SQLite maintenance (`PRAGMA optimize`, `VACUUM`) |
-| `memory_stats` | `None` | Active/deprecated counts, edges, and database location |
-| `memory_prune` | `days_inactive?`, `dry_run?` | Deprecate stale low-value facts not accessed recently (dry-run by default) |
-| `memory_prepare_task` | `intent`, `file_paths?`, `limit?` | Pre-coding flight briefing: context, file impact, risks, latest baseline (single newest checkpoint, capped — file briefings carry knowledge, not checkpoint history) |
-| `memory_checkpoint_task` | `summary`, `components?`, `decisions?`, `test_baseline?`, `failures?` | Post-coding checkpoint: writes learned facts + verified test baseline; `failures` stores failed approaches as negative-knowledge constraints |
-| `memory_scan_provenance` | `project_root?`, `auto_deprecate?` | Bulk code-drift health check across all anchored facts |
-| `memory_backfill_embeddings` | None | Generate missing semantic embeddings for historical facts |
+| `memory_write` | `category`, `content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `importance?`, `line_start?`, `line_end?`, `code_hash?`, `git_commit_sha?` | Record a new fact in project memory. |
+| `memory_write_batch` | `facts` | Record multiple new facts atomically in a single transaction. |
+| `memory_query` | `text`, `category?`, `tag?`, `limit?`, `session_id?` | Search project memory by keyword/tag (FTS5 lexical). |
+| `memory_query_hybrid` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?` | Hybrid RRF search combining lexical BM25 matching and term vector similarity, with intent-aware ranking and usage-pattern learning. Automatically includes graph-linked dependency facts when expand_graph=True. repo_id: optional - if omitted, defaults to the store's own repo (first repo) for episodic filtering. intent: optional task intent ('fix', 'implement', 'refactor', etc.) that boosts category-relevant facts in ranking; auto-detected from text if omitted. agent_type: optional ('cursor', 'claude', 'opencode', 'zed', 'default') to apply agent-specific retrieval-lane weights. Every retrieval is logged for usage-pattern learning. |
+| `memory_get_context` | `query`, `limit?`, `repo_id?`, `max_chars?`, `intent?` | High-precision context retriever with intent-based expansion and LLM optimization. |
+| `memory_get_context_optimized` | `query`, `agent_type?`, `limit?`, `max_chars?`, `intent?` | Agent-specific context generation with model-optimized formatting. |
+| `memory_get_context_for_agent` | `query`, `agent_type?`, `max_tokens?` | Smart context generation that automatically selects the best format for the agent. |
+| `memory_get_file_context` | `file_path` | Get file context before editing. |
+| `memory_check_safety` | `file_paths` | Multi-File Refactor Safety Matrix. Call this BEFORE modifying a batch of multiple files! Analyzes cross-file dependencies, shared constraints, and breaking change risks across all target files. |
+| `memory_get_dependency_map` | `file_paths` | Cross-File Dependency Map for LLM priming. |
+| `memory_usage_stats` | `top_facts?` | USAGE-PATTERN INSIGHTS - Summarizes how this project's memory is being used. |
+| `memory_suggest_context` | `current_fact_ids`, `limit?` | PROACTIVE CONTEXT SUGGESTIONS - Predicts what context you may need next. |
+| `memory_optimize_db` | — | Run SQLite database maintenance: PRAGMA optimize, VACUUM, and check integrity. |
+| `memory_auto_maintenance` | `project_root?` | AUTOMATIC MAINTENANCE - self-heals 99%: incremental bootstrap (20) + scan auto_heal (importance=1) + backfill + optimize. |
+| `memory_export_ui` | `out_path?` | Generate an interactive HTML Knowledge Graph visualizer file for browsing memory. |
+| `memory_supersede` | `old_id`, `new_content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `expected_version?` | Replace an outdated fact with a corrected or updated one. |
+| `memory_deprecate` | `id`, `reason?` | Mark a fact as no longer valid without replacing it. |
+| `memory_get_state` | `category?`, `session_id?` | Get full snapshot of active project memory. |
+| `memory_link_facts` | `source_id`, `target_id`, `relation` | Create a directed graph edge between two facts. |
+| `memory_unlink_facts` | `source_id`, `target_id`, `relation` | Remove a directed graph edge between two facts. |
+| `memory_get_graph` | `root_id`, `max_depth?` | Traverse relationship edges starting from root_id up to max_depth. |
+| `memory_acquire_lock` | `resource`, `locked_by`, `ttl_seconds?` | Acquire an advisory lock on a named resource for multi-turn multi-agent operations. |
+| `memory_release_lock` | `resource`, `locked_by` | Release an advisory lock on a named resource. |
+| `memory_verify_provenance` | `fact_id`, `project_root?` | Verify code snippet SHA256 hash at file_path. Self-heals line range shifts |
+| `memory_consolidate` | `session_id?`, `category?`, `allow_all?` | Compress itemized micro-state facts into milestone summary facts. |
+| `memory_prune` | `days_inactive?`, `dry_run?` | PRUNE STALE FACTS - Deprecate low-value state/other facts not accessed in |
+| `memory_audit` | — | Scan active memory for potential near-duplicates or conflicting facts. |
+| `memory_export_markdown` | `category?` | Export active memory as formatted markdown for LLM context prompts. |
+| `memory_stats` | — | Overview of memory database statistics, categories, edges, and location. |
+| `memory_prepare_task` | `intent`, `file_paths?`, `limit?` | PRE-CODING FLIGHT BRIEFING - Call this at the START of every coding task. |
+| `memory_checkpoint_task` | `summary`, `components?`, `decisions?`, `test_baseline?`, `failures?` | POST-CODING CHECKPOINT - Call this at the END of every coding task. |
+| `memory_scan_provenance` | `project_root?`, `auto_deprecate?`, `auto_heal?` | BULK PROVENANCE HEALTH CHECK - Scan all active facts for code drift. |
+| `memory_backfill_embeddings` | — | SEMANTIC INDEX BACKFILL - Generate embeddings for all existing facts that lack them. |
+| `memory_promote_branch` | `source_branch_id`, `convergence_policy?` | Promote an experimental branch's episodic memories into its canonical root (KEEP_BOTH). |
+| `memory_create_branch` | `repo_id?` | Create a new experimental branch under the canonical root. |
+| `memory_discard_branch` | `source_branch_id`, `reason?` | Discard an experimental branch (terminal alternative to promotion). |
+| `memory_list_branches` | `repo_id?`, `status?` | List branches for a repo (read-only). |
+| `memory_bootstrap_project` | `project_root?`, `dry_run?`, `full?`, `max_facts?`, `install_hook?`, `drop_protocol?` | PROJECT ONBOARDING - Scan a repository and ingest its structural + documentary |
+| `memory_who_calls` | `symbol` | ONE-HOP CODE GRAPH QUERY - ask this mid-reasoning instead of re-reading files. |
+| `memory_project_shape` | — | PROJECT ORIENTATION - indexed file inventory and code-graph size. |
+| `memory_flag_fact` | `fact_id`, `note?`, `flag_type?` | CORRECTION HOOK - fire this the moment a served fact turns out wrong. |
+<!-- tool-table:end -->
 
 ---
 
