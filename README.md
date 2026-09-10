@@ -10,7 +10,7 @@ For the full agent-orientation deep dive — tech stack, annotated file tree, co
 
 ## Key Capabilities
 
-1. **Hybrid RRF Search Engine**: Combines SQLite FTS5 BM25 keyword matching with term-vector similarity via Reciprocal Rank Fusion ($RRF = \frac{1}{60 + rank_{bm25}} + \frac{1}{60 + rank_{vec}}$).
+1. **Hybrid RRF Search Engine**: Combines SQLite FTS5 BM25 keyword matching with term-vector similarity via Reciprocal Rank Fusion ($RRF = \frac{1}{5 + rank_{bm25}} + \frac{1}{5 + rank_{vec}}$).
 2. **Graph-Relational Knowledge Engine (`memory_edges`)**: Directed graph edges (`depends_on`, `implements`, `conflicts_with`, `relates_to`) traversed via SQLite Recursive Common Table Expressions (CTEs).
 3. **Automatic Context Expansion (`memory_get_context`)**: Searching for a topic automatically expands connected graph relationship trees into a single context briefing.
 4. **File Impact Analysis (`memory_get_file_context`)**: Pre-edit briefing for any source file listing its stored components, decisions, constraints, and all linked dependent files.
@@ -180,6 +180,9 @@ python memory_cli.py prune --days 90
 
 # Pre-coding flight briefing from the shell
 python memory_cli.py prepare-task "implement caching layer" --files cache.py
+
+# Timestamped full-DB snapshot (WAL-safe, integrity-checked; prunes beyond --keep)
+python memory_cli.py backup --tag manual --keep 8
 ```
 
 ---
@@ -192,6 +195,7 @@ python memory_cli.py prepare-task "implement caching layer" --files cache.py
 - Concurrency (memory_store.py:48,1095-1123; server.py:25-40): SQLite PRAGMA journal_mode=WAL + busy_timeout=5000; get_store() returns a per-thread MemoryStore (one connection per thread on the same WAL DB); each MCP tool call gets a fresh store that is always closed (no leaked fd/WAL handles).
 - Git probes (bootstrap.py:309-327; wire.py:26-43; hooks/git_hook.py:29-30): every git/python child probe runs with stdin=subprocess.DEVNULL and a timeout (15 s) so an inherited stdio pipe under the MCP server cannot stall indefinitely.
 - Input clamps (server.py:42-71; mirrored in memory_cli.py:218-234): limit 1..100 (context/prepare-task paths cap at 50, graph depth at 10, bootstrap max_facts at 1000), lock ttl_seconds 1..86400 (default 60), fact importance 1..5 (default 3); non-numeric input falls back to the default instead of raising. Secrets are refused (pm_common.py:104-117; memory_store.py:474,682).
+- Timestamped DB backups (pm_backup.py): weekly auto-maintenance takes a WAL-safe snapshot via the SQLite backup API before any mutation, and corpus_hygiene --apply / genesis_migrate snapshot first; backups named memory.db.backup-<tag>-<ts>.bak are integrity-checked and pruned to the newest 8 (keep configurable), historical ad-hoc *.bak files untouched (test_backup.py).
 
 ## 5. Automated Git Commit Hook Integration
 

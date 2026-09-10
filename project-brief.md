@@ -230,7 +230,7 @@ The context-building mechanism operates across five concrete stages:
      5. **Episodic Token Jaccard:** Set-overlap similarity over episodic records.
      6. **Episodic Vector Cosine:** Vector similarity over episodic embeddings.
      7. **Structural AST Lane:** Direct symbol and identifier lookup in `structural_nodes`.
-   - Fuses lane ranks using Reciprocal Rank Fusion ($k=60$).
+   - Fuses lane ranks using Reciprocal Rank Fusion ($k=5$).
    - Multiplies scores by importance weights (1..5) and recency decay.
    - Applies **intent-aware boosting** ([pm_search.py:465-495](file:///C:/PROJECT/project-memory/pm_search.py#L465-L495)): e.g., an intent containing "fix" boosts `constraint` facts by 1.8x, whereas "implement" boosts `component` and `decision` facts.
    - Applies **file-anchor boosting**: Facts anchored to a file mentioned in the query receive a 1.6x multiplier.

@@ -128,6 +128,12 @@ def _auto_maintenance():
         from bootstrap import bootstrap_project
         from pathlib import Path
         root = Path(store.db_path).parent.parent
+        # 0. Timestamped full-DB snapshot before any maintenance mutation
+        try:
+            from pm_backup import timestamped_backup
+            timestamped_backup(store.db_path, tag="routine")
+        except Exception as e:
+            logger.debug("auto backup failed: %r", e)
         # 1. Incremental bootstrap (top 20, no hook/doc drop - just context)
         try:
             bootstrap_project(root, store=store, dry_run=False, full=False, max_facts=20, install_hook=False, drop_protocol=False)

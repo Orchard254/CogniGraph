@@ -58,6 +58,10 @@ def genesis_migrate(db_path: str | Path, inject_failure_after: int | None = None
                           to verify atomic rollback (no partial rows, no partial deprecation).
 
     Returns dict with counts and new_ids mapping.
+
+    A timestamped full-DB backup (pm_backup, pruned to the newest 8) is taken
+    before the migration begins; a backup failure logs a warning but never
+    blocks the one-time migration itself.
     """
     db_path_str = str(db_path)
     # Use direct sqlite3 connection for explicit BEGIN IMMEDIATE control (not RevisionTransaction)
@@ -92,6 +96,15 @@ def genesis_migrate(db_path: str | Path, inject_failure_after: int | None = None
         migrated_mem = conn.execute("SELECT count(*) FROM memory WHERE deprecated_reason='migrated to episodic via genesis'").fetchone()[0]
         if total_mem > 0 and migrated_mem == total_mem:
             raise ValueError("genesis already executed: all memory rows already deprecated as migrated")
+
+        # Pre-migration snapshot, after the already-executed guards so a
+        # re-run (or server startup) never spawns a fresh .bak. Best-effort:
+        # a backup failure warns but never blocks the one-time migration.
+        try:
+            from pm_backup import timestamped_backup
+            timestamped_backup(db_path_str, tag="pre-genesis-migration")
+        except Exception as e:
+            logger.warning("pre-genesis backup failed: %r", e)
 
         # Get repo and root for single-repo (first repo)
         repo_row = conn.execute("SELECT repo_id, current_revision FROM repositories ORDER BY repo_id LIMIT 1").fetchone()
