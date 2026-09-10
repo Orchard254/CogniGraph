@@ -1,10 +1,10 @@
-# Master Engineering Blueprint: Project-Memory
+# Master Engineering Blueprint: CogniGraph
 
 **Document Status:** FINAL PHASE 0 ARCHITECTURAL SPECIFICATION  
 **Version:** 2.3.0  
 **Date:** August 23, 2026  
 **Status:** IMPLEMENTATION-READY — PHASE 0 ARCHITECTURE FROZEN  
-**Primary Objective:** Define the canonical memory substrate, migration path, one-level branch model, temporal/revision invariants, and implementation gates for `project-memory`.
+**Primary Objective:** Define the canonical memory substrate, migration path, one-level branch model, temporal/revision invariants, and implementation gates for `CogniGraph`.
 
 **Changelog from v2.2.0 → v2.3.0:**
 - Reconciled against the live production system: the existing, tested, and
@@ -25,7 +25,7 @@
 
 # 1. Executive Summary
 
-`project-memory` is not merely a RAG database. It is a **Memory Controller for AI coding agents**.
+`CogniGraph` is not merely a RAG database. It is a **Memory Controller for AI coding agents**.
 
 The central problem is **context thrashing**: agents consume their context window with large amounts of raw filesystem state, causing attention dilution, forgotten constraints, state amnesia, and loss of prior rationale.
 
@@ -1297,7 +1297,7 @@ The implementation must include tests for:
 
 # 50. Final Architectural Position
 
-`project-memory` is:
+`CogniGraph` is:
 
 > **A temporal, provenance-aware, branch-aware memory substrate for AI coding agents.**
 

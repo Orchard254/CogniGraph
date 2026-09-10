@@ -1,10 +1,10 @@
-# Project Brief: project-memory
+# Project Brief: CogniGraph
 
 ---
 
 ## 1. ONE-PARAGRAPH SUMMARY
 
-**project-memory** is an enterprise-grade, persistent, vendor-neutral memory system and Model Context Protocol (MCP) server designed for AI coding agents (including Google Antigravity, Cursor, Windsurf, OpenCode, Claude Desktop, Zed, Roo Code, and Cline). Its primary goal is to eliminate agent "context thrashing" and multi-session amnesia by maintaining an authoritative, cross-session knowledge base of project components, architectural decisions, operational constraints, abstract syntax tree (AST) call/import graphs, code-anchored provenance hashes, and verified test checkpoints. In terms of maturity, project-memory is a **working, production-ready Phase 0/Phase 3 substrate** with 205 passing Python unit tests, 26 passing Node.js tests, an active multi-platform CI matrix, robust concurrency controls (SQLite WAL mode + per-call connections), self-healing AST indexing via Tree-sitter, and zero-config multi-IDE automated wiring.
+**CogniGraph** is an enterprise-grade, persistent, vendor-neutral memory system and Model Context Protocol (MCP) server designed for AI coding agents (including Google Antigravity, Cursor, Windsurf, OpenCode, Claude Desktop, Zed, Roo Code, and Cline). Its primary goal is to eliminate agent "context thrashing" and multi-session amnesia by maintaining an authoritative, cross-session knowledge base of project components, architectural decisions, operational constraints, abstract syntax tree (AST) call/import graphs, code-anchored provenance hashes, and verified test checkpoints. In terms of maturity, CogniGraph is a **working, production-ready Phase 0/Phase 3 substrate** with 205 passing Python unit tests, 26 passing Node.js tests, an active multi-platform CI matrix, robust concurrency controls (SQLite WAL mode + per-call connections), self-healing AST indexing via Tree-sitter, and zero-config multi-IDE automated wiring.
 
 ---
 
@@ -28,8 +28,8 @@
   - **File System Observer:** `watchdog>=3.0.0` (optional extra in [pyproject.toml:39](file:///C:/PROJECT/project-memory/pyproject.toml#L39); fallback is a non-blocking 30-second polling thread in [watcher.py:7-8,19-27](file:///C:/PROJECT/project-memory/watcher.py#L7-L27)).
 
 - **Package Managers & Build Tools:**
-  - Python: `setuptools>=61.0` and `wheel` build backend ([pyproject.toml:1-3](file:///C:/PROJECT/project-memory/pyproject.toml#L1-L3)), entry point console script `memory_cli = "memory_cli:main"` ([pyproject.toml:41-42](file:///C:/PROJECT/project-memory/pyproject.toml#L41-L42)).
-  - Node.js: `npm` package `@project-memory/mcp-server@1.0.0` ([package.json:2-3](file:///C:/PROJECT/project-memory/package.json#L2-L3)) providing binary `project-memory-mcp` ([package.json:7](file:///C:/PROJECT/project-memory/package.json#L7)).
+  - Python: `setuptools>=61.0` and `wheel` build backend ([pyproject.toml:1-3](file:///C:/PROJECT/project-memory/pyproject.toml#L1-L3)), entry point console script `cognigraph = "memory_cli:main"` (legacy alias `memory_cli` kept; [pyproject.toml:41-42](file:///C:/PROJECT/project-memory/pyproject.toml#L41-L42)).
+  - Node.js: `npm` package `cognigraph@1.0.0` ([package.json:2-3](file:///C:/PROJECT/project-memory/package.json#L2-L3)) providing binary `cognigraph` ([package.json:7](file:///C:/PROJECT/project-memory/package.json#L7)).
 
 - **Runtime Requirements:**
   - Standard OS (Windows, Linux, macOS).
@@ -37,7 +37,7 @@
   - Standard C/C++ runtime compatible with pre-built wheels of `tree-sitter` and `fastembed` ONNX Runtime dependencies.
 
 - **Unusual Setup Characteristics:**
-  - **Dual Packaging & Dual Distribution:** The system can be consumed either as a native Python package or zero-config via `npx -y @project-memory/mcp-server`. When invoked through Node.js, [index.js](file:///C:/PROJECT/project-memory/index.js) and [lib.js](file:///C:/PROJECT/project-memory/lib.js) automatically inspect the host system for Python `>=3.12`, establish an isolated `.venv` inside the package directory, execute pip install on missing requirements, perform a `py_compile` pre-spawn sanity check, and spawn `server.py` over stdio with inherited handles ([index.js:170-285](file:///C:/PROJECT/project-memory/index.js#L170-L285)).
+  - **Dual Packaging & Dual Distribution:** The system can be consumed either as a native Python package or zero-config via `npx -y cognigraph`. When invoked through Node.js, [index.js](file:///C:/PROJECT/project-memory/index.js) and [lib.js](file:///C:/PROJECT/project-memory/lib.js) automatically inspect the host system for Python `>=3.12`, establish an isolated `.venv` inside the package directory, execute pip install on missing requirements, perform a `py_compile` pre-spawn sanity check, and spawn `server.py` over stdio with inherited handles ([index.js:170-285](file:///C:/PROJECT/project-memory/index.js#L170-L285)).
   - **Tree-sitter 0.26.0 Workaround:** Tree-sitter 0.26.0 eliminated `Parser.set_language()` and deprecated `.captures(node)`. To avoid breaking changes across minor releases, [structural_extract.py:8-13](file:///C:/PROJECT/project-memory/structural_extract.py#L8-L13) uses `Parser(Language(pkg.language()))` combined with explicit recursive descent AST traversal instead of query pattern matching.
   - **Dual-Store Architecture (Two-Table Intake Contract):** Live writes strictly target the `memory` table, while historical migrations and branch operations reside in the `episodic_memories` table; retrieval fuses both stores across a 7-lane hybrid Reciprocal Rank Fusion (RRF) pipeline ([pm_search.py:513-528](file:///C:/PROJECT/project-memory/pm_search.py#L513-L528)).
 
@@ -78,7 +78,7 @@ C:\PROJECT\project-memory
 ├── memory_cli.py                      # Comprehensive CLI utility (22 subcommands: stats, query, wire, bootstrap, etc.)
 ├── MEMORY_SNAPSHOT.md                 # Archived memory export from earlier development milestone
 ├── memory_store.py                    # Storage engine facade: DB initialization, CRUD, OCC, locks, and mixin aggregation
-├── package.json                       # npm manifest for @project-memory/mcp-server
+├── package.json                       # npm manifest for cognigraph
 ├── phase0_schema.sql                  # Canonical schema DDL: memory, memory_fts, memory_edges, memory_locks
 ├── phase1_episodic.sql                # Episodic schema DDL: revisions, branches, episodic_memories, triggers
 ├── phase1_episodic_embeddings.sql     # SQLite vector tables for episodic embedding storage
@@ -89,7 +89,7 @@ C:\PROJECT\project-memory
 ├── pm_search.py                       # SearchMixin: 7-lane hybrid RRF engine, intent detection, usage-pattern learning
 ├── pm_structural.py                   # StructuralMixin: AST symbol indexing, who_calls graph queries, project_shape
 ├── postinstall.js                     # npm postinstall hook attempting best-effort venv setup and dependency installation
-├── project-memory_master_engineering_blueprint_v2_3_0.md # Core architectural specification (Phase 0 frozen architecture)
+├── cognigraph_master_engineering_blueprint_v2_3_0.md # Core architectural specification (Phase 0 frozen architecture)
 ├── pyproject.toml                     # PEP 518/621 project configuration, dependencies, and entry-points
 ├── pytest.ini                         # Pytest configuration registering custom markers (stress_heavy)
 ├── README.md                          # Primary human-readable documentation and architectural overview
@@ -121,7 +121,7 @@ C:\PROJECT\project-memory
                                            v
 +---------------------------------------------------------------------------------------+
 |                                      server.py                                        |
-|                        FastMCP Server ("project-memory", 41 tools)                    |
+|                        FastMCP Server ("CogniGraph", 41 tools)                     |
 +---------------------------------------------------------------------------------------+
         |                                  |                                 |
         | (per-call context manager)       | (background thread)             | (agent wiring)
@@ -150,7 +150,7 @@ C:\PROJECT\project-memory
                                    v
 +---------------------------------------------------------------------------------------+
 |                                SQLite 3 Database                                      |
-|                              (.project-memory/memory.db)                              |
+|                              (.cognigraph/memory.db)                              |
 |  - memory (live intake, OCC, provenance)     - memory_fts (FTS5 BM25 index)           |
 |  - episodic_memories (historical/branches)   - episodic_fts (Episodic FTS5 index)     |
 |  - memory_edges (knowledge graph CTEs)       - vec_memory / sqlite-vec (dense vectors)|
@@ -161,7 +161,7 @@ C:\PROJECT\project-memory
 ### Execution Entry Points
 
 1. **MCP Server Daemon:** `server.py` ([server.py:1015-1018](file:///C:/PROJECT/project-memory/server.py#L1015-L1018)). Invoked by the agent host. Starts background services (file watcher in [server.py:160-178](file:///C:/PROJECT/project-memory/server.py#L160-L178)) and runs `mcp.run()` over standard I/O.
-2. **NPM Distribution Wrapper:** `index.js` ([index.js:275-285](file:///C:/PROJECT/project-memory/index.js#L275-L285)). Invoked when configured as `npx -y @project-memory/mcp-server`. Resolves or creates Python virtual environment, executes preflight compilation, and spawns `server.py`.
+2. **NPM Distribution Wrapper:** `index.js` ([index.js:275-285](file:///C:/PROJECT/project-memory/index.js#L275-L285)). Invoked when configured as `npx -y cognigraph`. Resolves or creates Python virtual environment, executes preflight compilation, and spawns `server.py`.
 3. **CLI Management Interface:** `memory_cli.py:main` ([memory_cli.py:13-18](file:///C:/PROJECT/project-memory/memory_cli.py#L13-L18)). Direct terminal access for manual querying, database optimization, bulk provenance scanning, agent wiring, and project onboarding.
 4. **Automated Git Hook:** `hooks/git_hook.py:main` ([hooks/git_hook.py:55-80](file:///C:/PROJECT/project-memory/hooks/git_hook.py#L55-L80)). Triggered post-commit by git to ingest bracket-tagged commit summaries.
 5. **Evaluation & Benchmark Scripts:**
@@ -175,7 +175,7 @@ C:\PROJECT\project-memory
 ### SDK, Version, & Transport
 
 - **SDK:** Official Python Model Context Protocol SDK `mcp==1.9.4` ([pyproject.toml:29](file:///C:/PROJECT/project-memory/pyproject.toml#L29)).
-- **Server Implementation:** FastMCP instance `mcp = FastMCP("project-memory")` in [server.py:15](file:///C:/PROJECT/project-memory/server.py#L15).
+- **Server Implementation:** FastMCP instance `mcp = FastMCP("CogniGraph")` in [server.py:15](file:///C:/PROJECT/project-memory/server.py#L15).
 - **Transport:** Standard I/O (`stdio`) via `mcp.run()` in [server.py:1017](file:///C:/PROJECT/project-memory/server.py#L1017). Stdio framing integrity is guarded by configuring Python logging to `stderr` ([server.py:6, 13](file:///C:/PROJECT/project-memory/server.py#L6-L13)) and avoiding raw `print()` statements in server operations.
 - **Resource / Prompt Exposure:**
   - **Tools:** Exactly **41 tools** are exposed via `@mcp.tool()`.
@@ -233,7 +233,7 @@ C:\PROJECT\project-memory
 The context-building mechanism operates across five concrete stages:
 
 1. **Static Ingestion & Heuristic Parsing ([bootstrap.py](file:///C:/PROJECT/project-memory/bootstrap.py)):**
-   - **Directory Tree Walk ([bootstrap.py:55-70](file:///C:/PROJECT/project-memory/bootstrap.py#L55-L70)):** `_iter_files` traverses the project root while strictly pruning noise directories (`.git`, `node_modules`, `venv`, `dist`, `.project-memory`, etc.) and non-code binaries. Computes file counts and line metrics per directory.
+   - **Directory Tree Walk ([bootstrap.py:55-70](file:///C:/PROJECT/project-memory/bootstrap.py#L55-L70)):** `_iter_files` traverses the project root while strictly pruning noise directories (`.git`, `node_modules`, `venv`, `dist`, `.cognigraph`, legacy `.project-memory`, etc.) and non-code binaries. Computes file counts and line metrics per directory.
    - **Dependency Manifest Parsing ([bootstrap.py:226-269](file:///C:/PROJECT/project-memory/bootstrap.py#L226-L269)):** `parse_manifests` parses `pyproject.toml`, `package.json`, `requirements.txt`, and `Cargo.toml`, extracting pinned dependencies and runtime scripts.
    - **Documentation Chunking ([bootstrap.py:272-306](file:///C:/PROJECT/project-memory/bootstrap.py#L272-L306)):** `extract_docs` reads markdown files (`README.md`, `AGENTS.md`, `CONTRIBUTING.md`), splitting them along markdown heading boundaries (`#`, `##`, `###`) into discrete facts capped at 900 characters, tagging them by topic (`decision`, `constraint`, `component`).
    - **Git History Ingestion ([bootstrap.py:309-338](file:///C:/PROJECT/project-memory/bootstrap.py#L309-L338)):** `scan_git` extracts current branch and recent commit messages, detecting bracket tags like `[decision]` or `[constraint]` to ingest structured commit rationale.
@@ -303,7 +303,7 @@ The context-building mechanism operates across five concrete stages:
   ```
 - **Run via NPM distribution wrapper:**
   ```bash
-  npx -y @project-memory/mcp-server
+  npx -y cognigraph
   # or locally:
   node index.js
   ```
@@ -399,7 +399,7 @@ The context-building mechanism operates across five concrete stages:
 
 ### Testing Approach
 
-- **Hermetic Isolation:** Every test suite provisions temporary databases inside pytest's `tmp_path` fixture. Tests never mutate the project's own `.project-memory/memory.db`.
+- **Hermetic Isolation:** Every test suite provisions temporary databases inside pytest's `tmp_path` fixture. Tests never mutate the project's own `.cognigraph/memory.db`.
 - **Subprocess Deduplication:** [conftest.py:26-51](file:///C:/PROJECT/project-memory/conftest.py#L26-L51) registers an autouse fixture monkeypatching `MemoryStore._current_git_commit` to cache results per repository root, reducing test suite execution time by over 50%.
 - **Lightweight Native Node Tests:** The JavaScript test suite utilizes Node.js's built-in `node:test` runner and assertions ([test-js/lib.test.js](file:///C:/PROJECT/project-memory/test-js/lib.test.js)) without third-party frameworks like Jest or Mocha.
 
@@ -462,7 +462,7 @@ Every documentation file present in the repository, its purpose, and any noted c
      - Line 60 states that `pytest` collects 190 tests; the actual test count is now **205 tests** following the addition of multi-IDE wire and CLI tests.
      - Section 3 lists ~34 MCP tools in its reference table; the server code actually exposes **41 tools** (missing tools include `memory_promote_branch`, `memory_create_branch`, `memory_discard_branch`, `memory_list_branches`, `memory_bootstrap_project`, `memory_get_state`, and `memory_auto_maintenance`).
 2. **[README_NPM.md](file:///C:/PROJECT/project-memory/README_NPM.md):**
-   - *Description:* npm package documentation explaining zero-config `@project-memory/mcp-server` setup, automatic environment provisioning, and IDE snippets.
+   - *Description:* npm package documentation explaining zero-config `cognigraph` setup, automatic environment provisioning, and IDE snippets.
    - *Status:* Accurate and aligned with `index.js` and `package.json`.
 3. **[AGENTS.md](file:///C:/PROJECT/project-memory/AGENTS.md):**
    - *Description:* Mandatory operational protocol for AI coding agents detailing self-prompting rules, start-of-session checks (`memory_stats`, `memory_prepare_task`), in-flight memory recording, and end-of-session checkpoints.
@@ -470,12 +470,12 @@ Every documentation file present in the repository, its purpose, and any noted c
 4. **[INSTALL.md](file:///C:/PROJECT/project-memory/INSTALL.md):**
    - *Description:* Concise installation guide for human operators and IDE configurations across Windsurf, Cursor, Claude, Trae, and Zed.
    - *Status:* Accurate; correctly documents the Zed `context_servers` top-level environment requirement.
-5. **[project-memory_master_engineering_blueprint_v2_3_0.md](file:///C:/PROJECT/project-memory/project-memory_master_engineering_blueprint_v2_3_0.md):**
+5. **[cognigraph_master_engineering_blueprint_v2_3_0.md](file:///C:/PROJECT/project-memory/cognigraph_master_engineering_blueprint_v2_3_0.md):**
    - *Description:* Definitive Phase 0 architectural specification defining the canonical substrate, two-table model, revision invariants, and Phase IV deferrals.
    - *Status:* Accurate architectural baseline reconciling live Tree-sitter implementation with episodic storage.
 6. **[MEMORY_SNAPSHOT.md](file:///C:/PROJECT/project-memory/MEMORY_SNAPSHOT.md):**
    - *Description:* Static Markdown export of 258 memory entries generated on 2026-08-17.
-   - *Outdated / Historical Notice:* Contains legacy snapshot data from an earlier test harness / prior project (`evaluate_web_trust.py`, `backend/tools/web_confidence.py`). Does not represent the current `project-memory` repository state, serving instead as an example of `memory_export_markdown` output.
+   - *Outdated / Historical Notice:* Contains legacy snapshot data from an earlier test harness / prior project (`evaluate_web_trust.py`, `backend/tools/web_confidence.py`). Does not represent the current `CogniGraph` repository state, serving instead as an example of `memory_export_markdown` output.
 7. **[scripts/dev/PHASE_B_RECON_REPORT.md](file:///C:/PROJECT/project-memory/scripts/dev/PHASE_B_RECON_REPORT.md):**
    - *Description:* Historical development reconnaissance report documenting `bootstrap.py` and `wire.py` prior to the Phase B Tree-sitter integration.
    - *Outdated Notice:* Describes `scan_file_tree()` as lacking an AST extraction loop, which has since been fully implemented via `structural_extract.py`.
