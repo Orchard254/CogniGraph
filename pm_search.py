@@ -511,7 +511,7 @@ class SearchMixin:
           Episodic Lane 3b — Semantic cosine over episodic_embeddings/vec_episodic_memory (root ACTIVE)
           Lane 4 — Structural node name matching (memory-only, unchanged)
 
-        All lanes are fused via RRF (k=60) with importance + recency weighting,
+        All lanes are fused via RRF (k=5) with importance + recency weighting,
         but RRF is now keyed by (source, id) tuples to avoid the integer ID-space
         collision between memory.id and episodic_memories.memory_id (proven to collide
         at 500). Each result is tagged with "source": "memory" or "episodic".
@@ -652,7 +652,9 @@ class SearchMixin:
 
         # --- RRF Fusion with recency decay + importance weighting — now keyed by (source, id) ---
         rrf: Dict[tuple, float] = {}
-        k = 60
+        # k=5 chosen via holdout-validated 52-pair golden sweep (Phase 5);
+        # k=60 measured near-worst (recall@5 0.583 tuning / 0.625 holdout).
+        k = 5
 
         # Fetch recency/access info for memory candidates (episodic has no access_count)
         all_memory_ids = (
