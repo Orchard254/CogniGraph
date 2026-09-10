@@ -7,7 +7,7 @@
     "project-memory-mcp": "./index.js"
   },
   "scripts": {
-    "test": "node --test test-js/lib.test.js",
+    "test": "node scripts/run-node-tests.js",
     "postinstall": "node postinstall.js"
   },
   "keywords": [
