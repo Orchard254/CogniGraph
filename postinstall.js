@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Post-installation script for @project-memory/mcp-server
+ * Post-installation script for cognigraph
  * 
  * This script runs automatically after npm install to:
  * 1. Verify Python availability
@@ -22,7 +22,7 @@ async function main() {
     return;
   }
 
-  console.log('🚀 Setting up project-memory MCP server...');
+  console.log('🚀 Setting up CogniGraph MCP server...');
 
   const markIncomplete = (reason) => {
     // npm postinstall must stay best-effort (exit 0), but a silent success
@@ -120,13 +120,13 @@ async function main() {
       lib.clearIncompleteMarker(packageDir);
     }
 
-    console.log('🎉 Setup complete! The project-memory MCP server is ready to use.');
+    console.log('🎉 Setup complete! The CogniGraph MCP server is ready to use.');
     console.log('💡 Add it to your IDE\'s MCP configuration:');
     console.log('   {');
     console.log('     "mcpServers": {');
-    console.log('       "project-memory": {');
+    console.log('       "cognigraph": {');
     console.log('         "command": "npx",');
-    console.log('         "args": ["-y", "@project-memory/mcp-server"]');
+    console.log('         "args": ["-y", "cognigraph"]');
     console.log('       }');
     console.log('     }');
     console.log('   }');

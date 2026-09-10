@@ -110,7 +110,7 @@ def test_should_watch_matrix(root, pyfile):
     txt = root / "notes.txt"
     txt.write_text("hi")
     assert _should_watch(txt, root) is False  # unwatched extension
-    for d in ("node_modules", ".git", "venv", ".project-memory", "__pycache__"):
+    for d in ("node_modules", ".git", "venv", ".project-memory", ".cognigraph", "__pycache__"):
         sub = root / d
         sub.mkdir(exist_ok=True)
         f = sub / "x.py"

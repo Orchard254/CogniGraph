@@ -12,7 +12,7 @@ from memory_store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("project-memory")
+mcp = FastMCP("CogniGraph")
 # Create a function to get a store instance (not a global singleton)
 # Global flag to track if first-time setup has been done
 _first_time_setup_done = False
@@ -1013,5 +1013,13 @@ def memory_flag_fact(fact_id: int, note: str = "", flag_type: str = "misleading"
 
 
 if __name__ == "__main__":
+    # One-shot legacy (.project-memory -> .cognigraph) data-dir migration.
+    # Runs ONCE here, before any store is opened or the watcher thread starts
+    # (os.replace on an open SQLite file fails on Windows) — never per tool call.
+    try:
+        from pm_common import ensure_startup_migration
+        ensure_startup_migration()
+    except Exception as e:
+        logger.warning("startup migration check failed: %r", e)
     _start_background_services()
     mcp.run()

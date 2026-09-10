@@ -8,7 +8,7 @@ Strategy (per prior research):
 Hermeticity:
 - An autouse fixture points MEMORY_DB_PATH at tmp_path and stubs
   server._ensure_first_time_setup to a no-op, so the live DB
-  (C:/PROJECT/project-memory/.project-memory/memory.db) is never touched,
+  (C:/PROJECT/project-memory/.cognigraph/memory.db) is never touched,
   even if a test forgets to install a store fixture.
 - Real-DB round-trips are limited to 2 tool writes total (embedding cost);
   seeds use embed=False/force=True where semantics are not under test.
@@ -27,7 +27,7 @@ from memory_store import MemoryStore
 from pm_common import default_db_path
 
 LIVE_DB = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), ".project-memory", "memory.db"
+    os.path.dirname(os.path.abspath(__file__)), ".cognigraph", "memory.db"
 )
 
 

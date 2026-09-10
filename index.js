@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Universal MCP Server Entry Point for project-memory
+ * Universal MCP Server Entry Point for CogniGraph
  * 
  * This Node.js wrapper provides universal IDE compatibility by:
  * 1. Auto-detecting or creating Python virtual environment
@@ -9,7 +9,7 @@
  * 3. Launching the Python MCP server with proper environment
  * 4. Auto-creating project database on first use
  * 
- * Usage: npx -y @project-memory/mcp-server
+ * Usage: npx -y cognigraph
  */
 
 const path = require('path');
@@ -32,7 +32,9 @@ async function main() {
     projectRoot = path.dirname(path.dirname(dbPath));
   } else {
     projectRoot = await findProjectRoot();
-    dbPath = path.join(projectRoot, '.project-memory', 'memory.db');
+    // .cognigraph when present, legacy .project-memory passed through for the
+    // Python server's once-at-startup migration (lib.resolveDefaultDbPath).
+    dbPath = lib.resolveDefaultDbPath(projectRoot);
   }
     
     // Step 2: Ensure database directory exists
@@ -48,7 +50,7 @@ async function main() {
     await launchMCPServer(pythonSetup, dbPath);
     
   } catch (error) {
-    console.error('Failed to start project-memory MCP server:', error.message);
+    console.error('Failed to start CogniGraph MCP server:', error.message);
     process.exit(1);
   }
 }
@@ -90,7 +92,7 @@ async function ensureDatabaseDirectory(dbPath) {
     } catch (error) {
       throw new Error(`Cannot create database directory ${dbDir}: ${error.message}`);
     }
-    console.error(`[project-memory] Created database directory: ${dbDir}`);
+    console.error(`[cognigraph] Created database directory: ${dbDir}`);
   }
 }
 
@@ -109,12 +111,12 @@ async function setupPythonEnvironment() {
   
   // Create venv if it doesn't exist (race-safe: two starters may race here)
   if (!fs.existsSync(venvPath)) {
-    console.error('[project-memory] Creating Python virtual environment...');
+    console.error('[cognigraph] Creating Python virtual environment...');
     try {
       await runCommand(pythonCmd, ['-m', 'venv', 'venv'], { cwd: packageDir });
     } catch (error) {
       if (fs.existsSync(venvPath)) {
-        console.error('[project-memory] venv appeared concurrently, continuing');
+        console.error('[cognigraph] venv appeared concurrently, continuing');
       } else {
         throw new Error(
           `Failed to create virtual environment: ${error.message}. ` +
@@ -151,7 +153,7 @@ async function installDependencies(pythonSetup) {
   if (fs.existsSync(incompleteMarker)) {
     let reason = '';
     try { reason = fs.readFileSync(incompleteMarker, 'utf-8').trim(); } catch (e) { /* ignore */ }
-    console.error(`[project-memory] WARNING: npm postinstall did not complete${reason ? ` (${reason})` : ''}. Verifying install now.`);
+    console.error(`[cognigraph] WARNING: npm postinstall did not complete${reason ? ` (${reason})` : ''}. Verifying install now.`);
   }
 
   const markComplete = () => {
@@ -159,7 +161,7 @@ async function installDependencies(pythonSetup) {
   };
 
   if (!fs.existsSync(requirementsFile)) {
-    console.error('[project-memory] No requirements.txt found, skipping dependency installation');
+    console.error('[cognigraph] No requirements.txt found, skipping dependency installation');
     return;
   }
 
@@ -180,17 +182,17 @@ async function installDependencies(pythonSetup) {
     try {
       await runCommand(pythonSetup.python, ['-c', `import ${mod}`], { stdio: 'pipe' });
     } catch (error) {
-      console.error(`[project-memory] Optional dependency '${mod}' missing — ${lane} degraded`);
+      console.error(`[cognigraph] Optional dependency '${mod}' missing — ${lane} degraded`);
     }
   }
   if (missing.length === 0) {
-    console.error('[project-memory] Dependencies already installed');
+    console.error('[cognigraph] Dependencies already installed');
     markComplete();
     return;
   }
-  console.error(`[project-memory] Missing dependencies: ${missing.join(', ')}`);
+  console.error(`[cognigraph] Missing dependencies: ${missing.join(', ')}`);
 
-  console.error('[project-memory] Installing Python dependencies...');
+  console.error('[cognigraph] Installing Python dependencies...');
   await runCommand(
     pythonSetup.python,
     ['-m', 'pip', 'install', '-r', 'requirements.txt'],

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI utility for project-memory.
+CLI utility for CogniGraph.
 Allows human developers or scripts to inspect, audit, query, export, link graph edges, verify code provenance, and consolidate project memory.
 """
 import sys
@@ -13,7 +13,7 @@ from memory_store import MemoryStore, default_db_path
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    parser = argparse.ArgumentParser(description="Project Memory CLI Utility")
+    parser = argparse.ArgumentParser(description="CogniGraph CLI Utility")
     parser.add_argument("--db", default=None, help="Path to SQLite database file")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -88,7 +88,7 @@ def main():
 
     # export-ui
     ui_parser = subparsers.add_parser("export-ui", help="Export standalone interactive HTML graph visualizer")
-    ui_parser.add_argument("--out", help="Output HTML file path (default: .project-memory/memory_graph.html)")
+    ui_parser.add_argument("--out", help="Output HTML file path (default: .cognigraph/memory_graph.html)")
     ui_parser.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
 
     # state
@@ -161,11 +161,21 @@ def main():
     wire_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
 
     args = parser.parse_args()
+    # One-shot legacy (.project-memory -> .cognigraph) data-dir migration at
+    # CLI entry — never per command internals (os.replace on an open SQLite
+    # file fails on Windows). An explicit --db bypasses CWD/env sniffing;
+    # an explicit --root migrates just that project.
+    from pm_common import ensure_startup_migration, maybe_migrate_legacy_data_dir
+    if getattr(args, "db", None) or getattr(args, "root", None):
+        hints = [args.root] if getattr(args, "root", None) else []
+        ensure_startup_migration(hints=hints, include_cwd=False, include_env=False)
+    else:
+        ensure_startup_migration()
     # Without explicit --db, bind to target project's memory DB if --root given
     # so facts never land in the CWD fallback store (and no stray folder is created).
     db_path = getattr(args, "db", None)
     if db_path is None and getattr(args, "root", None):
-        db_path = str(Path(args.root).resolve() / ".project-memory" / "memory.db")
+        db_path = str(maybe_migrate_legacy_data_dir(Path(args.root).resolve()) / "memory.db")
     db_path = db_path or default_db_path()
 
     # Constructed lazily per command: `wire` never touches the DB, and
@@ -176,7 +186,7 @@ def main():
     try:
         if args.command == "stats":
             stats = store.stats()
-            print("=== Project Memory Statistics ===")
+            print("=== CogniGraph Statistics ===")
             print(f"Database Path    : {stats['db_path']}")
             print(f"Total Active     : {stats['total_active']}")
             print(f"Active post-genesis (live)  : {stats.get('active_post_genesis_count', stats.get('active_post_genesis', 0))}  (memory table is the live intake store by contract)")
@@ -192,7 +202,7 @@ def main():
 
         elif args.command == "audit":
             res = store.audit()
-            print("=== Project Memory Audit ===")
+            print("=== CogniGraph Audit ===")
             print(f"Total Active Checked : {res['total_active_checked']}")
             print(f"Potential Duplicates : {res['potential_duplicates_count']}")
             if res['potential_duplicates']:

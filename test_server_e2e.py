@@ -140,6 +140,8 @@ def test_server_stdio_framing(tmp_path, monkeypatch):
             f"initialize failed: {init_resp!r} "
             f"stderr={''.join(stderr_lines)[-2000:]}"
         )
+        server_name = init_resp["result"].get("serverInfo", {}).get("name", "")
+        assert server_name == "CogniGraph", f"unexpected server name: {server_name!r}"
 
         # 2. initialized notification (REQUIRED before further requests).
         _send(proc, {"jsonrpc": "2.0", "method": "notifications/initialized"})

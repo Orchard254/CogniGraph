@@ -390,7 +390,7 @@ class LifecycleMixin:
 
 <head>
     <meta charset="UTF-8">
-    <title>Project Memory Interactive Knowledge Graph</title>
+    <title>CogniGraph Interactive Knowledge Graph</title>
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
         body {{ margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; }}
@@ -409,7 +409,7 @@ class LifecycleMixin:
 </head>
 <body>
     <div id="header">
-        <div id="title">Project Memory Knowledge Graph</div>
+        <div id="title">CogniGraph Knowledge Graph</div>
         <div id="stats">Active Nodes: {len(nodes_data)} | Relationship Edges: {len(links_data)}</div>
     </div>
     <div id="container">
@@ -527,9 +527,9 @@ class LifecycleMixin:
     def export_markdown(self, category: Optional[str] = None) -> str:
         facts = self.get_state(category=category, limit=MAX_LIMIT)
         if not facts:
-            return "# Project Memory Snapshot\n\n*No active facts stored.*"
+            return "# CogniGraph Snapshot\n\n*No active facts stored.*"
 
-        lines = ["# Project Memory Snapshot", f"*Generated at UTC: {datetime.datetime.now(datetime.timezone.utc).isoformat()}*", ""]
+        lines = ["# CogniGraph Snapshot", f"*Generated at UTC: {datetime.datetime.now(datetime.timezone.utc).isoformat()}*", ""]
         by_cat: Dict[str, List[Dict[str, Any]]] = {}
         for f in facts:
             by_cat.setdefault(f["category"], []).append(f)

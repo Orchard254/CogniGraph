@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Microbenchmark suite for project-memory key operations.
+Microbenchmark suite for CogniGraph key operations.
 Measures and saves JSON baselines. No behavior changes — just measurement.
 """
 import gc
@@ -232,7 +232,7 @@ def benchmark_bootstrap_dry_run_full_true() -> float:
 
 def main():
     print("=" * 60)
-    print("project-memory Microbenchmark Suite")
+    print("CogniGraph Microbenchmark Suite")
     print("=" * 60)
     print(f"Repo: {REPO_ROOT}")
     print(f"Python: {sys.version.split()[0]}")

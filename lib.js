@@ -1,5 +1,5 @@
 /**
- * Shared pure helpers for the project-memory npm wrapper.
+ * Shared pure helpers for the CogniGraph npm wrapper.
  *
  * Extracted verbatim-semantics from index.js and postinstall.js so the
  * helpers can be unit-tested with node:test. Behaviour is intentionally
@@ -56,6 +56,32 @@ const SOFT_DEP_LANES = {
 };
 
 const INCOMPLETE_MARKER_FILENAME = '.postinstall-incomplete';
+
+// ---------------------------------------------------------------------------
+// Data-directory resolution (CogniGraph rebrand, Phase 1.9).
+// The live DB lives at <project>/.cognigraph/memory.db; legacy checkouts
+// still carry <project>/.project-memory/memory.db until first-use migration
+// renames it. The Node wrapper never migrates by itself: when only the legacy
+// dir exists it passes the legacy path through and the Python server migrates
+// once at startup (before any store is opened). Single migration owner:
+// pm_common.maybe_migrate_legacy_data_dir.
+// ---------------------------------------------------------------------------
+
+const DATA_DIR_NAME = '.cognigraph';
+const LEGACY_DATA_DIR_NAME = '.project-memory';
+
+/** Default DB path for a project root (pure except for fs injection). */
+function resolveDefaultDbPath(projectRoot, fsMod = fs) {
+  const current = path.join(projectRoot, DATA_DIR_NAME);
+  const legacy = path.join(projectRoot, LEGACY_DATA_DIR_NAME);
+  let hasCurrent = false;
+  let hasLegacy = false;
+  try { hasCurrent = fsMod.existsSync(current); } catch (e) { /* ignore */ }
+  try { hasLegacy = fsMod.existsSync(legacy); } catch (e) { /* ignore */ }
+  if (hasCurrent) return path.join(current, 'memory.db');
+  if (hasLegacy) return path.join(legacy, 'memory.db');
+  return path.join(current, 'memory.db');
+}
 
 // ---------------------------------------------------------------------------
 // Version parsing / comparison (pure)
@@ -228,16 +254,16 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
     MEMORY_DB_PATH: dbPath,
   };
 
-  console.error(`[project-memory] Starting MCP server with database: ${dbPath}`);
-  console.error(`[project-memory] Python: ${pythonSetup.python}`);
-  console.error(`[project-memory] Server script: ${pythonSetup.serverScript}`);
+  console.error(`[cognigraph] Starting MCP server with database: ${dbPath}`);
+  console.error(`[cognigraph] Python: ${pythonSetup.python}`);
+  console.error(`[cognigraph] Server script: ${pythonSetup.serverScript}`);
 
   // Pre-spawn gate: a corrupt/incomplete install must fail here with a clear
   // message, not hang or crash-loop after spawn.
   try {
     await runCommandFn(pythonSetup.python, ['-m', 'py_compile', pythonSetup.serverScript], { stdio: 'pipe' });
   } catch (error) {
-    console.error(`[project-memory] Server script failed to compile: ${error.message}`);
+    console.error(`[cognigraph] Server script failed to compile: ${error.message}`);
     process.exit(1);
   }
 
@@ -249,7 +275,7 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
       stdio: 'inherit', // Pass through stdin/stdout/stderr for MCP communication
     });
   } catch (error) {
-    console.error('[project-memory] Failed to spawn server process:', error.message);
+    console.error('[cognigraph] Failed to spawn server process:', error.message);
     process.exit(1);
   }
 
@@ -258,18 +284,18 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
   const startTime = Date.now();
 
   serverProcess.on('error', (error) => {
-    console.error('[project-memory] Failed to start server process:', error);
+    console.error('[cognigraph] Failed to start server process:', error);
     process.exit(1);
   });
 
   serverProcess.on('exit', (code, signal) => {
     if (Date.now() - startTime < STARTUP_GRACE_MS) {
       console.error(
-        `[project-memory] Server died during startup (code ${code}, signal ${signal}). ` +
+        `[cognigraph] Server died during startup (code ${code}, signal ${signal}). ` +
         `Likely a broken Python install — rerun setup or check requirements.`
       );
     } else {
-      console.error(`[project-memory] Server exited with code ${code}, signal ${signal}`);
+      console.error(`[cognigraph] Server exited with code ${code}, signal ${signal}`);
     }
     process.exit(code || 1);
   });
@@ -289,6 +315,9 @@ module.exports = {
   HARD_REQUIRED_DEPS,
   SOFT_DEP_LANES,
   INCOMPLETE_MARKER_FILENAME,
+  DATA_DIR_NAME,
+  LEGACY_DATA_DIR_NAME,
+  resolveDefaultDbPath,
   parsePythonVersion,
   parseMinVersion,
   isPythonVersionSupported,

@@ -1,5 +1,5 @@
 """
-Project bootstrap / onboarding pipeline for project-memory.
+Project bootstrap / onboarding pipeline for CogniGraph.
 
 Scans a target repository and ingests structural + documentary context into the
 memory database, installs the git capture hook, and drops the agent protocol file —
@@ -22,7 +22,7 @@ from structural_extract import extract_structures
 logger = logging.getLogger(__name__)
 
 IGNORE_DIRS = {
-    ".git", "venv", ".venv", "node_modules", "__pycache__", ".project-memory",
+    ".git", "venv", ".venv", "node_modules", "__pycache__", ".project-memory", ".cognigraph",
     "dist", "build", "target", ".next", ".cache", ".idea", ".vscode",
     "site-packages", ".pytest_cache", ".mypy_cache", "coverage", ".opencode",
 }

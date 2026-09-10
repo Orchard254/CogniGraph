@@ -7,9 +7,10 @@ auto-dedup guard, optimistic concurrency control, and automated consolidation.
 """
 import os
 import re
+import sys
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -251,12 +252,144 @@ CREATE INDEX IF NOT EXISTS idx_fact_flags_fact ON fact_flags(fact_id);
 """
 
 
+# ---------------------------------------------------------------------------
+# Data-directory identity (CogniGraph rebrand, Phase 1.9).
+# The live DB lives at <project-root>/.cognigraph/memory.db; legacy checkouts
+# still carry <project-root>/.project-memory/memory.db until first-use
+# migration renames it. Module filenames, MCP tool names, DB tables, and
+# stored row content are all UNCHANGED — only the directory name migrates.
+# ---------------------------------------------------------------------------
+DATA_DIR_NAME = ".cognigraph"
+LEGACY_DATA_DIR_NAME = ".project-memory"
+
+_migration_done = False
+
+
+def maybe_migrate_legacy_data_dir(project_root) -> Path:
+    """Return the active data dir for a project root, migrating legacy -> current.
+
+    - `.cognigraph/` absent + `.project-memory/` present: atomically rename
+      (os.replace, same volume), then integrity-check the moved DB. On ANY
+      failure move it back, keep using the old path, log to stderr. NEVER
+      deletes or overwrites data.
+    - Both exist: use `.cognigraph/`, warn about the orphan on stderr.
+    - Idempotent: a second run is a no-op.
+    - Read-only fast path: no migration needed, no logging, no FS writes.
+    """
+    root = Path(project_root)
+    new_dir = root / DATA_DIR_NAME
+    old_dir = root / LEGACY_DATA_DIR_NAME
+    if new_dir.is_dir():
+        if old_dir.is_dir():
+            print(f"[cognigraph] WARNING: both {new_dir} and legacy {old_dir} exist; "
+                  f"using {new_dir}, legacy orphan left untouched",
+                  file=sys.stderr)
+        return new_dir
+    if not old_dir.is_dir():
+        return new_dir
+    try:
+        os.replace(str(old_dir), str(new_dir))
+    except Exception as e:
+        print(f"[cognigraph] migration skipped ({old_dir} -> {new_dir}: {e}); "
+              f"continuing with legacy path", file=sys.stderr)
+        return old_dir
+    db_file = new_dir / "memory.db"
+    if not db_file.is_file():
+        return new_dir  # nothing to verify (legacy dir held no DB)
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(db_file), timeout=5.0)
+        try:
+            conn.execute("PRAGMA busy_timeout=5000")
+            row = conn.execute("PRAGMA integrity_check").fetchone()
+            if not row or str(row[0]).lower() != "ok":
+                raise ValueError(f"integrity_check returned {row!r}")
+            conn.execute("SELECT COUNT(*) FROM memory").fetchone()
+        finally:
+            conn.close()
+    except Exception as e:
+        try:
+            os.replace(str(new_dir), str(old_dir))
+        except Exception as e2:
+            print(f"[cognigraph] migration verify failed ({e}) AND rollback failed ({e2}); "
+                  f"data remains at {new_dir}", file=sys.stderr)
+            return new_dir
+        print(f"[cognigraph] migration verify failed ({e}); rolled back to {old_dir}",
+              file=sys.stderr)
+        return old_dir
+    return new_dir
+
+
+def ensure_startup_migration(hints: Optional[List] = None,
+                             include_cwd: bool = True,
+                             include_env: bool = True) -> None:
+    """One-shot legacy data-dir migration for server startup / CLI entry.
+
+    Migrates each candidate project root once per process (NOT per tool call —
+    os.replace on an open SQLite file fails on Windows, so this must run
+    before any store is opened). When MEMORY_DB_PATH pointed inside a legacy
+    dir that just migrated, the env var is rewritten to the new path so later
+    store opens land on the migrated DB.
+    """
+    global _migration_done
+    if _migration_done:
+        return
+    _migration_done = True
+    roots: List[Path] = []
+    if hints:
+        roots.extend(Path(h) for h in hints)
+    if include_env:
+        override = os.environ.get("MEMORY_DB_PATH")
+        if override:
+            try:
+                p = Path(override)
+                if p.parent.name in (DATA_DIR_NAME, LEGACY_DATA_DIR_NAME):
+                    roots.append(p.parent.parent)
+            except Exception:
+                pass
+    if include_cwd and not hints:
+        roots.append(Path.cwd())
+        try:
+            roots.append(Path(__file__).resolve().parent)
+        except Exception:
+            pass
+    seen = set()
+    for root in roots:
+        try:
+            key = str(root.resolve())
+        except Exception:
+            key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            active = maybe_migrate_legacy_data_dir(root)
+        except Exception:
+            continue
+        if include_env:
+            override = os.environ.get("MEMORY_DB_PATH")
+            if override:
+                try:
+                    op = Path(override)
+                    if (op.parent.name == LEGACY_DATA_DIR_NAME
+                            and str(op.parent.parent.resolve()) == key
+                            and active.name == DATA_DIR_NAME):
+                        os.environ["MEMORY_DB_PATH"] = str(active / op.name)
+                except Exception:
+                    pass
+
+
 def find_project_root(start_path: Optional[Path] = None) -> Optional[Path]:
-    """Finds the root directory containing .project-memory/memory.db by traversing upwards."""
+    """Finds the root directory containing CogniGraph data (memory.db) by traversing upwards.
+
+    Prefers the current `.cognigraph/` dir, falls back to legacy `.project-memory/`.
+    """
     current = Path(start_path or Path.cwd()).resolve()
     for parent in [current, *current.parents]:
-        db_candidate = parent / ".project-memory" / "memory.db"
-        if db_candidate.is_file():
+        if (parent / DATA_DIR_NAME / "memory.db").is_file():
+            return parent
+    for parent in [current, *current.parents]:
+        if (parent / LEGACY_DATA_DIR_NAME / "memory.db").is_file():
             return parent
     return None
 
@@ -265,29 +398,37 @@ def default_db_path() -> str:
     """
     Intelligently finds the canonical memory database path:
     1. MEMORY_DB_PATH environment variable override.
-    2. Searches upwards from CWD for an existing .project-memory/memory.db.
-    3. Searches upwards from this script's directory for .project-memory/memory.db.
-    4. Fallback: Creates .project-memory/memory.db in CWD.
+    2. Searches upwards from CWD for an existing .cognigraph/memory.db
+       (legacy .project-memory/memory.db as fallback).
+    3. Searches upwards from this script's directory likewise.
+    4. Fallback: Creates .cognigraph/memory.db in CWD.
+
+    Read-only resolution: never migrates (migration runs once at server
+    startup / CLI entry via ensure_startup_migration, never per call).
     """
     override = os.environ.get("MEMORY_DB_PATH")
     if override:
         return override
-    
+
     # 1. Search upwards from cwd
     root = find_project_root(Path.cwd())
     if root:
-        return str(root / ".project-memory" / "memory.db")
-    
+        if (root / DATA_DIR_NAME / "memory.db").is_file():
+            return str(root / DATA_DIR_NAME / "memory.db")
+        return str(root / LEGACY_DATA_DIR_NAME / "memory.db")
+
     # 2. Search upwards from this script's directory
     try:
         script_root = find_project_root(Path(__file__).resolve().parent)
         if script_root:
-            return str(script_root / ".project-memory" / "memory.db")
+            if (script_root / DATA_DIR_NAME / "memory.db").is_file():
+                return str(script_root / DATA_DIR_NAME / "memory.db")
+            return str(script_root / LEGACY_DATA_DIR_NAME / "memory.db")
     except Exception:
         pass
 
     # 3. Fallback
-    base = Path.cwd() / ".project-memory"
+    base = Path.cwd() / DATA_DIR_NAME
     base.mkdir(parents=True, exist_ok=True)
     return str(base / "memory.db")
 

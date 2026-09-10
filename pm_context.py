@@ -241,9 +241,9 @@ class ContextMixin:
         final_results = prioritized_results[:limit]
         
         if not final_results:
-            return f"### Project Memory Context for: '{query}'\n*No matching facts found in memory.*"
+            return f"### CogniGraph Context for: '{query}'\n*No matching facts found in memory.*"
 
-        lines = [f"### Project Memory Context for: '{query}'", f"*Intent detected: **{detected_intent.upper()}** task*", ""]
+        lines = [f"### CogniGraph Context for: '{query}'", f"*Intent detected: **{detected_intent.upper()}** task*", ""]
         seen_ids: set[tuple] = set()
 
         for idx, f in enumerate(final_results, 1):

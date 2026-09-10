@@ -12,9 +12,9 @@ Prerequisites: Python 3.12+ on PATH (setup.ps1:9-13 enforces this; index.js/post
 ```json
 {
   "mcpServers": {
-    "project-memory": {
+    "cognigraph": {
       "command": "npx",
-      "args": ["-y", "@project-memory/mcp-server"]
+      "args": ["-y", "cognigraph"]
     }
   }
 }
@@ -24,25 +24,25 @@ Prerequisites: Python 3.12+ on PATH (setup.ps1:9-13 enforces this; index.js/post
 ```json
 {
   "context_servers": {
-    "project-memory": {
+    "cognigraph": {
       "command": "npx",
-      "args": ["-y", "@project-memory/mcp-server"],
+      "args": ["-y", "cognigraph"],
       "env": {
-        "MEMORY_DB_PATH": "<your-project>/.project-memory/memory.db"
+        "MEMORY_DB_PATH": "<your-project>/.cognigraph/memory.db"
       }
     }
   }
 }
 ```
 
-Zed note: env is a sibling of command/args inside the server entry, not nested under settings (settings.env never reaches the process - wire.py:180-185). wire pins MEMORY_DB_PATH to <project-root>/.project-memory/memory.db (wire.py:142-149); or set MEMORY_DB_PATH yourself - index.js honors it as the single source of truth (index.js:31-33).
+Zed note: env is a sibling of command/args inside the server entry, not nested under settings (settings.env never reaches the process - wire.py:180-185). wire pins MEMORY_DB_PATH to <project-root>/.cognigraph/memory.db (wire.py:142-149); or set MEMORY_DB_PATH yourself - index.js honors it as the single source of truth (index.js:31-33).
 
 ### 2. Restart your IDE
 
 ### 3. Start coding!
 
 The system will automatically:
-- Create `.project-memory/memory.db` in your project
+- Create `.cognigraph/memory.db` in your project
 - Learn your project structure 
 - Bootstrap with key information
 - Begin persistent memory tracking
@@ -52,7 +52,7 @@ The system will automatically:
 After restarting your IDE, ask your coding agent:
 
 ```
-"Call memory_stats to show me the project memory status"
+"Call memory_stats to show me the CogniGraph status"
 ```
 
 You should see database statistics indicating the system is working.
@@ -75,7 +75,7 @@ You should see database statistics indicating the system is working.
 ## Next Steps
 
 1. **Try it out**: Ask your agent to modify a file and watch it use memory tools
-2. **Customize**: Add `.project-memory/config.json` for project-specific settings
+2. **Customize**: Add `.cognigraph/config.json` for project-specific settings
 3. **Explore**: Use `memory_prepare_task` before complex tasks
 4. **Monitor**: Check `memory_stats` periodically to see what's been learned
 
@@ -92,10 +92,10 @@ You should see database statistics indicating the system is working.
 
 ## Wire report + safety notes (current code)
 
-- wire pins MEMORY_DB_PATH to <project>/.project-memory/memory.db (wire.py:142-149) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md/next_steps (wire.py:207-222) - on WIRED_WITH_ERRORS, fix config_errors first.
+- wire pins MEMORY_DB_PATH to <project>/.cognigraph/memory.db (wire.py:142-149) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md/next_steps (wire.py:207-222) - on WIRED_WITH_ERRORS, fix config_errors first.
 - Corrupt existing configs are preserved as .corrupt-<timestamp>.bak, never overwritten (wire.py:64-90).
-- Without --db, --root commands bind to <root>/.project-memory/memory.db (memory_cli.py:163-174); limit/ttl/importance inputs are clamped (server.py:42-71).
+- Without --db, --root commands bind to <root>/.cognigraph/memory.db (memory_cli.py:163-174); limit/ttl/importance inputs are clamped (server.py:42-71).
 
 ## Support
 
-For issues or questions, please refer to the main README_NPM.md or the core project-memory documentation.
+For issues or questions, please refer to the main README_NPM.md or the core CogniGraph documentation.

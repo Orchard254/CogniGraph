@@ -1,4 +1,4 @@
-# One-time setup for project-memory: venv + dependencies + test suite.
+# One-time setup for CogniGraph: venv + dependencies + test suite.
 # Usage: .\setup.ps1
 
 $ErrorActionPreference = "Stop"

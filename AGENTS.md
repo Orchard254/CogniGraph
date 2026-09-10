@@ -1,4 +1,4 @@
-# Mandatory Project Memory Protocol — Self-Prompting for Human Language
+# Mandatory CogniGraph Protocol — Self-Prompting for Human Language
 
 0. Self-prompt (on any human message like "hey fix planner"):
    intent = lower(strip filler "hey/please/can you/fix/add") + keywords

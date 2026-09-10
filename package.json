@@ -1,10 +1,10 @@
 {
-  "name": "@project-memory/mcp-server",
+  "name": "cognigraph",
   "version": "1.0.0",
-  "description": "Universal MCP server for persistent project memory across all AI coding IDEs - zero configuration setup",
+  "description": "CogniGraph - universal MCP server for persistent project memory across all AI coding IDEs - zero configuration setup",
   "main": "index.js",
   "bin": {
-    "project-memory-mcp": "./index.js"
+    "cognigraph": "./index.js"
   },
   "scripts": {
     "test": "node scripts/run-node-tests.js",
@@ -13,7 +13,7 @@
   "keywords": [
     "mcp",
     "mcp-server",
-    "project-memory",
+    "cognigraph",
     "ai",
     "coding-agent",
     "windsurf",
@@ -26,7 +26,7 @@
     "auto-bootstrap",
     "zero-config"
   ],
-  "author": "project-memory",
+  "author": "cognigraph",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"

@@ -16,7 +16,7 @@ tests/
 # Documentation (keep only npm-specific docs)
 README.md
 MEMORY_SNAPSHOT.md
-project-memory_master_engineering_blueprint_v2_3_0.md
+cognigraph_master_engineering_blueprint_v2_3_0.md
 scripts/
 dev/
 *.md
@@ -25,6 +25,7 @@ dev/
 !AGENTS.md
 
 # Database files
+.cognigraph/
 .project-memory/
 *.db
 *.db-shm

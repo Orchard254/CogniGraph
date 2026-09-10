@@ -1,6 +1,6 @@
-# @project-memory/mcp-server
+# cognigraph
 
-Universal MCP server for persistent project memory across all AI coding IDEs.
+CogniGraph: universal MCP server for persistent project memory across all AI coding IDEs.
 
 ## 🚀 Zero-Configuration Setup
 
@@ -9,9 +9,9 @@ The easiest way to add persistent memory to any AI coding agent:
 ```json
 {
   "mcpServers": {
-    "project-memory": {
+    "cognigraph": {
       "command": "npx",
-      "args": ["-y", "@project-memory/mcp-server"]
+      "args": ["-y", "cognigraph"]
     }
   }
 }
@@ -32,7 +32,7 @@ That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 14 (pa
 
 1. **First Use**: When an agent first calls any memory tool, the system:
    - Auto-detects your project root
-   - Creates `.project-memory/memory.db` if needed
+   - Creates `.cognigraph/memory.db` if needed
    - Runs lightweight bootstrap (top 20 facts)
    - Learns project structure, dependencies, and key files
 
@@ -50,9 +50,9 @@ That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 14 (pa
 ```json
 {
   "mcpServers": {
-    "project-memory": {
+    "cognigraph": {
       "command": "npx",
-      "args": ["-y", "@project-memory/mcp-server"]
+      "args": ["-y", "cognigraph"]
     }
   }
 }
@@ -62,9 +62,9 @@ That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 14 (pa
 ```json
 {
   "mcpServers": {
-    "project-memory": {
+    "cognigraph": {
       "command": "npx",
-      "args": ["-y", "@project-memory/mcp-server"]
+      "args": ["-y", "cognigraph"]
     }
   }
 }
@@ -74,9 +74,9 @@ That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 14 (pa
 ```json
 {
   "mcpServers": {
-    "project-memory": {
+    "cognigraph": {
       "command": "npx",
-      "args": ["-y", "@project-memory/mcp-server"]
+      "args": ["-y", "cognigraph"]
     }
   }
 }
@@ -86,9 +86,9 @@ That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 14 (pa
 ```json
 {
   "mcpServers": {
-    "project-memory": {
+    "cognigraph": {
       "command": "npx",
-      "args": ["-y", "@project-memory/mcp-server"]
+      "args": ["-y", "cognigraph"]
     }
   }
 }
@@ -98,11 +98,11 @@ That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 14 (pa
 ```json
 {
   "context_servers": {
-    "project-memory": {
+    "cognigraph": {
       "command": "npx",
-      "args": ["-y", "@project-memory/mcp-server"],
+      "args": ["-y", "cognigraph"],
       "env": {
-        "MEMORY_DB_PATH": "<your-project>/.project-memory/memory.db"
+        "MEMORY_DB_PATH": "<your-project>/.cognigraph/memory.db"
       }
     }
   }
@@ -113,9 +113,9 @@ That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 14 (pa
 
 ### Wire report + safety notes (current code)
 
-- wire pins MEMORY_DB_PATH to <project>/.project-memory/memory.db (wire.py:142-149) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md/next_steps (wire.py:207-222) - on WIRED_WITH_ERRORS, fix config_errors first.
+- wire pins MEMORY_DB_PATH to <project>/.cognigraph/memory.db (wire.py:142-149) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md/next_steps (wire.py:207-222) - on WIRED_WITH_ERRORS, fix config_errors first.
 - Corrupt existing configs are preserved as .corrupt-<timestamp>.bak, never overwritten (wire.py:64-90).
-- Without --db, --root commands bind to <root>/.project-memory/memory.db (memory_cli.py:163-174); limit/ttl/importance inputs are clamped (server.py:42-71). Zed env is a sibling of command/args inside the server entry, not nested under settings (settings.env never reaches the process - wire.py:180-185).
+- Without --db, --root commands bind to <root>/.cognigraph/memory.db (memory_cli.py:163-174); limit/ttl/importance inputs are clamped (server.py:42-71). Zed env is a sibling of command/args inside the server entry, not nested under settings (settings.env never reaches the process - wire.py:180-185).
 
 ### Custom Database Location
 Set the `MEMORY_DB_PATH` environment variable:
@@ -123,9 +123,9 @@ Set the `MEMORY_DB_PATH` environment variable:
 ```json
 {
   "mcpServers": {
-    "project-memory": {
+    "cognigraph": {
       "command": "npx",
-      "args": ["-y", "@project-memory/mcp-server"],
+      "args": ["-y", "cognigraph"],
       "env": {
         "MEMORY_DB_PATH": "/custom/path/to/memory.db"
       }
@@ -135,7 +135,7 @@ Set the `MEMORY_DB_PATH` environment variable:
 ```
 
 ### Project-Specific Configuration
-Create `.project-memory/config.json` in your project root:
+Create `.cognigraph/config.json` in your project root:
 
 ```json
 {
@@ -249,11 +249,11 @@ Agent: "I decided to use Redis for caching"
 ### Server doesn't start
 - Ensure Node.js 14+ is installed
 - Check that `npx` is available in your PATH
-- Try running `npx -y @project-memory/mcp-server` manually
+- Try running `npx -y cognigraph` manually
 
 ### Database not created
 - Check write permissions in your project directory
-- Verify the `.project-memory` directory can be created
+- Verify the `.cognigraph` directory can be created
 - Try setting a custom `MEMORY_DB_PATH` environment variable
 
 ### Tools not showing up
@@ -283,7 +283,7 @@ Agent: "I decided to use Redis for caching"
 
 ## 🤝 Contributing
 
-This is the universal npm wrapper for the core project-memory system. For core development, see the main project-memory repository.
+This is the universal npm wrapper for the core CogniGraph system. For core development, see the main CogniGraph repository.
 
 ## 📄 License
 
@@ -291,7 +291,7 @@ MIT License - see LICENSE file for details
 
 ## 🙏 Acknowledgments
 
-Built on top of the excellent project-memory core system, designed for enterprise-grade persistent memory for AI coding agents.
+Built on top of the excellent CogniGraph core system, designed for enterprise-grade persistent memory for AI coding agents.
 
 ---
 

@@ -35,7 +35,7 @@ except ImportError:
     extract_structures = None
 
 WATCHED_EXTS = {".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".java"}
-IGNORE_DIRS = {".git", "venv", ".venv", "node_modules", "__pycache__", ".project-memory", "dist", "build", "target", ".next", ".cache", ".idea", ".vscode", "site-packages", ".pytest_cache", ".mypy_cache", "coverage", ".opencode", "scratch", "fixtures"}
+IGNORE_DIRS = {".git", "venv", ".venv", "node_modules", "__pycache__", ".project-memory", ".cognigraph", "dist", "build", "target", ".next", ".cache", ".idea", ".vscode", "site-packages", ".pytest_cache", ".mypy_cache", "coverage", ".opencode", "scratch", "fixtures"}
 
 def _should_watch(path: Path, root: Path) -> bool:
     try:

@@ -1,6 +1,6 @@
-# project-memory MCP Server
+# CogniGraph MCP Server
 
-An enterprise-grade, state-of-the-art persistent project-memory system for AI coding agents (**Google Antigravity, Cursor, OpenCode, Claude Desktop**).
+An enterprise-grade, state-of-the-art persistent memory system for AI coding agents (**Google Antigravity, Cursor, OpenCode, Claude Desktop**) — CogniGraph.
 
 It provides cross-session, vendor-neutral memory for project components, architectural decisions, constraints, file dependency graph edges, code-anchored provenance, and state checkpoints.
 
@@ -17,7 +17,7 @@ For the full agent-orientation deep dive — tech stack, annotated file tree, co
 5. **Multi-File Refactor Safety Matrix (`memory_check_safety`)**: Scans batches of target files before refactoring to detect cross-file breaking risks.
 6. **Code-Anchored Self-Healing Provenance (`memory_verify_provenance`)**: Anchors line numbers and SHA256 snippet hashes with neighborhood shift detection that self-heals line range shifts automatically.
 7. **Swarm Concurrency & Advisory Locks**: Optimistic Concurrency Control (`version` checking) + advisory locks (`memory_locks`) preventing race conditions across multi-agent swarms.
-8. **Interactive Visual Web UI (`memory_export_ui`)**: Standalone, self-contained HTML visualizer ([`memory_graph.html`](file:///.project-memory/memory_graph.html)) for exploring the knowledge graph in 2D.
+8. **Interactive Visual Web UI (`memory_export_ui`)**: Standalone, self-contained HTML visualizer ([`memory_graph.html`](file:///.cognigraph/memory_graph.html)) for exploring the knowledge graph in 2D.
 9. **Priming Eval Harness (`eval_priming.py`)**: Scores retrieval quality for realistic coding tasks — whether the facts an LLM needs (by content or file anchor) land in the top-K of `query_hybrid`. Run `python eval_priming.py` to regress-check priming quality after ranking changes.
 10. **Code Graph & Trust Layer (`structural_edges`)**: AST-ground-truth call and import edges across the codebase, rebuilt on every structural sync. One-hop mid-reasoning queries via `memory_who_calls` ("who calls X? who imports Y?"), project orientation via `memory_project_shape`, and a trust layer: unmapped files are flagged explicitly, flagged/unverified facts are stamped inline at priming time (`memory_flag_fact` correction hook), and `memory_checkpoint_task` captures failed approaches as negative-knowledge constraints.
 
@@ -69,18 +69,18 @@ Restart your coding agent. It now starts every session with full project context
 
 > **Recommended:** run `memory_cli.py wire <agent> --root <project>` — it generates the correct config automatically. The manual JSON below is the fallback.
 
-Point your AI agent's MCP configuration at `server.py`. Prefer `memory_cli.py wire <agent> --root <project>` - it generates the config automatically and pins MEMORY_DB_PATH to <project-root>/.project-memory/memory.db (created in wire.py:142-149).
+Point your AI agent's MCP configuration at `server.py`. Prefer `memory_cli.py wire <agent> --root <project>` - it generates the config automatically and pins MEMORY_DB_PATH to <project-root>/.cognigraph/memory.db (created in wire.py:142-149).
 
 Standard agents (`mcpServers`):
 
 ```jsonc
 {
   "mcpServers": {
-    "project-memory": {
-      "command": "C:/Ai/project-memory/venv/Scripts/python.exe",
-      "args": ["C:/Ai/project-memory/server.py"],
+    "cognigraph": {
+      "command": "C:/Ai/cognigraph/venv/Scripts/python.exe",
+      "args": ["C:/Ai/cognigraph/server.py"],
       "env": {
-        "MEMORY_DB_PATH": "C:/path/to/your/project/.project-memory/memory.db"
+        "MEMORY_DB_PATH": "C:/path/to/your/project/.cognigraph/memory.db"
       }
     }
   }
@@ -92,21 +92,21 @@ Zed (`.zed/settings.json`, `context_servers` - `env` is a sibling of `command`/`
 ```jsonc
 {
   "context_servers": {
-    "project-memory": {
-      "command": "C:/Ai/project-memory/venv/Scripts/python.exe",
-      "args": ["C:/Ai/project-memory/server.py"],
+    "cognigraph": {
+      "command": "C:/Ai/cognigraph/venv/Scripts/python.exe",
+      "args": ["C:/Ai/cognigraph/server.py"],
       "env": {
-        "MEMORY_DB_PATH": "C:/path/to/your/project/.project-memory/memory.db"
+        "MEMORY_DB_PATH": "C:/path/to/your/project/.cognigraph/memory.db"
       }
     }
   }
 }
 ```
 
-### Agent Instruction Rules (`AGENTS.md` / `GEMINI.md` / `.cursor/rules/project-memory.mdc`)
+### Agent Instruction Rules (`AGENTS.md` / `GEMINI.md` / `.cursor/rules/cognigraph.mdc`)
 
 ```markdown
-## Mandatory Project Memory Protocol
+## Mandatory CogniGraph Protocol
 At the start of every session:
 1. Call `memory_get_state` or `memory_stats` to load existing project context.
 2. Call `memory_get_context(query)` before asking broad architecture questions.
@@ -215,7 +215,7 @@ python memory_cli.py prepare-task "implement caching layer" --files cache.py
 
 - wire report schema (wire.py:207-222): status is WIRED, or WIRED_WITH_ERRORS when config_errors is non-empty; report carries config_files, backups (rotating .bak/.bak.1/.bak.2), config_errors, agents_md (created/skipped_exists/...), mcp_snippet, and next_steps (bootstrap dry-run, --apply, restart, plus Fix config errors first lines when errors exist). On WIRED_WITH_ERRORS, fix config_errors first - the listed config was not written.
 - Corrupt-config refusal (wire.py:64-90): an existing config that is not valid JSON is preserved as <name>.corrupt-<timestamp>.bak and reported in config_errors; it is never silently overwritten (atomic tmp + fsync + os.replace).
-- --root DB binding (memory_cli.py:163-174): without explicit --db, any command with --root binds to <root>/.project-memory/memory.db so facts never land in the CWD fallback store; wire never touches the DB (store is constructed lazily for other commands).
+- --root DB binding (memory_cli.py:163-174): without explicit --db, any command with --root binds to <root>/.cognigraph/memory.db so facts never land in the CWD fallback store; wire never touches the DB (store is constructed lazily for other commands).
 - Concurrency (memory_store.py:48,1095-1123; server.py:25-40): SQLite PRAGMA journal_mode=WAL + busy_timeout=5000; get_store() returns a per-thread MemoryStore (one connection per thread on the same WAL DB); each MCP tool call gets a fresh store that is always closed (no leaked fd/WAL handles).
 - Git probes (bootstrap.py:309-327; wire.py:26-43; hooks/git_hook.py:29-30): every git/python child probe runs with stdin=subprocess.DEVNULL and a timeout (15 s) so an inherited stdio pipe under the MCP server cannot stall indefinitely.
 - Input clamps (server.py:42-71; mirrored in memory_cli.py:218-234): limit 1..100 (context/prepare-task paths cap at 50, graph depth at 10, bootstrap max_facts at 1000), lock ttl_seconds 1..86400 (default 60), fact importance 1..5 (default 3); non-numeric input falls back to the default instead of raising. Secrets are refused (pm_common.py:104-117; memory_store.py:474,682).

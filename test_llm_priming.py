@@ -314,7 +314,7 @@ class TestEnhancedGetContext:
     def test_get_context_with_intent_param(self, seeded_store):
         ctx = seeded_store.get_context('fix authentication bug', intent='fix', limit=3)
         assert isinstance(ctx, str)
-        assert 'Project Memory Context' in ctx
+        assert 'CogniGraph Context' in ctx
 
     def test_get_context_auto_detects_intent(self, seeded_store):
         ctx = seeded_store.get_context('fix authentication bug', limit=3)
@@ -892,7 +892,7 @@ class TestGitCommitAnchoring:
         return tmp_path, head
 
     def _store_in(self, repo_root):
-        db = repo_root / ".project-memory" / "memory.db"
+        db = repo_root / ".cognigraph" / "memory.db"
         db.parent.mkdir(parents=True, exist_ok=True)
         return MemoryStore(str(db))
 
