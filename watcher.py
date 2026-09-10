@@ -111,8 +111,12 @@ def _sync_file(file_path: Path, root: Path, store: MemoryStore):
             h = hashlib.sha256(data).hexdigest()
             lines = data.decode('utf-8', errors='replace').count('\n') + 1
             content = f"Source file: {rel} (python, {lines} lines, hash {h[:8]})" if file_path.suffix.lower()==".py" else f"Source file: {rel} ({lines} lines, hash {h[:8]})"
-            # Check existing
-            existing = store.conn.execute("SELECT id, code_hash FROM memory WHERE file_path=? AND deprecated_at IS NULL", (rel,)).fetchall()
+            # Only rows whose content is already a stub template are upserted:
+            # a curated fact anchored to this file must never be clobbered by
+            # the file-sync rewrite (that destroyed 7 curated facts historically).
+            existing = store.conn.execute(
+                "SELECT id, code_hash FROM memory WHERE file_path=? AND deprecated_at IS NULL AND content LIKE 'Source file:%'",
+                (rel,)).fetchall()
             if existing:
                 # Update hash directly if changed (avoid supersede dance which creates duplicate with old hash).
                 # Wrapped in one transaction so concurrent syncs can't interleave;
@@ -140,8 +144,9 @@ def _sync_file(file_path: Path, root: Path, store: MemoryStore):
                         except Exception as e:
                             logger.debug("watcher re-embed failed for fact %s: %r", fid, e)
             else:
-                # New file
-                store.write(category="component", content=content, file_path=rel, tags="bootstrap, file, auto-watched", importance=2, line_start=1, line_end=lines, code_hash=h, force=True, embed=True)
+                # New file — "other" like bootstrap's template facts, so stubs
+                # never ride intent boosts meant for curated knowledge.
+                store.write(category="other", content=content, file_path=rel, tags="bootstrap, file, auto-watched", importance=2, line_start=1, line_end=lines, code_hash=h, force=True, embed=True)
             # Link to structural nodes
             try:
                 store.link_facts_to_structural_nodes(rel)

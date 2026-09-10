@@ -486,6 +486,20 @@ def test_scan_file_tree_dry_run(tmp_path):
     assert any(f["content"].startswith("Directory ") for f in facts)
 
 
+def test_scan_file_tree_template_facts_are_not_boosted_categories(tmp_path):
+    """Key-file, Source-file and Directory facts are template-derived and must
+    not sit in component/decision/constraint, where intent boosts would rank
+    them above curated knowledge (the Phase-3 corpus pollution)."""
+    _demo_tree(tmp_path)
+    facts, _ = bootstrap.scan_file_tree(tmp_path, full=True, dry_run=True)
+    templated = [f for f in facts
+                 if f["content"].startswith(("Key file:", "Source file:", "Directory "))]
+    assert templated, "demo tree should produce template facts"
+    assert all(f["category"] == "other" for f in templated)
+    manifests = bootstrap.parse_manifests(tmp_path)
+    assert all(f["category"] == "component" for f in manifests)  # curated: unchanged
+
+
 def test_parse_manifests(tmp_path):
     _demo_tree(tmp_path)
     facts = bootstrap.parse_manifests(tmp_path)
