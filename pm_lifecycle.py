@@ -344,6 +344,13 @@ class LifecycleMixin:
         stats = self.stats()
         return {"status": "OPTIMIZED", "stats": stats}
 
+    def backup_db(self, tag: str = "manual", keep: int = 8) -> Dict[str, Any]:
+        """Timestamped full-DB snapshot (WAL-safe, integrity-checked, pruned)."""
+        from pm_backup import timestamped_backup
+        res = timestamped_backup(self.db_path, tag=tag, keep=keep)
+        res["status"] = "BACKED_UP"
+        return res
+
     def export_interactive_html(self, out_path: Optional[str] = None) -> str:
         """
         Generate a self-contained standalone single-file HTML page containing an

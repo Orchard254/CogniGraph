@@ -29,7 +29,7 @@ At the end of every session:
 8. Call `memory_checkpoint_task(summary, components, decisions, test_baseline)` with the verified test output.
 
 Maintenance (weekly or when drift is suspected) runs via CLI/background, not MCP:
-- `scan-provenance`, `audit`, `prune`, `optimize`, `backfill`, `export`, `bootstrap`, `branch` via `memory_cli.py`; auto-maintenance also runs on server startup.
+- `backup`, `scan-provenance`, `audit`, `prune`, `optimize`, `backfill`, `export`, `bootstrap`, `branch` via `memory_cli.py`; auto-maintenance also runs on server startup and takes a timestamped full-DB backup first (keep 8). Migration scripts snapshot automatically before mutating.
 
 Structural layer (tree-sitter, Python/JS/TS/TSX):
 - `structural_extract.py:extract_structures(file_path)` — parse file into function/class/method/import nodes

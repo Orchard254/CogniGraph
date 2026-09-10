@@ -21,7 +21,9 @@ This migration:
      decision/constraint) with reason 'corpus_hygiene_clobbered_curated'.
 
 Idempotent: a second run finds no candidates and changes nothing.
-Requires a file-copy backup first; the script refuses to run without --apply.
+--apply snapshots the DB first (WAL-safe, integrity-checked, pruned to
+the newest 8) via pm_backup.timestamped_backup; the script refuses to
+run without --apply.
 
 Usage:
     python corpus_hygiene.py            # dry-run report on the live DB
@@ -101,6 +103,8 @@ def corpus_hygiene(db_path: str | Path, apply: bool = False) -> Dict[str, Any]:
     }
 
     if apply and (stub_rows or clobber_rows):
+        from pm_backup import timestamped_backup
+        report["backup"] = timestamped_backup(db_path, tag="pre-corpus-hygiene")
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         conn.execute("BEGIN IMMEDIATE")
         try:

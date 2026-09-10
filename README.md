@@ -180,6 +180,9 @@ python memory_cli.py prune --days 90
 
 # Pre-coding flight briefing from the shell
 python memory_cli.py prepare-task "implement caching layer" --files cache.py
+
+# Timestamped full-DB snapshot (WAL-safe, integrity-checked; prunes beyond --keep)
+python memory_cli.py backup --tag manual --keep 8
 ```
 
 ---
@@ -192,6 +195,7 @@ python memory_cli.py prepare-task "implement caching layer" --files cache.py
 - Concurrency (memory_store.py:48,1095-1123; server.py:25-40): SQLite PRAGMA journal_mode=WAL + busy_timeout=5000; get_store() returns a per-thread MemoryStore (one connection per thread on the same WAL DB); each MCP tool call gets a fresh store that is always closed (no leaked fd/WAL handles).
 - Git probes (bootstrap.py:309-327; wire.py:26-43; hooks/git_hook.py:29-30): every git/python child probe runs with stdin=subprocess.DEVNULL and a timeout (15 s) so an inherited stdio pipe under the MCP server cannot stall indefinitely.
 - Input clamps (server.py:42-71; mirrored in memory_cli.py:218-234): limit 1..100 (context/prepare-task paths cap at 50, graph depth at 10, bootstrap max_facts at 1000), lock ttl_seconds 1..86400 (default 60), fact importance 1..5 (default 3); non-numeric input falls back to the default instead of raising. Secrets are refused (pm_common.py:104-117; memory_store.py:474,682).
+- Timestamped DB backups (pm_backup.py): weekly auto-maintenance takes a WAL-safe snapshot via the SQLite backup API before any mutation, and corpus_hygiene --apply / genesis_migrate snapshot first; backups named memory.db.backup-<tag>-<ts>.bak are integrity-checked and pruned to the newest 8 (keep configurable), historical ad-hoc *.bak files untouched (test_backup.py).
 
 ## 5. Automated Git Commit Hook Integration
 

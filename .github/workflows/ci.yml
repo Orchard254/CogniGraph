@@ -103,9 +103,9 @@ jobs:
       - name: Run Python tests with coverage
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            venv/Scripts/python -m pytest --cov=memory_store --cov=bootstrap --cov=watcher --cov=wire --cov=pm_common --cov=pm_search --cov=pm_context --cov=pm_lifecycle --cov=pm_structural --cov-report=xml --cov-report=term-missing -q --ignore=scratch
+            venv/Scripts/python -m pytest --cov=memory_store --cov=bootstrap --cov=watcher --cov=wire --cov=pm_common --cov=pm_search --cov=pm_context --cov=pm_lifecycle --cov=pm_structural --cov=pm_backup --cov-report=xml --cov-report=term-missing -q --ignore=scratch
           else
-            venv/bin/python -m pytest --cov=memory_store --cov=bootstrap --cov=watcher --cov=wire --cov=pm_common --cov=pm_search --cov=pm_context --cov=pm_lifecycle --cov=pm_structural --cov-report=xml --cov-report=term-missing -q --ignore=scratch
+            venv/bin/python -m pytest --cov=memory_store --cov=bootstrap --cov=watcher --cov=wire --cov=pm_common --cov=pm_search --cov=pm_context --cov=pm_lifecycle --cov=pm_structural --cov=pm_backup --cov-report=xml --cov-report=term-missing -q --ignore=scratch
           fi
         shell: bash
 

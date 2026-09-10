@@ -101,6 +101,11 @@ class FakeCLIStore:
         self._rec("backfill_embeddings")
         return {"embedded": 0}
 
+    def backup_db(self, tag="manual", keep=8):
+        self._rec("backup_db", tag=tag, keep=keep)
+        return {"backup_path": "memory.db.backup-manual-20260101-000000.bak",
+                "bytes": 1024, "kept": 1, "pruned": []}
+
     def prune_stale(self, days_inactive=90, dry_run=True):
         self._rec("prune_stale", days_inactive=days_inactive, dry_run=dry_run)
         return {"pruned": []}
@@ -275,6 +280,14 @@ def test_optimize_export_ui_scan_backfill(cli):
     assert _call(s, "scan_provenance")[0][2] == {"project_root": "R",
                                                 "auto_deprecate": True, "auto_heal": False}
     assert _call(cli("backfill"), "backfill_embeddings")
+
+
+def test_backup_dispatch_clamps(cli, capsys):
+    s = cli("backup", "--tag", "weekly", "--keep", "3")
+    assert _call(s, "backup_db")[0][2] == {"tag": "weekly", "keep": 3}
+    assert "backup-manual" in capsys.readouterr().out
+    s = cli("backup", "--keep", "0")
+    assert _call(s, "backup_db")[0][2] == {"tag": "manual", "keep": 8}  # falsy -> default
 
 
 def test_consolidate_and_prune_flags(cli):

@@ -108,6 +108,12 @@ def main():
     backfill_p = subparsers.add_parser("backfill", help="Generate embeddings for active facts missing them")
     backfill_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
 
+    # backup
+    backup_p = subparsers.add_parser("backup", help="Timestamped full-DB snapshot; prunes beyond --keep")
+    backup_p.add_argument("--tag", default="manual", help="Backup label (default: manual)")
+    backup_p.add_argument("--keep", type=int, default=8, help="Timestamped backups to retain (default 8)")
+    backup_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
+
     # promote
     promote_p = subparsers.add_parser("promote", help="Promote an experimental branch's episodic memories into canonical (KEEP_BOTH)")
     promote_p.add_argument("source_branch_id", type=int, help="Source experimental branch ID to promote")
@@ -292,6 +298,9 @@ def main():
             print(json.dumps(res, indent=2))
         elif args.command == "backfill":
             res = store.backfill_embeddings()
+            print(json.dumps(res, indent=2))
+        elif args.command == "backup":
+            res = store.backup_db(tag=args.tag or "manual", keep=max(1, args.keep or 8))
             print(json.dumps(res, indent=2))
         elif args.command == "promote":
             from branch_promotion import promote_branch
