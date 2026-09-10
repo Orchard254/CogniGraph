@@ -1,0 +1,182 @@
+{
+  "version": 1,
+  "created": "2026-09-10",
+  "source": "live .cognigraph/memory.db at branch phase-3-eval-baseline (311 active facts)",
+  "description": "Golden query/fact pairs for retrieval evaluation. Queries are phrased the way a coding agent mid-task would ask; each is answerable by its fact alone. fact_id references the live DB at creation time - if a fact is superseded or deprecated, update the pair (eval_golden.py fails loudly on stale pairs).",
+  "items": [
+    {
+      "fact_id": 152,
+      "category": "component",
+      "query": "is there a zero-config npm package for wiring this into any IDE",
+      "content_prefix": "Created universal npm package @project-memory/mcp-server with zero-configuration"
+    },
+    {
+      "fact_id": 185,
+      "category": "component",
+      "query": "where does the README document the two-table intake contract",
+      "content_prefix": "README architecture section documents the two-table intake contract (memory=live"
+    },
+    {
+      "fact_id": 265,
+      "category": "component",
+      "query": "do we have a live end-to-end test that the watcher keeps the graph fresh",
+      "content_prefix": "scratch/live_watcher_test.py: live end-to-end freshness test using the real watc"
+    },
+    {
+      "fact_id": 271,
+      "category": "component",
+      "query": "why are the bytecode-recovery artifacts excluded from git by filename",
+      "content_prefix": ".gitignore excludes the bytecode-recovery provenance artifacts by explicit filena"
+    },
+    {
+      "fact_id": 278,
+      "category": "component",
+      "query": "what does the npm tarball include to stay import-complete",
+      "content_prefix": "package.json files now includes pm_* modules, SQL schemas, and hooks/git_hook.py"
+    },
+    {
+      "fact_id": 323,
+      "category": "component",
+      "query": "which tests cover wire.py and the bootstrap dry/apply paths",
+      "content_prefix": "test_wire_bootstrap.py covers wire.py, bootstrap.py dry/apply paths, and hooks/g"
+    },
+    {
+      "fact_id": 325,
+      "category": "component",
+      "query": "is memory_cli.py covered by tests",
+      "content_prefix": "test_memory_cli.py covers all 22 memory_cli.py commands via FakeCLIStore dispatc"
+    },
+    {
+      "fact_id": 327,
+      "category": "component",
+      "query": "how is watcher.py tested deterministically",
+      "content_prefix": "test_watcher.py covers watcher.py deterministically (16 tests, 0.8s): filter, de"
+    },
+    {
+      "fact_id": 343,
+      "category": "component",
+      "query": "where did the testable JS helpers from index.js go",
+      "content_prefix": "lib.js extracts testable JS helpers from index.js/postinstall.js with 26 node:te"
+    },
+    {
+      "fact_id": 360,
+      "category": "component",
+      "query": "where are the performance microbenchmarks and the embedding latency numbers",
+      "content_prefix": "bench/bench_memory.py: 9 microbenchmarks saved to baseline_20260910.json (cold/w"
+    },
+    {
+      "fact_id": 375,
+      "category": "component",
+      "query": "is there a project brief with the architecture and conventions",
+      "content_prefix": "Project brief documentation: project-brief.md written with full technical detail"
+    },
+    {
+      "fact_id": 422,
+      "category": "component",
+      "query": "where is the memory-workflow skill defined across scopes",
+      "content_prefix": "memory-workflow skill (global + project scopes, SKILL.md 50 lines)"
+    },
+    {
+      "fact_id": 126,
+      "category": "decision",
+      "query": "where does repo_id derivation live now",
+      "content_prefix": "Centralize repo_id derivation in MemoryStore._derive_default_repo_id()"
+    },
+    {
+      "fact_id": 151,
+      "category": "decision",
+      "query": "why did we package this as a universal npm module",
+      "content_prefix": "Project-memory should be packaged as a universal npm package for automatic IDE-n"
+    },
+    {
+      "fact_id": 173,
+      "category": "decision",
+      "query": "what cap do usage-learning boosts have and what triggers them",
+      "content_prefix": "Usage learning boosts are capped at 1.15x and require at least 2 overlapping que"
+    },
+    {
+      "fact_id": 194,
+      "category": "decision",
+      "query": "why was memory_store split into mixins rather than separate services",
+      "content_prefix": "Split MemoryStore via mixin composition rather than delegation or separate servi"
+    },
+    {
+      "fact_id": 197,
+      "category": "decision",
+      "query": "why does memory_store.py still re-export everything after the split",
+      "content_prefix": "Keep backward-compatible re-exports in memory_store.py rather than updating all "
+    },
+    {
+      "fact_id": 221,
+      "category": "decision",
+      "query": "why do access_count bumps share the log_usage flag",
+      "content_prefix": "Gate access_count updates behind the same log_usage flag as usage logging rather"
+    },
+    {
+      "fact_id": 229,
+      "category": "decision",
+      "query": "where do failed approaches from checkpoint_task end up",
+      "content_prefix": "Failed approaches from checkpoint_task are stored as constraints tagged negative"
+    },
+    {
+      "fact_id": 319,
+      "category": "decision",
+      "query": "why must subprocess probes pass stdin=DEVNULL on Windows",
+      "content_prefix": "All git/python subprocess probes must pass stdin=DEVNULL with a timeout; inherit"
+    },
+    {
+      "fact_id": 379,
+      "category": "decision",
+      "query": "what's the python floor and why",
+      "content_prefix": "Python matrix floor raised to 3.12 because numpy==2.5.3 requires >=3.12 and scik"
+    },
+    {
+      "fact_id": 111,
+      "category": "constraint",
+      "query": "what order does the mandatory session protocol run in",
+      "content_prefix": "Whole workflow self-prompting 0-6: STOP → memory_stats → memory_query_hybrid(int"
+    },
+    {
+      "fact_id": 259,
+      "category": "constraint",
+      "query": "which watcher verification approach turned out to be a mistake",
+      "content_prefix": "Verifying watcher graph freshness only architecturally (tracing _sync_file -> sy"
+    },
+    {
+      "fact_id": 321,
+      "category": "constraint",
+      "query": "what must we never do to the pytest suite or index.js stdio",
+      "content_prefix": "Do not split pytest suite by slow marker and do not change index.js stdio inheri"
+    },
+    {
+      "fact_id": 377,
+      "category": "constraint",
+      "query": "why does passing a directory to node --test fail on windows",
+      "content_prefix": "node --test test-js/ (directory form) fails on Windows Node 24 with MODULE_NOT_F"
+    },
+    {
+      "fact_id": 385,
+      "category": "constraint",
+      "query": "why does polling CI runs by head_sha come up empty right after a push",
+      "content_prefix": "Polling runs by head_sha immediately after push returned total_count 0 for ~65 s"
+    },
+    {
+      "fact_id": 273,
+      "category": "state",
+      "query": "what did the initial git commit contain",
+      "content_prefix": "Completed git init — the last deferred item. Initialized the repository (branch "
+    },
+    {
+      "fact_id": 397,
+      "category": "state",
+      "query": "when did the rebrand to cognigraph happen and on which branch",
+      "content_prefix": "Phase 1.9 rebrand project-memory to CogniGraph completed on branch phase-1.9-reb"
+    },
+    {
+      "fact_id": 428,
+      "category": "state",
+      "query": "what was broken in the opencode wire config",
+      "content_prefix": "Fixed OpenCode wire format (mcpServers→mcp), re-wired opencode.json, full suite "
+    }
+  ]
+}
