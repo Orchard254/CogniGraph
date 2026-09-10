@@ -4,7 +4,7 @@ An enterprise-grade, state-of-the-art persistent memory system for AI coding age
 
 It provides cross-session, vendor-neutral memory for project components, architectural decisions, constraints, file dependency graph edges, code-anchored provenance, and state checkpoints.
 
-For the full agent-orientation deep dive — tech stack, annotated file tree, complete 41-tool catalog, conventions, and current state — see [project-brief.md](project-brief.md).
+For the full agent-orientation deep dive — tech stack, annotated file tree, complete 14-tool catalog, conventions, and current state — see [project-brief.md](project-brief.md).
 
 ---
 
@@ -121,51 +121,24 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 41 tools.
+The server registers 14 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `memory_write` | `category`, `content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `importance?`, `line_start?`, `line_end?`, `code_hash?`, `git_commit_sha?` | Record a new fact in project memory. |
-| `memory_write_batch` | `facts` | Record multiple new facts atomically in a single transaction. |
-| `memory_query` | `text`, `category?`, `tag?`, `limit?`, `session_id?` | Search project memory by keyword/tag (FTS5 lexical). |
-| `memory_query_hybrid` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?` | Hybrid RRF search combining lexical BM25 matching and term vector similarity, with intent-aware ranking and usage-pattern learning. Automatically includes graph-linked dependency facts when expand_graph=True. repo_id: optional - if omitted, defaults to the store's own repo (first repo) for episodic filtering. intent: optional task intent ('fix', 'implement', 'refactor', etc.) that boosts category-relevant facts in ranking; auto-detected from text if omitted. agent_type: optional ('cursor', 'claude', 'opencode', 'zed', 'default') to apply agent-specific retrieval-lane weights. Every retrieval is logged for usage-pattern learning. |
-| `memory_get_context` | `query`, `limit?`, `repo_id?`, `max_chars?`, `intent?` | High-precision context retriever with intent-based expansion and LLM optimization. |
-| `memory_get_context_optimized` | `query`, `agent_type?`, `limit?`, `max_chars?`, `intent?` | Agent-specific context generation with model-optimized formatting. |
-| `memory_get_context_for_agent` | `query`, `agent_type?`, `max_tokens?` | Smart context generation that automatically selects the best format for the agent. |
-| `memory_get_file_context` | `file_path` | Get file context before editing. |
-| `memory_check_safety` | `file_paths` | Multi-File Refactor Safety Matrix. Call this BEFORE modifying a batch of multiple files! Analyzes cross-file dependencies, shared constraints, and breaking change risks across all target files. |
-| `memory_get_dependency_map` | `file_paths` | Cross-File Dependency Map for LLM priming. |
-| `memory_usage_stats` | `top_facts?` | USAGE-PATTERN INSIGHTS - Summarizes how this project's memory is being used. |
-| `memory_suggest_context` | `current_fact_ids`, `limit?` | PROACTIVE CONTEXT SUGGESTIONS - Predicts what context you may need next. |
-| `memory_optimize_db` | — | Run SQLite database maintenance: PRAGMA optimize, VACUUM, and check integrity. |
-| `memory_auto_maintenance` | `project_root?` | AUTOMATIC MAINTENANCE - self-heals 99%: incremental bootstrap (20) + scan auto_heal (importance=1) + backfill + optimize. |
-| `memory_export_ui` | `out_path?` | Generate an interactive HTML Knowledge Graph visualizer file for browsing memory. |
-| `memory_supersede` | `old_id`, `new_content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `expected_version?` | Replace an outdated fact with a corrected or updated one. |
-| `memory_deprecate` | `id`, `reason?` | Mark a fact as no longer valid without replacing it. |
-| `memory_get_state` | `category?`, `session_id?` | Get full snapshot of active project memory. |
-| `memory_link_facts` | `source_id`, `target_id`, `relation` | Create a directed graph edge between two facts. |
-| `memory_unlink_facts` | `source_id`, `target_id`, `relation` | Remove a directed graph edge between two facts. |
-| `memory_get_graph` | `root_id`, `max_depth?` | Traverse relationship edges starting from root_id up to max_depth. |
-| `memory_acquire_lock` | `resource`, `locked_by`, `ttl_seconds?` | Acquire an advisory lock on a named resource for multi-turn multi-agent operations. |
-| `memory_release_lock` | `resource`, `locked_by` | Release an advisory lock on a named resource. |
-| `memory_verify_provenance` | `fact_id`, `project_root?` | Verify code snippet SHA256 hash at file_path. Self-heals line range shifts |
-| `memory_consolidate` | `session_id?`, `category?`, `allow_all?` | Compress itemized micro-state facts into milestone summary facts. |
-| `memory_prune` | `days_inactive?`, `dry_run?` | PRUNE STALE FACTS - Deprecate low-value state/other facts not accessed in |
-| `memory_audit` | — | Scan active memory for potential near-duplicates or conflicting facts. |
-| `memory_export_markdown` | `category?` | Export active memory as formatted markdown for LLM context prompts. |
-| `memory_stats` | — | Overview of memory database statistics, categories, edges, and location. |
-| `memory_prepare_task` | `intent`, `file_paths?`, `limit?` | PRE-CODING FLIGHT BRIEFING - Call this at the START of every coding task. |
-| `memory_checkpoint_task` | `summary`, `components?`, `decisions?`, `test_baseline?`, `failures?` | POST-CODING CHECKPOINT - Call this at the END of every coding task. |
-| `memory_scan_provenance` | `project_root?`, `auto_deprecate?`, `auto_heal?` | BULK PROVENANCE HEALTH CHECK - Scan all active facts for code drift. |
-| `memory_backfill_embeddings` | — | SEMANTIC INDEX BACKFILL - Generate embeddings for all existing facts that lack them. |
-| `memory_promote_branch` | `source_branch_id`, `convergence_policy?` | Promote an experimental branch's episodic memories into its canonical root (KEEP_BOTH). |
-| `memory_create_branch` | `repo_id?` | Create a new experimental branch under the canonical root. |
-| `memory_discard_branch` | `source_branch_id`, `reason?` | Discard an experimental branch (terminal alternative to promotion). |
-| `memory_list_branches` | `repo_id?`, `status?` | List branches for a repo (read-only). |
-| `memory_bootstrap_project` | `project_root?`, `dry_run?`, `full?`, `max_facts?`, `install_hook?`, `drop_protocol?` | PROJECT ONBOARDING - Scan a repository and ingest its structural + documentary |
-| `memory_who_calls` | `symbol` | ONE-HOP CODE GRAPH QUERY - ask this mid-reasoning instead of re-reading files. |
-| `memory_project_shape` | — | PROJECT ORIENTATION - indexed file inventory and code-graph size. |
-| `memory_flag_fact` | `fact_id`, `note?`, `flag_type?` | CORRECTION HOOK - fire this the moment a served fact turns out wrong. |
+| `memory_write` | `category`, `content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `importance?`, `line_start?`, `line_end?`, `code_hash?`, `git_commit_sha?` | Record a durable fact this session learned that future sessions will need: decisions, constraints, gotchas, where components live. Secrets are refused. |
+| `memory_write_batch` | `facts` | Atomic batch form of memory_write for several related facts. |
+| `memory_query` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?` | Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have. |
+| `memory_get_context` | `query`, `agent_type?`, `max_tokens?`, `limit?`, `intent?` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. |
+| `memory_get_file_context` | `file_path` | Call BEFORE editing a file: its symbols, anchored facts, callers, and call-graph edges. |
+| `memory_check_safety` | `file_paths` | Call before a multi-file refactor: dependency risk matrix across the files you're about to change. |
+| `memory_supersede` | `old_id`, `new_content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `expected_version?` | Replace an outdated fact with corrected content. Use when you discover memory that is wrong. |
+| `memory_deprecate` | `id`, `reason?` | Mark a fact obsolete without replacement. |
+| `memory_stats` | — | Memory health: active/deprecated counts, category breakdown, edges. Call at session start per AGENTS.md. |
+| `memory_prepare_task` | `intent`, `file_paths?`, `limit?` | REQUIRED before writing or modifying any code in this repository. Returns the task briefing: relevant decisions, constraints, component facts, file-level impacts, cross-file dependency risks, and the current verified test baseline. |
+| `memory_checkpoint_task` | `summary`, `components?`, `decisions?`, `test_baseline?`, `failures?` | Call immediately after a task is verified complete (tests green). Records new components, decisions, the test baseline, and failed approaches as durable memory for future sessions. |
+| `memory_who_calls` | `symbol` | Where a symbol is defined, every call site, and importing files. Call before renaming or changing a signature. |
+| `memory_project_shape` | — | Lay of the land: indexed files, top modules by definition density, call/import edge totals. |
+| `memory_flag_fact` | `fact_id`, `note?`, `flag_type?` | Flag a fact as misleading or unverified so future briefings carry a warning. Use when memory looks wrong but you lack the correction. |
 <!-- tool-table:end -->
 
 ---

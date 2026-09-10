@@ -95,7 +95,7 @@ C:\PROJECT\project-memory
 ├── README.md                          # Primary human-readable documentation and architectural overview
 ├── README_NPM.md                      # npm package documentation and zero-config quickstart
 ├── requirements.txt                   # Production Python dependencies pinned to exact versions
-├── server.py                          # Main MCP server exposing 41 FastMCP tools over stdio
+├── server.py                          # Main MCP server exposing 14 FastMCP tools over stdio
 ├── setup.ps1                          # Automated Windows PowerShell environment bootstrapper
 ├── structural_extract.py              # Tree-sitter recursive-descent AST extractor (Python, JS, TS, TSX)
 ├── watcher.py                         # Background daemon thread monitoring project files for live AST re-indexing
@@ -121,7 +121,7 @@ C:\PROJECT\project-memory
                                            v
 +---------------------------------------------------------------------------------------+
 |                                      server.py                                        |
-|                        FastMCP Server ("CogniGraph", 41 tools)                     |
+|                        FastMCP Server ("CogniGraph", 14 tools)                     |
 +---------------------------------------------------------------------------------------+
         |                                  |                                 |
         | (per-call context manager)       | (background thread)             | (agent wiring)
@@ -178,7 +178,7 @@ C:\PROJECT\project-memory
 - **Server Implementation:** FastMCP instance `mcp = FastMCP("CogniGraph")` in [server.py:15](file:///C:/PROJECT/project-memory/server.py#L15).
 - **Transport:** Standard I/O (`stdio`) via `mcp.run()` in [server.py:1017](file:///C:/PROJECT/project-memory/server.py#L1017). Stdio framing integrity is guarded by configuring Python logging to `stderr` ([server.py:6, 13](file:///C:/PROJECT/project-memory/server.py#L6-L13)) and avoiding raw `print()` statements in server operations.
 - **Resource / Prompt Exposure:**
-  - **Tools:** Exactly **41 tools** are exposed via `@mcp.tool()`.
+  - **Tools:** Exactly **14 tools** are exposed via `@mcp.tool()`.
   - **Resources:** **0** (no `@mcp.resource` defined; state is retrieved dynamically via tools).
   - **Prompts:** **0** (no `@mcp.prompt` defined; priming workflows are handled by structured tool calls).
 
@@ -186,47 +186,20 @@ C:\PROJECT\project-memory
 
 | # | Tool Name | Description | Summary Input Schema (Parameters & Types) |
 |---|---|---|---|
-| 1 | `memory_write` | Records a new fact in the live `memory` table with deduplication guard. | `category: str`, `content: str`, `rationale: str = ""`, `confidence: str = "assumed"`, `session_id: str = ""`, `file_path: str = ""`, `tags: str = ""`, `importance: int = 3`, `line_start: int = 0`, `line_end: int = 0`, `code_hash: str = ""`, `git_commit_sha: str = ""` |
-| 2 | `memory_write_batch` | Records multiple facts atomically in a single transaction. | `facts: List[Dict[str, Any]]` |
-| 3 | `memory_query` | Lexical search over active facts using SQLite FTS5 BM25 matching. | `text: str`, `category: str = ""`, `tag: str = ""`, `limit: int = 10`, `session_id: str = ""` |
-| 4 | `memory_query_hybrid` | 7-lane RRF search combining lexical BM25, Jaccard, semantic embeddings, structural AST matching, intent boosting, and usage learning. | `text: str`, `category: str = ""`, `tag: str = ""`, `limit: int = 10`, `expand_graph: bool = True`, `session_id: str = ""`, `repo_id: Optional[int] = None`, `intent: str = ""`, `agent_type: str = ""` |
-| 5 | `memory_get_context` | High-precision Markdown context briefing with graph expansion, doc-noise suppression, and character budgeting. | `query: str`, `limit: int = 5`, `repo_id: Optional[int] = None`, `max_chars: int = 8000`, `intent: str = ""` |
-| 6 | `memory_get_context_optimized` | Agent-tuned context generation with target model token budgets and category priorities. | `query: str`, `agent_type: str = "default"`, `limit: int = 5`, `max_chars: int = 8000`, `intent: str = ""` |
-| 7 | `memory_get_context_for_agent` | Convenience selector determining best context format given a token ceiling. | `query: str`, `agent_type: str = "default"`, `max_tokens: int = 2000` |
-| 8 | `memory_get_file_context` | Pre-edit briefing for a specific file: AST symbols (classes, functions, imports), anchored facts, callers, and call-graph edges. | `file_path: str` |
-| 9 | `memory_check_safety` | Multi-file refactor safety matrix: analyzes cross-file dependencies and shared constraints across a batch of files. | `file_paths: List[str]` |
-| 10 | `memory_get_dependency_map` | Cross-file dependency map showing internal edges, external dependents, and risk classifications. | `file_paths: List[str]` |
-| 11 | `memory_usage_stats` | Summarizes retrieval counts, intent distribution, and most frequently retrieved facts. | `top_facts: int = 10` |
-| 12 | `memory_suggest_context` | Proactive context prediction: returns facts historically co-retrieved with the provided active fact IDs. | `current_fact_ids: List[int]`, `limit: int = 5` |
-| 13 | `memory_optimize_db` | Runs SQLite database maintenance: `PRAGMA optimize`, `VACUUM`, and integrity verification. | *(None)* |
-| 14 | `memory_auto_maintenance` | Self-healing composite: runs lightweight bootstrap (20 facts), auto-heals code drift, backfills embeddings, and optimizes DB. | `project_root: str = ""` |
-| 15 | `memory_export_ui` | Generates a standalone interactive 2D HTML Knowledge Graph visualizer file. | `out_path: str = ""` |
-| 16 | `memory_supersede` | Atomically replaces an outdated fact with an updated one under Optimistic Concurrency Control (`expected_version`). | `old_id: int`, `new_content: str`, `rationale: str = ""`, `confidence: str = "confirmed"`, `session_id: str = ""`, `file_path: str = ""`, `tags: str = ""`, `expected_version: Optional[int] = None` |
-| 17 | `memory_deprecate` | Marks a fact as obsolete without replacement. | `id: int`, `reason: str = ""` |
-| 18 | `memory_get_state` | Retrieves full snapshot of active memory facts, optionally filtered by category or session. | `category: str = ""`, `session_id: str = ""` |
-| 19 | `memory_link_facts` | Creates a directed graph edge between two facts (`depends_on`, `implements`, `conflicts_with`, `relates_to`). | `source_id: int`, `target_id: int`, `relation: str` |
-| 20 | `memory_unlink_facts` | Removes an existing directed graph relationship between two facts. | `source_id: int`, `target_id: int`, `relation: str` |
-| 21 | `memory_get_graph` | Traverses relationship edges starting from a root fact ID up to a specified depth using recursive CTEs. | `root_id: int`, `max_depth: int = 3` |
-| 22 | `memory_acquire_lock` | Acquires a named advisory lock with TTL for multi-agent swarm operations. | `resource: str`, `locked_by: str`, `ttl_seconds: int = 60` |
-| 23 | `memory_release_lock` | Releases an advisory lock on a named resource. | `resource: str`, `locked_by: str` |
-| 24 | `memory_verify_provenance`| Checks SHA256 snippet hash against source file on disk; detects and self-heals line range shifts. | `fact_id: int`, `project_root: str = ""` |
-| 25 | `memory_consolidate` | Compresses micro-state facts into milestone summary facts to prevent context bloat. | `session_id: str = ""`, `category: str = "state"`, `allow_all: bool = False` |
-| 26 | `memory_prune` | Deprecates stale, low-importance facts unaccessed for N days (defaults to dry-run preview). | `days_inactive: int = 90`, `dry_run: bool = True` |
-| 27 | `memory_audit` | Scans active memory for potential near-duplicates or conflicting facts. | *(None)* |
-| 28 | `memory_export_markdown` | Exports active memory formatted as structured Markdown for prompt construction. | `category: str = ""` |
-| 29 | `memory_stats` | Reports total active/deprecated counts, category breakdowns, edge counts, and database storage paths. | *(None)* |
-| 30 | `memory_prepare_task` | **Pre-coding flight briefing**: Returns unified Markdown of intent context, target file impacts, safety matrix, and test baselines. | `intent: str`, `file_paths: Optional[List[str]] = None`, `limit: int = 5` |
-| 31 | `memory_checkpoint_task`| **Post-coding checkpoint**: Atomically records new components, decisions, verified test baselines, and dead-end failures. | `summary: str`, `components: Optional[List[Dict[str, Any]]] = None`, `decisions: Optional[List[Dict[str, Any]]] = None`, `test_baseline: Optional[str] = None`, `failures: Optional[List[Dict[str, Any]]] = None` |
-| 32 | `memory_scan_provenance` | Bulk code-drift health check across all anchored facts (reports ok, drifted, missing, and healed). | `project_root: str = ""`, `auto_deprecate: bool = False`, `auto_heal: bool = False` |
-| 33 | `memory_backfill_embeddings`| Generates dense semantic vector embeddings for all facts currently lacking them. | *(None)* |
-| 34 | `memory_promote_branch` | Promotes an experimental branch's episodic memories into the canonical root using `KEEP_BOTH` policy. | `source_branch_id: int`, `convergence_policy: str = "KEEP_BOTH"` |
-| 35 | `memory_create_branch` | Creates a new experimental branch under the canonical root at the current revision. | `repo_id: Optional[int] = None` |
-| 36 | `memory_discard_branch` | Discards an experimental branch, creating a tombstone and updating lineage. | `source_branch_id: int`, `reason: Optional[str] = None` |
-| 37 | `memory_list_branches` | Lists all branches for a repository, optionally filtered by status (ACTIVE, PROMOTED, DISCARDED). | `repo_id: Optional[int] = None`, `status: Optional[str] = None` |
-| 38 | `memory_bootstrap_project`| Scans repository to ingest file tree summaries, manifests, docs, and git history into memory. | `project_root: str = ""`, `dry_run: bool = True`, `full: bool = False`, `max_facts: int = 150`, `install_hook: bool = True`, `drop_protocol: bool = True` |
-| 39 | `memory_who_calls` | One-hop AST code graph query: returns symbol definition, all call sites, and importing files from tree-sitter AST data. | `symbol: str` |
-| 40 | `memory_project_shape` | Returns high-level orientation: indexed file count, top modules by definition density, and call/import edge totals. | *(None)* |
-| 41 | `memory_flag_fact` | Correction hook: marks a fact as misleading or unverified so future briefings stamp an inline warning. | `fact_id: int`, `note: str = ""`, `flag_type: str = "misleading"` |
+| 1 | `memory_prepare_task` | REQUIRED before writing or modifying any code in this repository. Returns the task briefing: relevant decisions, constraints, component facts, file-level impacts, cross-file dependency risks, and the current verified test baseline. | `intent: str`, `file_paths: Optional[List[str]] = None`, `limit: int = 5` |
+| 2 | `memory_checkpoint_task` | Call immediately after a task is verified complete (tests green). Records new components, decisions, the test baseline, and failed approaches as durable memory for future sessions. | `summary: str`, `components: Optional[List[Dict[str, Any]]] = None`, `decisions: Optional[List[Dict[str, Any]]] = None`, `test_baseline: Optional[str] = None`, `failures: Optional[List[Dict[str, Any]]] = None` |
+| 3 | `memory_write` | Record a durable fact this session learned that future sessions will need: decisions, constraints, gotchas, where components live. Secrets are refused. | `category: str`, `content: str`, `rationale: str = ""`, `confidence: str = "assumed"`, `session_id: str = ""`, `file_path: str = ""`, `tags: str = ""`, `importance: int = 3`, `line_start: int = 0`, `line_end: int = 0`, `code_hash: str = ""`, `git_commit_sha: str = ""` |
+| 4 | `memory_write_batch` | Atomic batch form of memory_write for several related facts. | `facts: List[Dict[str, Any]]` |
+| 5 | `memory_query` | Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have. | `text: str`, `category: str = ""`, `tag: str = ""`, `limit: int = 10`, `expand_graph: bool = True`, `session_id: str = ""`, `repo_id: Optional[int] = None`, `intent: str = ""`, `agent_type: str = ""` |
+| 6 | `memory_get_context` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. | `query: str`, `agent_type: str = "default"`, `max_tokens: int = 2000`, `limit: int = 5`, `intent: str = ""` |
+| 7 | `memory_get_file_context` | Call BEFORE editing a file: its symbols, anchored facts, callers, and call-graph edges. | `file_path: str` |
+| 8 | `memory_check_safety` | Call before a multi-file refactor: dependency risk matrix across the files you're about to change. | `file_paths: List[str]` |
+| 9 | `memory_who_calls` | Where a symbol is defined, every call site, and importing files. Call before renaming or changing a signature. | `symbol: str` |
+| 10 | `memory_project_shape` | Lay of the land: indexed files, top modules by definition density, call/import edge totals. | *(None)* |
+| 11 | `memory_supersede` | Replace an outdated fact with corrected content. Use when you discover memory that is wrong. | `old_id: int`, `new_content: str`, `rationale: str = ""`, `confidence: str = "assumed"`, `session_id: str = ""`, `file_path: str = ""`, `tags: str = ""`, `expected_version: int = 0` |
+| 12 | `memory_deprecate` | Mark a fact obsolete without replacement. | `id: int`, `reason: str = ""` |
+| 13 | `memory_flag_fact` | Flag a fact as misleading or unverified so future briefings carry a warning. Use when memory looks wrong but you lack the correction. | `fact_id: int`, `note: str = ""`, `flag_type: str = "misleading"` |
+| 14 | `memory_stats` | Memory health: active/deprecated counts, category breakdown, edges. Call at session start per AGENTS.md. | *(None)* |
 
 ### How Context is Gathered and Built
 
@@ -416,7 +389,7 @@ The context-building mechanism operates across five concrete stages:
 
 ### What's Implemented & Complete
 
-- **Full MCP Server:** 41 tools fully registered and wired via FastMCP over stdio ([server.py:181-1013](file:///C:/PROJECT/project-memory/server.py#L181-L1013)).
+- **Full MCP Server:** 14 tools fully registered and wired via FastMCP over stdio ([server.py:181-522](file:///C:/PROJECT/project-memory/server.py#L181-L522)).
 - **Multi-Lane Hybrid RRF Search:** Complete 7-lane fusion engine with intent detection, agent lane weights, and usage-pattern frequency boosting ([pm_search.py:508-650](file:///C:/PROJECT/project-memory/pm_search.py#L508-L650)).
 - **Tree-sitter AST Extraction:** Recursive descent AST parsing for Python, JS, and TS, populating structural nodes, call edges, and import dependencies ([structural_extract.py](file:///C:/PROJECT/project-memory/structural_extract.py)).
 - **Background File Watcher:** Live file monitoring with debounce handling and automatic AST node re-indexing ([watcher.py](file:///C:/PROJECT/project-memory/watcher.py)).
@@ -458,9 +431,7 @@ Every documentation file present in the repository, its purpose, and any noted c
 
 1. **[README.md](file:///C:/PROJECT/project-memory/README.md):**
    - *Description:* Primary project overview, architecture description, quickstart guide, tool reference table, CLI guide, and reliability notes.
-   - *Discrepancies:*
-     - Line 60 states that `pytest` collects 190 tests; the actual test count is now **205 tests** following the addition of multi-IDE wire and CLI tests.
-     - Section 3 lists ~34 MCP tools in its reference table; the server code actually exposes **41 tools** (missing tools include `memory_promote_branch`, `memory_create_branch`, `memory_discard_branch`, `memory_list_branches`, `memory_bootstrap_project`, `memory_get_state`, and `memory_auto_maintenance`).
+   - *Status:* Accurate; Section 3 tool table is auto-generated from the live server registry (14 tools) and enforced by docs-drift CI.
 2. **[README_NPM.md](file:///C:/PROJECT/project-memory/README_NPM.md):**
    - *Description:* npm package documentation explaining zero-config `cognigraph` setup, automatic environment provisioning, and IDE snippets.
    - *Status:* Accurate and aligned with `index.js` and `package.json`.
