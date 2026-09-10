@@ -96,16 +96,6 @@ jobs:
           fi
         shell: bash
 
-      - name: Check README tool table is up to date
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.node-version == '20'
-        run: |
-          venv/bin/python scripts/gen_tool_table.py
-          if ! git diff --exit-code README.md; then
-            echo "::error::README tool table is stale — run scripts/gen_tool_table.py and commit"
-            exit 1
-          fi
-        shell: bash
-
       - name: Install Node.js dependencies
         run: npm ci
         # No node_modules to install currently, but future-proof
@@ -154,5 +144,34 @@ jobs:
                           pct = (covered / total * 100) if total > 0 else 0
                           print(f'{filename}: {pct:.1f}% ({covered}/{total})')
           PY
+          fi
+        shell: bash
+
+  docs-drift:
+    name: Docs drift (README tool table)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install package
+        run: |
+          python -m venv venv
+          venv/bin/pip install -e ".[dev]"
+        shell: bash
+
+      - name: Check README tool table is up to date
+        run: |
+          venv/bin/python scripts/gen_tool_table.py
+          if ! git diff --exit-code README.md; then
+            echo "::error::README tool table is stale — run scripts/gen_tool_table.py and commit"
+            exit 1
           fi
         shell: bash
