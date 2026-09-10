@@ -1,5 +1,5 @@
 """
-Project bootstrap / onboarding pipeline for project-memory.
+Project bootstrap / onboarding pipeline for CogniGraph.
 
 Scans a target repository and ingests structural + documentary context into the
 memory database, installs the git capture hook, and drops the agent protocol file —

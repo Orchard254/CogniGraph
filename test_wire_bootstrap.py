@@ -23,7 +23,7 @@ from wire import _backup, _merge_json, _python_exe, wire_agent, detect_agent, pr
 # --------------------------------------------------------------------------
 
 def _make_pm_root(tmp_path: Path) -> Path:
-    """Fake project-memory install root with an AGENTS.md template."""
+    """Fake CogniGraph install root with an AGENTS.md template."""
     pm = tmp_path / "pm"
     pm.mkdir()
     (pm / "AGENTS.md").write_text("# Protocol\n", encoding="utf-8")

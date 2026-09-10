@@ -74,7 +74,7 @@ def iter_py_files(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
         # prune common ignores similar to bootstrap
         dirnames[:] = [d for d in dirnames if d not in {
-            '.git', 'venv', '.venv', 'node_modules', '__pycache__', '.project-memory', 'dist', 'build'
+            '.git', 'venv', '.venv', 'node_modules', '__pycache__', '.project-memory', '.cognigraph', 'dist', 'build'
         }]
         for fn in filenames:
             if fn.lower().endswith(CODE_SUFFIX) and not fn.lower().endswith('.pyc'):

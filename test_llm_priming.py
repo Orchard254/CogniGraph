@@ -314,7 +314,7 @@ class TestEnhancedGetContext:
     def test_get_context_with_intent_param(self, seeded_store):
         ctx = seeded_store.get_context('fix authentication bug', intent='fix', limit=3)
         assert isinstance(ctx, str)
-        assert 'Project Memory Context' in ctx
+        assert 'CogniGraph Context' in ctx
 
     def test_get_context_auto_detects_intent(self, seeded_store):
         ctx = seeded_store.get_context('fix authentication bug', limit=3)

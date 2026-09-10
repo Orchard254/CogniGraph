@@ -10,7 +10,7 @@ from pm_common import default_db_path
 
 
 def main():
-    p = argparse.ArgumentParser(description="Inspect a project-memory SQLite DB (read-only).")
+    p = argparse.ArgumentParser(description="Inspect a CogniGraph SQLite DB (read-only).")
     p.add_argument("--db", default=None,
                    help="DB path (default: MEMORY_DB_PATH env or project default; never hardcoded)")
     args = p.parse_args()
