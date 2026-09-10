@@ -31,8 +31,8 @@ GOLDEN_PATH = Path(__file__).resolve().parent / "golden_set.json"
 TOP_K = 10
 
 
-def load_golden() -> List[Dict[str, Any]]:
-    data = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
+def load_golden(path: Optional[Path] = None) -> List[Dict[str, Any]]:
+    data = json.loads((path or GOLDEN_PATH).read_text(encoding="utf-8"))
     return data["items"]
 
 
@@ -138,13 +138,17 @@ def aggregate(per_item: List[Dict[str, Any]]) -> Dict[str, Any]:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Golden-set retrieval evaluation")
     parser.add_argument("--db", default=None, help="source memory.db (default: live DB)")
+    parser.add_argument("--golden", default=None,
+                        help="golden set file (default: eval/golden_set.json; "
+                             "use golden_tuning.json / golden_holdout.json for the split)")
     parser.add_argument("--runs", type=int, default=2,
                         help="consecutive runs for the determinism gate (default 2)")
     parser.add_argument("--json", action="store_true", help="emit machine-readable report")
     args = parser.parse_args(argv)
 
     src_db = args.db or default_db_path()
-    items = load_golden()
+    golden_path = Path(args.golden) if args.golden else GOLDEN_PATH
+    items = load_golden(golden_path)
 
     usage_before = usage_log_count(src_db)
 
@@ -186,7 +190,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
-        print(f"Golden eval: {len(items)} pairs, {len(runs)} run(s), source {src_db}")
+        print(f"Golden eval: {len(items)} pairs, {len(runs)} run(s), source {src_db}, "
+              f"golden {golden_path.name}")
         print(f"  recall@5  = {agg['recall@5']}")
         print(f"  recall@10 = {agg['recall@10']}")
         print(f"  MRR       = {agg['mrr']}")

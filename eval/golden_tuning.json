@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "created": "2026-09-10",
+  "source": "live .cognigraph/memory.db after corpus_hygiene (306 active facts)",
+  "description": "Tuning split (~2/3) of golden_set.json, stratified by category. Used for the k sweep.",
+  "items": [
+    {
+      "fact_id": 152,
+      "category": "component",
+      "query": "is there a zero-config npm package for wiring this into any IDE",
+      "content_prefix": "Created universal npm package @project-memory/mcp-server with zero-configuration"
+    },
+    {
+      "fact_id": 185,
+      "category": "component",
+      "query": "where does the README document the two-table intake contract",
+      "content_prefix": "README architecture section documents the two-table intake contract (memory=live"
+    },
+    {
+      "fact_id": 271,
+      "category": "component",
+      "query": "why are the bytecode-recovery artifacts excluded from git by filename",
+      "content_prefix": ".gitignore excludes the bytecode-recovery provenance artifacts by explicit filen"
+    },
+    {
+      "fact_id": 278,
+      "category": "component",
+      "query": "what does the npm tarball include to stay import-complete",
+      "content_prefix": "package.json files now includes pm_* modules, SQL schemas, and hooks/git_hook.py"
+    },
+    {
+      "fact_id": 325,
+      "category": "component",
+      "query": "is memory_cli.py covered by tests",
+      "content_prefix": "test_memory_cli.py covers all 22 memory_cli.py commands via FakeCLIStore dispatc"
+    },
+    {
+      "fact_id": 327,
+      "category": "component",
+      "query": "how is watcher.py tested deterministically",
+      "content_prefix": "test_watcher.py covers watcher.py deterministically (16 tests, 0.8s): filter, de"
+    },
+    {
+      "fact_id": 360,
+      "category": "component",
+      "query": "where are the performance microbenchmarks and the embedding latency numbers",
+      "content_prefix": "bench/bench_memory.py: 9 microbenchmarks saved to baseline_20260910.json (cold/w"
+    },
+    {
+      "fact_id": 375,
+      "category": "component",
+      "query": "is there a project brief with the architecture and conventions",
+      "content_prefix": "Project brief documentation: project-brief.md written with full technical detail"
+    },
+    {
+      "fact_id": 141,
+      "category": "component",
+      "query": "what packages does requirements.txt install",
+      "content_prefix": "requirements.txt: 9 deps: mcp==1.9.4, fastembed, scikit-learn, numpy, sqlite-vec"
+    },
+    {
+      "fact_id": 342,
+      "category": "component",
+      "query": "are the server.py MCP tools tested",
+      "content_prefix": "test_server_tools.py covers server.py MCP tools (16 tests, 4.3s, hermetic)"
+    },
+    {
+      "fact_id": 126,
+      "category": "decision",
+      "query": "where does repo_id derivation live now",
+      "content_prefix": "Centralize repo_id derivation in MemoryStore._derive_default_repo_id()"
+    },
+    {
+      "fact_id": 151,
+      "category": "decision",
+      "query": "why did we package this as a universal npm module",
+      "content_prefix": "Project-memory should be packaged as a universal npm package for automatic IDE-a"
+    },
+    {
+      "fact_id": 194,
+      "category": "decision",
+      "query": "why was memory_store split into mixins rather than separate services",
+      "content_prefix": "Split MemoryStore via mixin composition rather than delegation or separate servi"
+    },
+    {
+      "fact_id": 197,
+      "category": "decision",
+      "query": "why does memory_store.py still re-export everything after the split",
+      "content_prefix": "Keep backward-compatible re-exports in memory_store.py rather than updating all "
+    },
+    {
+      "fact_id": 229,
+      "category": "decision",
+      "query": "where do failed approaches from checkpoint_task end up",
+      "content_prefix": "Failed approaches from checkpoint_task are stored as constraints tagged negative"
+    },
+    {
+      "fact_id": 319,
+      "category": "decision",
+      "query": "why must subprocess probes pass stdin=DEVNULL on Windows",
+      "content_prefix": "All git/python subprocess probes must pass stdin=DEVNULL with a timeout; inherit"
+    },
+    {
+      "fact_id": 167,
+      "category": "decision",
+      "query": "why do the standalone test scripts stay out of pytest collection",
+      "content_prefix": "Standalone test_*.py scripts are excluded from pytest via conftest collect_ignor"
+    },
+    {
+      "fact_id": 206,
+      "category": "decision",
+      "query": "what happens to long bootstrap doc facts under coding intents",
+      "content_prefix": "Doc-noise suppression demotes rather than drops long bootstrap doc facts, and on"
+    },
+    {
+      "fact_id": 236,
+      "category": "decision",
+      "query": "do state facts show up in file briefings",
+      "content_prefix": "State facts are excluded from file briefings entirely rather than truncated"
+    },
+    {
+      "fact_id": 260,
+      "category": "decision",
+      "query": "why does watcher.py keep a per-thread store cache",
+      "content_prefix": "Per-thread store cache in watcher.py rather than check_same_thread=False on the "
+    },
+    {
+      "fact_id": 351,
+      "category": "decision",
+      "query": "what did the near-duplicate dedup fix change",
+      "content_prefix": "Dedup bug fixed: _find_near_duplicate now falls through to tokenized-Jaccard whe"
+    },
+    {
+      "fact_id": 111,
+      "category": "constraint",
+      "query": "what order does the mandatory session protocol run in",
+      "content_prefix": "Whole workflow self-prompting 0-6: STOP → memory_stats → memory_query_hybrid(int"
+    },
+    {
+      "fact_id": 259,
+      "category": "constraint",
+      "query": "which watcher verification approach turned out to be a mistake",
+      "content_prefix": "Verifying watcher graph freshness only architecturally (tracing _sync_file -> sy"
+    },
+    {
+      "fact_id": 377,
+      "category": "constraint",
+      "query": "why does passing a directory to node --test fail on windows",
+      "content_prefix": "node --test test-js/ (directory form) fails on Windows Node 24 with MODULE_NOT_F"
+    },
+    {
+      "fact_id": 385,
+      "category": "constraint",
+      "query": "why does polling CI runs by head_sha come up empty right after a push",
+      "content_prefix": "Polling runs by head_sha immediately after push returned total_count 0 for ~65 s"
+    },
+    {
+      "fact_id": 273,
+      "category": "state",
+      "query": "what did the initial git commit contain",
+      "content_prefix": "Completed git init — the last deferred item. Initialized the repository (branch "
+    },
+    {
+      "fact_id": 397,
+      "category": "state",
+      "query": "when did the rebrand to cognigraph happen and on which branch",
+      "content_prefix": "Phase 1.9 rebrand project-memory to CogniGraph completed on branch phase-1.9-reb"
+    },
+    {
+      "fact_id": 153,
+      "category": "state",
+      "query": "was the universal npm package setup actually tested in an IDE",
+      "content_prefix": "Successfully tested universal npm package setup in Windsurf IDE with automatic N"
+    },
+    {
+      "fact_id": 180,
+      "category": "state",
+      "query": "what did phase 3 usage-pattern learning introduce",
+      "content_prefix": "Phase 3 LLM priming implementation complete. (3A) Usage-pattern learning: new me"
+    },
+    {
+      "fact_id": 235,
+      "category": "state",
+      "query": "what did the code graph and trust layer implement",
+      "content_prefix": "Implemented the code graph and trust layer for LLM priming. (1) Code graph: stru"
+    },
+    {
+      "fact_id": 246,
+      "category": "state",
+      "query": "what did stage-2 JS/TS code graph parity ship",
+      "content_prefix": "Stage-2 code graph parity for JS/TS/TSX plus a graph regression gate in the eval"
+    },
+    {
+      "fact_id": 352,
+      "category": "state",
+      "query": "what did the four subagent items close out",
+      "content_prefix": "All four subagent items closed: docs count 190→191, stdio e2e test, dedup embed "
+    },
+    {
+      "fact_id": 390,
+      "category": "state",
+      "query": "what did the phase 1.5 hygiene pass change",
+      "content_prefix": "Phase 1.5 hygiene pass: (1) propagated the Python 3.12 floor to every runtime ga"
+    },
+    {
+      "fact_id": 366,
+      "category": "state",
+      "query": "what did the weekly DB maintenance find",
+      "content_prefix": "Weekly DB maintenance completed: prune 0 candidates, audit stable (re-observatio"
+    },
+    {
+      "fact_id": 240,
+      "category": "state",
+      "query": "what caused the prepare_task briefing bloat and how was it fixed",
+      "content_prefix": "Fixed the prepare_task briefing bloat measured in the 2026-09-02 priming simulat"
+    },
+    {
+      "fact_id": 309,
+      "category": "state",
+      "query": "what did the bug audit conclude was fixed",
+      "content_prefix": "Audit complete: all actionable bugs fixed in 9 commits (8b71186, 27b34f6, 2fb2b1"
+    }
+  ]
+}

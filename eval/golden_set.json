@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created": "2026-09-10",
-  "source": "live .cognigraph/memory.db at branch phase-3-eval-baseline (311 active facts)",
+  "source": "live .cognigraph/memory.db after corpus_hygiene (306 active facts)",
   "description": "Golden query/fact pairs for retrieval evaluation. Queries are phrased the way a coding agent mid-task would ask; each is answerable by its fact alone. fact_id references the live DB at creation time - if a fact is superseded or deprecated, update the pair (eval_golden.py fails loudly on stale pairs).",
   "items": [
     {
@@ -26,7 +26,7 @@
       "fact_id": 271,
       "category": "component",
       "query": "why are the bytecode-recovery artifacts excluded from git by filename",
-      "content_prefix": ".gitignore excludes the bytecode-recovery provenance artifacts by explicit filena"
+      "content_prefix": ".gitignore excludes the bytecode-recovery provenance artifacts by explicit filen"
     },
     {
       "fact_id": 278,
@@ -77,6 +77,18 @@
       "content_prefix": "memory-workflow skill (global + project scopes, SKILL.md 50 lines)"
     },
     {
+      "fact_id": 141,
+      "category": "component",
+      "query": "what packages does requirements.txt install",
+      "content_prefix": "requirements.txt: 9 deps: mcp==1.9.4, fastembed, scikit-learn, numpy, sqlite-vec"
+    },
+    {
+      "fact_id": 342,
+      "category": "component",
+      "query": "are the server.py MCP tools tested",
+      "content_prefix": "test_server_tools.py covers server.py MCP tools (16 tests, 4.3s, hermetic)"
+    },
+    {
       "fact_id": 126,
       "category": "decision",
       "query": "where does repo_id derivation live now",
@@ -86,7 +98,7 @@
       "fact_id": 151,
       "category": "decision",
       "query": "why did we package this as a universal npm module",
-      "content_prefix": "Project-memory should be packaged as a universal npm package for automatic IDE-n"
+      "content_prefix": "Project-memory should be packaged as a universal npm package for automatic IDE-a"
     },
     {
       "fact_id": 173,
@@ -127,8 +139,50 @@
     {
       "fact_id": 379,
       "category": "decision",
-      "query": "what's the python floor and why",
+      "query": "what is the python floor and why",
       "content_prefix": "Python matrix floor raised to 3.12 because numpy==2.5.3 requires >=3.12 and scik"
+    },
+    {
+      "fact_id": 167,
+      "category": "decision",
+      "query": "why do the standalone test scripts stay out of pytest collection",
+      "content_prefix": "Standalone test_*.py scripts are excluded from pytest via conftest collect_ignor"
+    },
+    {
+      "fact_id": 206,
+      "category": "decision",
+      "query": "what happens to long bootstrap doc facts under coding intents",
+      "content_prefix": "Doc-noise suppression demotes rather than drops long bootstrap doc facts, and on"
+    },
+    {
+      "fact_id": 227,
+      "category": "decision",
+      "query": "when does the code graph actually create a call edge",
+      "content_prefix": "Call edges resolve conservatively: an edge is only created when the callee is un"
+    },
+    {
+      "fact_id": 236,
+      "category": "decision",
+      "query": "do state facts show up in file briefings",
+      "content_prefix": "State facts are excluded from file briefings entirely rather than truncated"
+    },
+    {
+      "fact_id": 260,
+      "category": "decision",
+      "query": "why does watcher.py keep a per-thread store cache",
+      "content_prefix": "Per-thread store cache in watcher.py rather than check_same_thread=False on the "
+    },
+    {
+      "fact_id": 395,
+      "category": "decision",
+      "query": "which function owns the legacy data-dir migration",
+      "content_prefix": "Single migration owner pm_common.maybe_migrate_legacy_data_dir; Node wrapper pas"
+    },
+    {
+      "fact_id": 351,
+      "category": "decision",
+      "query": "what did the near-duplicate dedup fix change",
+      "content_prefix": "Dedup bug fixed: _find_near_duplicate now falls through to tokenized-Jaccard whe"
     },
     {
       "fact_id": 111,
@@ -161,6 +215,12 @@
       "content_prefix": "Polling runs by head_sha immediately after push returned total_count 0 for ~65 s"
     },
     {
+      "fact_id": 378,
+      "category": "constraint",
+      "query": "how do we talk to the GitHub API on this machine without gh",
+      "content_prefix": "gh CLI not available on this machine; GitHub API polled via curl + git credentia"
+    },
+    {
       "fact_id": 273,
       "category": "state",
       "query": "what did the initial git commit contain",
@@ -177,6 +237,84 @@
       "category": "state",
       "query": "what was broken in the opencode wire config",
       "content_prefix": "Fixed OpenCode wire format (mcpServers→mcp), re-wired opencode.json, full suite "
+    },
+    {
+      "fact_id": 153,
+      "category": "state",
+      "query": "was the universal npm package setup actually tested in an IDE",
+      "content_prefix": "Successfully tested universal npm package setup in Windsurf IDE with automatic N"
+    },
+    {
+      "fact_id": 180,
+      "category": "state",
+      "query": "what did phase 3 usage-pattern learning introduce",
+      "content_prefix": "Phase 3 LLM priming implementation complete. (3A) Usage-pattern learning: new me"
+    },
+    {
+      "fact_id": 189,
+      "category": "state",
+      "query": "is the episodic intake contract work finished",
+      "content_prefix": "Completed all remaining non-priming work. (1) Episodic intake contract: formally"
+    },
+    {
+      "fact_id": 235,
+      "category": "state",
+      "query": "what did the code graph and trust layer implement",
+      "content_prefix": "Implemented the code graph and trust layer for LLM priming. (1) Code graph: stru"
+    },
+    {
+      "fact_id": 246,
+      "category": "state",
+      "query": "what did stage-2 JS/TS code graph parity ship",
+      "content_prefix": "Stage-2 code graph parity for JS/TS/TSX plus a graph regression gate in the eval"
+    },
+    {
+      "fact_id": 266,
+      "category": "state",
+      "query": "what did the live watcher freshness test catch",
+      "content_prefix": "Live-tested watcher-driven graph freshness end to end and caught two real bugs t"
+    },
+    {
+      "fact_id": 352,
+      "category": "state",
+      "query": "what did the four subagent items close out",
+      "content_prefix": "All four subagent items closed: docs count 190→191, stdio e2e test, dedup embed "
+    },
+    {
+      "fact_id": 390,
+      "category": "state",
+      "query": "what did the phase 1.5 hygiene pass change",
+      "content_prefix": "Phase 1.5 hygiene pass: (1) propagated the Python 3.12 floor to every runtime ga"
+    },
+    {
+      "fact_id": 193,
+      "category": "state",
+      "query": "what happened in the memory_store corruption recovery",
+      "content_prefix": "memory_store.py corruption recovery completed on 2026-05-29. The nine methods lo"
+    },
+    {
+      "fact_id": 366,
+      "category": "state",
+      "query": "what did the weekly DB maintenance find",
+      "content_prefix": "Weekly DB maintenance completed: prune 0 candidates, audit stable (re-observatio"
+    },
+    {
+      "fact_id": 240,
+      "category": "state",
+      "query": "what caused the prepare_task briefing bloat and how was it fixed",
+      "content_prefix": "Fixed the prepare_task briefing bloat measured in the 2026-09-02 priming simulat"
+    },
+    {
+      "fact_id": 219,
+      "category": "state",
+      "query": "what did the auto-tagging priming backlog item do",
+      "content_prefix": "Implemented the remaining 3-item priming backlog. (1) Auto-tagging in memory_sto"
+    },
+    {
+      "fact_id": 309,
+      "category": "state",
+      "query": "what did the bug audit conclude was fixed",
+      "content_prefix": "Audit complete: all actionable bugs fixed in 9 commits (8b71186, 27b34f6, 2fb2b1"
     }
   ]
 }
