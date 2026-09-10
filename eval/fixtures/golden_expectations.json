@@ -1,0 +1,36 @@
+{
+  "description": "Committed eval-gate baseline for golden_fixture.db. Regenerate both files together via scripts/freeze_eval_fixture.py.",
+  "pinned_now": "2026-09-11T00:00:00+00:00",
+  "rrf_k": 5,
+  "created_at_utc": "2026-09-10T22:44:57.560134+00:00",
+  "git_commit_sha": "f8de50e4d338e92128c8748b8774fe92df307cde",
+  "fixture": {
+    "path": "eval/fixtures/golden_fixture.db",
+    "source_db": "C:\\PROJECT\\project-memory\\.cognigraph\\memory.db",
+    "bytes": 6148096,
+    "sha256": "e045e473a41f1555aa00e9e0cd336bb1a79c0004c266e69ce6c98798b74ee0cd",
+    "active_facts": 330,
+    "embeddings_precomputed": true,
+    "golden_query_embeddings": 52
+  },
+  "gate_policy": "FAIL if measured recall@5 or mrr for either split is below the committed value. Deterministic pinned clock: expected behavior is exact reproduction; any drop is a regression.",
+  "splits": {
+    "tuning": {
+      "n": 36,
+      "recall@5": 0.8333,
+      "recall@10": 0.9444,
+      "mrr": 0.5672,
+      "missed_fact_ids": [
+        111,
+        153
+      ]
+    },
+    "holdout": {
+      "n": 16,
+      "recall@5": 0.75,
+      "recall@10": 1.0,
+      "mrr": 0.5298,
+      "missed_fact_ids": []
+    }
+  }
+}
