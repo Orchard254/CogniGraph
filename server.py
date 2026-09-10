@@ -1,7 +1,7 @@
 """
 MCP server exposing an enterprise project memory store as tools a coding agent can call.
 
-Run via stdio - point opencode's, Cursor's, or Antigravity's mcpServers config at this script.
+Run via stdio - point opencode's `mcp` config (others use `mcpServers`) at this script.
 """
 import logging
 import threading

@@ -188,10 +188,29 @@ def test_wire_opencode_entry(tmp_path):
     assert res["agents_md"] == "created"
     assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "# Protocol\n"
     cfg = json.loads((proj / "opencode.json").read_text(encoding="utf-8"))
-    entry = cfg["mcpServers"]["cognigraph"]
-    assert entry["args"][0].endswith("server.py")
-    assert entry["env"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
+    assert "mcpServers" not in cfg  # opencode uses `mcp`, never `mcpServers`
+    entry = cfg["mcp"]["cognigraph"]
+    assert entry["type"] == "local"
+    assert entry["command"][0] and entry["command"][1].endswith("server.py")
+    assert entry["environment"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
+    assert entry["enabled"] is True
     assert (proj / ".cognigraph").is_dir()
+
+
+def test_wire_opencode_cleans_legacy_mcpservers(tmp_path):
+    """Old (buggy) opencode.json with `mcpServers` gets migrated to `mcp`."""
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    (proj / "opencode.json").write_text(json.dumps({
+        "mcpServers": {"cognigraph": {"command": "py", "args": ["server.py"],
+                                      "env": {"MEMORY_DB_PATH": "x"}}}}),
+        encoding="utf-8")
+    res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    cfg = json.loads((proj / "opencode.json").read_text(encoding="utf-8"))
+    assert "mcpServers" not in cfg
+    assert cfg["mcp"]["cognigraph"]["type"] == "local"
 
 
 def test_wire_cursor_nested_and_existing_backup(tmp_path):
