@@ -190,8 +190,8 @@ def test_wire_opencode_entry(tmp_path):
     cfg = json.loads((proj / "opencode.json").read_text(encoding="utf-8"))
     entry = cfg["mcpServers"]["project-memory"]
     assert entry["args"][0].endswith("server.py")
-    assert entry["env"]["MEMORY_DB_PATH"].endswith(".project-memory/memory.db")
-    assert (proj / ".project-memory").is_dir()
+    assert entry["env"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
+    assert (proj / ".cognigraph").is_dir()
 
 
 def test_wire_cursor_nested_and_existing_backup(tmp_path):
@@ -289,7 +289,7 @@ def test_wire_antigravity_home_config(tmp_path, monkeypatch):
     assert cfg.exists()
     data = json.loads(cfg.read_text(encoding="utf-8"))
     assert "project-memory" in data["mcpServers"]
-    assert data["mcpServers"]["project-memory"]["env"]["MEMORY_DB_PATH"].endswith(".project-memory/memory.db")
+    assert data["mcpServers"]["project-memory"]["env"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
 
 
 def test_wire_windsurf_home_config(tmp_path, monkeypatch):

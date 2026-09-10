@@ -2,7 +2,8 @@
 Agent wiring module for project-memory.
 
 Generates the correct MCP server configuration for a given coding agent,
-pinned to the target project's own .project-memory/memory.db, and drops the
+pinned to the target project's own .cognigraph/memory.db (legacy
+.project-memory/ migrated on first use), and drops the
 AGENTS.md protocol file. Existing agent configs are merged (never clobbered)
 and backed up first.
 
@@ -168,7 +169,13 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
     if not proj_root.is_dir():
         raise ValueError(f"project root does not exist: {proj_root}")
 
-    db_dir = proj_root / ".project-memory"
+    db_dir = None
+    try:
+        from pm_common import maybe_migrate_legacy_data_dir
+        db_dir = maybe_migrate_legacy_data_dir(proj_root)
+    except Exception:
+        from pm_common import DATA_DIR_NAME
+        db_dir = proj_root / DATA_DIR_NAME
     db_dir.mkdir(parents=True, exist_ok=True)
     db_path = str(db_dir / "memory.db").replace("\\", "/")
 

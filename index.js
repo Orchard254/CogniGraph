@@ -32,7 +32,9 @@ async function main() {
     projectRoot = path.dirname(path.dirname(dbPath));
   } else {
     projectRoot = await findProjectRoot();
-    dbPath = path.join(projectRoot, '.project-memory', 'memory.db');
+    // .cognigraph when present, legacy .project-memory passed through for the
+    // Python server's once-at-startup migration (lib.resolveDefaultDbPath).
+    dbPath = lib.resolveDefaultDbPath(projectRoot);
   }
     
     // Step 2: Ensure database directory exists

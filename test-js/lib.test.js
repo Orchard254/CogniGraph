@@ -153,6 +153,53 @@ describe('incomplete marker write/read round-trip', () => {
   });
 });
 
+describe('resolveDefaultDbPath (.cognigraph vs legacy .project-memory)', () => {
+  function makeRoot() {
+    return fs.mkdtempSync(path.join(os.tmpdir(), 'cg-resolve-'));
+  }
+
+  it('prefers .cognigraph when neither dir exists (fresh project)', () => {
+    const root = makeRoot();
+    try {
+      // Pure resolution: must not create directories as a side effect.
+      assert.strictEqual(
+        lib.resolveDefaultDbPath(root),
+        path.join(root, '.cognigraph', 'memory.db')
+      );
+      assert.ok(!fs.existsSync(path.join(root, '.cognigraph')));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('passes the legacy path through when only .project-memory exists', () => {
+    const root = makeRoot();
+    try {
+      fs.mkdirSync(path.join(root, '.project-memory'), { recursive: true });
+      assert.strictEqual(
+        lib.resolveDefaultDbPath(root),
+        path.join(root, '.project-memory', 'memory.db')
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers .cognigraph when both dirs exist', () => {
+    const root = makeRoot();
+    try {
+      fs.mkdirSync(path.join(root, '.cognigraph'), { recursive: true });
+      fs.mkdirSync(path.join(root, '.project-memory'), { recursive: true });
+      assert.strictEqual(
+        lib.resolveDefaultDbPath(root),
+        path.join(root, '.cognigraph', 'memory.db')
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('launchMCPServer spawn options (injected fake spawn)', () => {
   function makeFakeChild() {
     const handlers = {};

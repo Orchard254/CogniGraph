@@ -146,10 +146,10 @@ def test_root_binds_to_project_db(cli, tmp_path):
     # Only --root-accepting commands (verify/scan-provenance/bootstrap) bind;
     # `stats` has no --root flag, so exercise the binding via scan-provenance.
     store = cli("scan-provenance", "--root", str(tmp_path))
-    assert store.db_path.replace("\\", "/").endswith(".project-memory/memory.db")
-    assert ".project-memory" in store.db_path
+    assert store.db_path.replace("\\", "/").endswith(".cognigraph/memory.db")
+    assert ".cognigraph" in store.db_path
     # No stray DB file created by a stubbed store; real binding only.
-    assert not (tmp_path / ".project-memory" / "memory.db").exists()
+    assert not (tmp_path / ".cognigraph" / "memory.db").exists()
 
 
 def test_default_db_fallback(cli, monkeypatch):

@@ -58,6 +58,32 @@ const SOFT_DEP_LANES = {
 const INCOMPLETE_MARKER_FILENAME = '.postinstall-incomplete';
 
 // ---------------------------------------------------------------------------
+// Data-directory resolution (CogniGraph rebrand, Phase 1.9).
+// The live DB lives at <project>/.cognigraph/memory.db; legacy checkouts
+// still carry <project>/.project-memory/memory.db until first-use migration
+// renames it. The Node wrapper never migrates by itself: when only the legacy
+// dir exists it passes the legacy path through and the Python server migrates
+// once at startup (before any store is opened). Single migration owner:
+// pm_common.maybe_migrate_legacy_data_dir.
+// ---------------------------------------------------------------------------
+
+const DATA_DIR_NAME = '.cognigraph';
+const LEGACY_DATA_DIR_NAME = '.project-memory';
+
+/** Default DB path for a project root (pure except for fs injection). */
+function resolveDefaultDbPath(projectRoot, fsMod = fs) {
+  const current = path.join(projectRoot, DATA_DIR_NAME);
+  const legacy = path.join(projectRoot, LEGACY_DATA_DIR_NAME);
+  let hasCurrent = false;
+  let hasLegacy = false;
+  try { hasCurrent = fsMod.existsSync(current); } catch (e) { /* ignore */ }
+  try { hasLegacy = fsMod.existsSync(legacy); } catch (e) { /* ignore */ }
+  if (hasCurrent) return path.join(current, 'memory.db');
+  if (hasLegacy) return path.join(legacy, 'memory.db');
+  return path.join(current, 'memory.db');
+}
+
+// ---------------------------------------------------------------------------
 // Version parsing / comparison (pure)
 // ---------------------------------------------------------------------------
 
@@ -289,6 +315,9 @@ module.exports = {
   HARD_REQUIRED_DEPS,
   SOFT_DEP_LANES,
   INCOMPLETE_MARKER_FILENAME,
+  DATA_DIR_NAME,
+  LEGACY_DATA_DIR_NAME,
+  resolveDefaultDbPath,
   parsePythonVersion,
   parseMinVersion,
   isPythonVersionSupported,

@@ -892,7 +892,7 @@ class TestGitCommitAnchoring:
         return tmp_path, head
 
     def _store_in(self, repo_root):
-        db = repo_root / ".project-memory" / "memory.db"
+        db = repo_root / ".cognigraph" / "memory.db"
         db.parent.mkdir(parents=True, exist_ok=True)
         return MemoryStore(str(db))
 

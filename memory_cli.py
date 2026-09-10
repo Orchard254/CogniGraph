@@ -88,7 +88,7 @@ def main():
 
     # export-ui
     ui_parser = subparsers.add_parser("export-ui", help="Export standalone interactive HTML graph visualizer")
-    ui_parser.add_argument("--out", help="Output HTML file path (default: .project-memory/memory_graph.html)")
+    ui_parser.add_argument("--out", help="Output HTML file path (default: .cognigraph/memory_graph.html)")
     ui_parser.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
 
     # state
@@ -161,11 +161,21 @@ def main():
     wire_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
 
     args = parser.parse_args()
+    # One-shot legacy (.project-memory -> .cognigraph) data-dir migration at
+    # CLI entry — never per command internals (os.replace on an open SQLite
+    # file fails on Windows). An explicit --db bypasses CWD/env sniffing;
+    # an explicit --root migrates just that project.
+    from pm_common import ensure_startup_migration, maybe_migrate_legacy_data_dir
+    if getattr(args, "db", None) or getattr(args, "root", None):
+        hints = [args.root] if getattr(args, "root", None) else []
+        ensure_startup_migration(hints=hints, include_cwd=False, include_env=False)
+    else:
+        ensure_startup_migration()
     # Without explicit --db, bind to target project's memory DB if --root given
     # so facts never land in the CWD fallback store (and no stray folder is created).
     db_path = getattr(args, "db", None)
     if db_path is None and getattr(args, "root", None):
-        db_path = str(Path(args.root).resolve() / ".project-memory" / "memory.db")
+        db_path = str(maybe_migrate_legacy_data_dir(Path(args.root).resolve()) / "memory.db")
     db_path = db_path or default_db_path()
 
     # Constructed lazily per command: `wire` never touches the DB, and
