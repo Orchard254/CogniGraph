@@ -98,7 +98,7 @@ async function setupPythonEnvironment() {
   // Check if Python is available
   const pythonCmd = await findPythonCommand();
   if (!pythonCmd) {
-    throw new Error('Python 3.8+ is required but not found. Please install Python.');
+    throw new Error(`Python ${PYTHON_MIN_VERSION}+ is required but not found. Please install Python.`);
   }
   
   // Get package directory (where this script is installed)

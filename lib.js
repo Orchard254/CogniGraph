@@ -19,16 +19,13 @@ const os = require('os');
 // ---------------------------------------------------------------------------
 
 const PACKAGE_VERSION = '1.0.0';
-const PYTHON_MIN_VERSION = '3.8';
+const PYTHON_MIN_VERSION = '3.12';
 
 const PYTHON_CANDIDATES = [
   'python3',
   'python',
-  'python3.8',
-  'python3.9',
-  'python3.10',
-  'python3.11',
   'python3.12',
+  'python3.13',
 ];
 
 // Must mirror the package.json "files" list (python sources, schemas, hooks).

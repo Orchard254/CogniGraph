@@ -36,9 +36,9 @@ async function main() {
     console.log('📋 Checking Python availability...');
     const pythonCmd = await findPythonCommand();
     if (!pythonCmd) {
-      console.warn('⚠️  Python 3.8+ not found. The system will attempt to auto-install Python dependencies on first use.');
-      console.log('💡 For best performance, install Python 3.8+ from python.org');
-      markIncomplete('python-3.8+-not-found');
+      console.warn('⚠️  Python 3.12+ not found. The system will attempt to auto-install Python dependencies on first use.');
+      console.log('💡 For best performance, install Python 3.12+ from python.org');
+      markIncomplete('python-3.12+-not-found');
       return;
     }
     console.log(`✅ Found Python: ${pythonCmd}`);

@@ -6,11 +6,11 @@ Set-Location -Path $PSScriptRoot
 
 $venvPython = Join-Path $PSScriptRoot "venv\Scripts\python.exe"
 
-# 0. Require Python 3.8+
+# 0. Require Python 3.12+
 $pyVersion = & python --version 2>&1
-if ($LASTEXITCODE -ne 0) { throw "Python not found on PATH. Install Python 3.8+ first." }
+if ($LASTEXITCODE -ne 0) { throw "Python not found on PATH. Install Python 3.12+ first." }
 if ($pyVersion -notmatch 'Python 3\.(\d+)') { throw "Could not parse Python version from: $pyVersion" }
-if ([int]$Matches[1] -lt 8) { throw "Python 3.8+ required, found: $pyVersion" }
+if ([int]$Matches[1] -lt 12) { throw "Python 3.12+ required, found: $pyVersion" }
 Write-Host "[setup] Found $pyVersion"
 
 # 1. Create the virtual environment if missing

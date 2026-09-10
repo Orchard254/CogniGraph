@@ -31,10 +31,10 @@ describe('parsePythonVersion', () => {
   }
 });
 
-describe('isPythonVersionSupported (<3.8 rejection)', () => {
-  it('rejects Python below 3.8', () => {
+describe('isPythonVersionSupported (<3.12 rejection)', () => {
+  it('rejects Python below 3.12', () => {
+    assert.strictEqual(lib.isPythonVersionSupported({ major: 3, minor: 11 }), false);
     assert.strictEqual(lib.isPythonVersionSupported({ major: 3, minor: 7 }), false);
-    assert.strictEqual(lib.isPythonVersionSupported({ major: 3, minor: 0 }), false);
     assert.strictEqual(lib.isPythonVersionSupported({ major: 2, minor: 7 }), false);
   });
 
@@ -44,9 +44,9 @@ describe('isPythonVersionSupported (<3.8 rejection)', () => {
     assert.strictEqual(lib.isPythonVersionSupported(lib.parsePythonVersion('garbage')), false);
   });
 
-  it('accepts 3.8+ and future majors', () => {
-    assert.strictEqual(lib.isPythonVersionSupported({ major: 3, minor: 8 }), true);
-    assert.strictEqual(lib.isPythonVersionSupported({ major: 3, minor: 11 }), true);
+  it('accepts 3.12+ and future majors', () => {
+    assert.strictEqual(lib.isPythonVersionSupported({ major: 3, minor: 12 }), true);
+    assert.strictEqual(lib.isPythonVersionSupported({ major: 3, minor: 13 }), true);
     assert.strictEqual(lib.isPythonVersionSupported({ major: 4, minor: 0 }), true);
   });
 });
@@ -61,8 +61,8 @@ describe('getCandidatePythonCommands', () => {
 });
 
 describe('findPythonCommand (injected runCommand)', () => {
-  it('skips <3.8 and picks the first supported candidate', async () => {
-    const versions = { python3: 'Python 3.7.9', python: 'Python 3.11.2' };
+  it('skips <3.12 and picks the first supported candidate', async () => {
+    const versions = { python3: 'Python 3.11.2', python: 'Python 3.12.1' };
     const fakeRun = async (cmd) => {
       if (versions[cmd]) return { stdout: versions[cmd], stderr: '' };
       throw new Error(`not found: ${cmd}`);
@@ -70,8 +70,8 @@ describe('findPythonCommand (injected runCommand)', () => {
     assert.strictEqual(await lib.findPythonCommand(fakeRun), 'python');
   });
 
-  it('returns null when every candidate is missing or <3.8', async () => {
-    const alwaysOld = async () => ({ stdout: 'Python 3.7.0', stderr: '' });
+  it('returns null when every candidate is missing or <3.12', async () => {
+    const alwaysOld = async () => ({ stdout: 'Python 3.11.0', stderr: '' });
     assert.strictEqual(await lib.findPythonCommand(alwaysOld), null);
 
     const alwaysMissing = async () => { throw new Error('ENOENT'); };
