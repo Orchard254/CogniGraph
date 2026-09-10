@@ -4,6 +4,8 @@ An enterprise-grade, state-of-the-art persistent project-memory system for AI co
 
 It provides cross-session, vendor-neutral memory for project components, architectural decisions, constraints, file dependency graph edges, code-anchored provenance, and state checkpoints.
 
+For the full agent-orientation deep dive — tech stack, annotated file tree, complete 41-tool catalog, conventions, and current state — see [project-brief.md](project-brief.md).
+
 ---
 
 ## Key Capabilities
