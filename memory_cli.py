@@ -164,6 +164,8 @@ def main():
                         help="Target coding agent (antigravity, cursor, windsurf, claude, zed, roo, cline, opencode, kiro, vscode, generic). Omit for interactive menu.")
     wire_p.add_argument("--root", help="Project root to wire (default: CWD)")
     wire_p.add_argument("--no-protocol", action="store_true", help="Skip AGENTS.md drop")
+    wire_p.add_argument("--global", dest="global_config", action="store_true",
+                        help="Also update the user-global config (antigravity only; default is project-local)")
     wire_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
 
     args = parser.parse_args()
@@ -359,7 +361,8 @@ def main():
                 agent = agent_norm
             try:
                 res = wire_agent(agent, project_root=args.root,
-                                 drop_protocol=not args.no_protocol)
+                                 drop_protocol=not args.no_protocol,
+                                 global_config=getattr(args, "global_config", False))
                 print(json.dumps(res, indent=2))
             except ValueError as e:
                 sys.stderr.write(f"Error: {e}\n")

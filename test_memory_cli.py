@@ -175,20 +175,38 @@ def test_wire_never_constructs_store(cli, monkeypatch, tmp_path):
     monkeypatch.setattr(memory_cli, "MemoryStore", boom)
     seen = {}
     monkeypatch.setattr("wire.wire_agent",
-                        lambda agent, project_root=None, drop_protocol=True:
+                        lambda agent, project_root=None, drop_protocol=True,
+                        global_config=False:
                         seen.update(agent=agent, root=project_root,
-                                    drop=drop_protocol) or {"status": "WIRED"})
+                                    drop=drop_protocol,
+                                    global_config=global_config) or {"status": "WIRED"})
     monkeypatch.setattr(sys, "argv", ["memory_cli.py", "wire", "zed",
                                       "--root", str(tmp_path), "--no-protocol"])
     memory_cli.main()  # would raise if a store were constructed
-    assert seen == {"agent": "zed", "root": str(tmp_path), "drop": False}
+    assert seen == {"agent": "zed", "root": str(tmp_path), "drop": False,
+                    "global_config": False}
+
+
+def test_wire_global_flag_passthrough(cli, monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr("wire.wire_agent",
+                        lambda agent, project_root=None, drop_protocol=True,
+                        global_config=False:
+                        seen.update(agent=agent, global_config=global_config)
+                        or {"status": "WIRED"})
+    monkeypatch.setattr(sys, "argv", ["memory_cli.py", "wire", "antigravity",
+                                      "--root", str(tmp_path), "--global"])
+    memory_cli.main()
+    assert seen == {"agent": "antigravity", "global_config": True}
 
 
 def test_wire_auto_detect_dispatched(cli, monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr("wire.wire_agent",
-                        lambda agent, project_root=None, drop_protocol=True:
-                        seen.update(agent=agent, root=project_root) or {"status": "WIRED"})
+                        lambda agent, project_root=None, drop_protocol=True,
+                        global_config=False:
+                        seen.update(agent=agent, root=project_root,
+                                    global_config=global_config) or {"status": "WIRED"})
     monkeypatch.setattr("wire.detect_agent", lambda proj: "antigravity")
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(sys, "argv", ["memory_cli.py", "wire", "--root", str(tmp_path)])

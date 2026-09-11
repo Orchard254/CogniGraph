@@ -40,7 +40,7 @@ AGENT_ALIASES = {
     "roocode": "roo",
 }
 AGENT_DISPLAY_NAMES = {
-    "antigravity": "Google Antigravity (~/.gemini/config/mcp_config.json)",
+    "antigravity": "Google Antigravity (.agents/mcp_config.json)",
     "cursor": "Cursor (.cursor/mcp.json)",
     "windsurf": "Windsurf (~/.codeium/windsurf/mcp_config.json)",
     "claude": "Claude Desktop (global config)",
@@ -201,10 +201,16 @@ def _merge_json(path: Path, top_key: str, entry: Dict[str, Any]) -> None:
 
 def wire_agent(agent: str, project_root: Optional[str] = None,
                project_memory_root: Optional[str] = None,
-               drop_protocol: bool = True) -> Dict[str, Any]:
+               drop_protocol: bool = True,
+               global_config: bool = False) -> Dict[str, Any]:
     """
     Wire a target project to CogniGraph for the given coding agent.
     Returns a report with config file paths, backups, and exact next-step commands.
+
+    global_config only affects agents with a global config location
+    (currently antigravity): when False (default) only the project-local
+    workspace file is written so one project's DB path cannot bleed into
+    other projects; pass True to also update the user-global file.
     """
     if not isinstance(agent, str):
         raise ValueError(f"agent must be one of {SUPPORTED_AGENTS}, got {type(agent).__name__}")
@@ -262,8 +268,16 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         cfg = proj_root / ".cursor" / "mcp.json"
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
     elif agent == "antigravity":
-        cfg = Path.home() / ".gemini" / "config" / "mcp_config.json"
-        _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
+        # Primary: workspace .agents/mcp_config.json (project-local, STATIC).
+        # The old global-only write (~/.gemini/config/mcp_config.json) meant
+        # the last-wired project's DB path bled into every other workspace,
+        # so global is now opt-in via global_config=True, never the default.
+        ws_cfg = proj_root / ".agents" / "mcp_config.json"
+        _safe_merge(ws_cfg, "mcpServers", {"command": py, "args": [server], "env": env})
+        if global_config:
+            gbl_cfg = Path.home() / ".gemini" / "config" / "mcp_config.json"
+            _safe_merge(gbl_cfg, "mcpServers",
+                        {"command": py, "args": [server], "env": env})
     elif agent == "windsurf":
         cfg = Path.home() / ".codeium" / "windsurf" / "mcp_config.json"
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})

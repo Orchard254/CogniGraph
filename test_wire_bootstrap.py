@@ -381,20 +381,44 @@ def test_wire_protocol_no_template(tmp_path):
     assert res["agents_md"] == "skipped_no_template"
 
 
-def test_wire_antigravity_home_config(tmp_path, monkeypatch):
+def test_wire_antigravity_workspace_primary(tmp_path, monkeypatch):
+    """Default writes project-local .agents/mcp_config.json, NOT global."""
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setattr(wire.Path, "home", lambda: fake_home)
     pm = _make_pm_root(tmp_path)
-    proj = _make_proj(tmp_path)
+    proj = _make_proj(tmp_path, "ag_proj")
+    ws_dir = proj / ".agents"
+    ws_dir.mkdir()
+    existing = ws_dir / "mcp_config.json"
+    existing.write_text(json.dumps({"mcpServers": {"other": {"command": "other"}}}),
+                        encoding="utf-8")
     res = wire_agent("antigravity", project_root=str(proj), project_memory_root=str(pm),
                      drop_protocol=False)
     assert res["status"] == "WIRED"
-    cfg = fake_home / ".gemini" / "config" / "mcp_config.json"
-    assert cfg.exists()
-    data = json.loads(cfg.read_text(encoding="utf-8"))
-    assert "cognigraph" in data["mcpServers"]
-    assert data["mcpServers"]["cognigraph"]["env"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
+    data = json.loads(existing.read_text(encoding="utf-8"))
+    assert data["mcpServers"]["other"] == {"command": "other"}  # sibling preserved
+    assert data["mcpServers"]["cognigraph"]["env"]["MEMORY_DB_PATH"].endswith(
+        ".cognigraph/memory.db")
+    assert str(existing) in res["config_files"]
+    # Global untouched by default — no cross-project bleed.
+    assert not (fake_home / ".gemini" / "config" / "mcp_config.json").exists()
+
+
+def test_wire_antigravity_global_opt_in(tmp_path, monkeypatch):
+    """global_config=True additionally writes the user-global file."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setattr(wire.Path, "home", lambda: fake_home)
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path, "ag_global_proj")
+    res = wire_agent("antigravity", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False, global_config=True)
+    assert res["status"] == "WIRED"
+    assert (proj / ".agents" / "mcp_config.json").exists()
+    gbl = fake_home / ".gemini" / "config" / "mcp_config.json"
+    assert gbl.exists()
+    assert "cognigraph" in json.loads(gbl.read_text(encoding="utf-8"))["mcpServers"]
 
 
 def test_wire_windsurf_home_config(tmp_path, monkeypatch):
@@ -504,7 +528,8 @@ def test_wire_alias_normalization(tmp_path, monkeypatch):
     res = wire_agent("gemini", project_root=str(proj), project_memory_root=str(pm),
                      drop_protocol=False)
     assert res["agent"] == "antigravity"
-    assert (fake_home / ".gemini" / "config" / "mcp_config.json").exists()
+    assert (proj / ".agents" / "mcp_config.json").exists()
+    assert not (fake_home / ".gemini" / "config" / "mcp_config.json").exists()
 
 
 def test_detect_agent_from_env(tmp_path):
