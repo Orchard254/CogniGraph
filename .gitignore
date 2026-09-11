@@ -23,14 +23,21 @@ MEMORY_SNAPSHOT.md
 scratch/
 *.bak
 *.bak-*
+*.bak.[0-9]*
 *.db-journal
 *.db-wal
 *.db-shm
 
-# IDE / agent local state
+# IDE / agent local state (MCP wire outputs contain absolute local paths — never commit)
 .agents/
+.cursor/
+.roo/
+.cline/
 .kiro/
 .trae/
+.vscode/
+.mcp.json
+.opencode/
 opencode.json
 
 # Coverage artifacts
