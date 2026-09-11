@@ -519,6 +519,77 @@ def test_detect_agent_vscode_marker(tmp_path):
     assert detect_agent(proj, env={}, home=empty_home) == "vscode"
 
 
+def test_merge_json_nested_dotted_key(tmp_path):
+    """Dotted top_key merges into nested mappings (ZCode mcp.servers)."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"mcp": {"servers": {"other": {"command": "o"}},
+                                       "other_top": 1},
+                               "mcpServers": {"stale": True}}),
+                   encoding="utf-8")
+    _merge_json(cfg, "mcp.servers", {"command": "py"})
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert "mcpServers" not in data  # compat key dropped, no disagreement
+    assert data["mcp"]["servers"]["other"] == {"command": "o"}
+    assert data["mcp"]["other_top"] == 1
+    assert data["mcp"]["servers"]["cognigraph"] == {"command": "py"}
+
+
+def test_wire_zcode_workspace_config(tmp_path, monkeypatch):
+    """ZCode writes workspace .zcode/config.json, never .agents/mcp.json."""
+    fake_home = tmp_path / "zhome"
+    fake_home.mkdir()
+    monkeypatch.setattr(wire.Path, "home", lambda: fake_home)
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path, "zcode_proj")
+    zdir = proj / ".zcode"
+    zdir.mkdir()
+    existing = zdir / "config.json"
+    existing.write_text(json.dumps({"mcp": {"servers": {"other": {"command": "o"}}}}),
+                        encoding="utf-8")
+    res = wire_agent("zcode", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    assert res["warnings"] == []
+    data = json.loads(existing.read_text(encoding="utf-8"))
+    assert data["mcp"]["servers"]["other"] == {"command": "o"}  # sibling kept
+    entry = data["mcp"]["servers"]["cognigraph"]
+    assert entry["args"][0].endswith("server.py")
+    assert entry["env"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
+    assert not (proj / ".agents" / "mcp.json").exists()
+    assert str(existing) in res["config_files"]
+    assert list(res["mcp_snippet"].keys()) == ["mcp"]
+
+
+def test_wire_zcode_user_shadow_warning(tmp_path, monkeypatch):
+    """A user-global cognigraph entry triggers an unmissable warning."""
+    fake_home = tmp_path / "zhome2"
+    user_cli = fake_home / ".zcode" / "cli"
+    user_cli.mkdir(parents=True)
+    (user_cli / "config.json").write_text(json.dumps(
+        {"mcp": {"servers": {"cognigraph": {"command": "stale"}}}}),
+        encoding="utf-8")
+    monkeypatch.setattr(wire.Path, "home", lambda: fake_home)
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path, "zcode_shadow_proj")
+    res = wire_agent("zcode", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    assert len(res["warnings"]) == 1
+    assert "SHADOWING RISK" in res["warnings"][0]
+    assert any("SHADOWING RISK" in s for s in res["next_steps"])
+    # Workspace write still lands (ready once the user cleans the global).
+    data = json.loads((proj / ".zcode" / "config.json").read_text(encoding="utf-8"))
+    assert "cognigraph" in data["mcp"]["servers"]
+
+
+def test_detect_agent_zcode_marker(tmp_path):
+    proj = _make_proj(tmp_path, "zcode_detect")
+    empty_home = tmp_path / "zcode_empty_home"
+    empty_home.mkdir(exist_ok=True)
+    (proj / ".zcode").mkdir()
+    assert detect_agent(proj, env={}, home=empty_home) == "zcode"
+
+
 def test_wire_alias_normalization(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     fake_home.mkdir()

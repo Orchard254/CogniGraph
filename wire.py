@@ -31,6 +31,7 @@ SUPPORTED_AGENTS = (
     "opencode",
     "kiro",
     "vscode",
+    "zcode",
     "generic",
 )
 AGENT_ALIASES = {
@@ -50,6 +51,7 @@ AGENT_DISPLAY_NAMES = {
     "opencode": "OpenCode (opencode.json)",
     "kiro": "Kiro (.kiro/settings/mcp.json)",
     "vscode": "VS Code (.vscode/mcp.json)",
+    "zcode": "ZCode (.zcode/config.json)",
     "generic": "Generic (display JSON snippet only)",
 }
 ENTRY_NAME = "cognigraph"
@@ -128,6 +130,10 @@ def _merge_json(path: Path, top_key: str, entry: Dict[str, Any]) -> None:
     """Merge one MCP entry into a JSON config file, preserving existing content.
     Removes deprecated keys (e.g., 'mcp' when writing 'mcpServers').
 
+    top_key may be dotted for nested configs (e.g., ZCode's "mcp.servers"):
+    intermediate objects are created as needed and the entry lands in the
+    leaf mapping under ENTRY_NAME.
+
     A corrupt (unparseable) existing file is NEVER silently clobbered: it is
     preserved as <name>.corrupt-<timestamp>.bak and reported, then rebuilt.
     Writes are atomic (tmp + fsync + os.replace) so a mid-write crash cannot
@@ -170,18 +176,33 @@ def _merge_json(path: Path, top_key: str, entry: Dict[str, Any]) -> None:
         data.pop("mcpServers", None)
         data.pop("mcp", None)
         data.pop("context_servers", None)
+    elif top_key == "mcp.servers":
+        # ZCode native shape is {"mcp": {"servers": {...}}}; drop the
+        # industry-standard compat key at top level so the two cannot disagree.
+        data.pop("mcpServers", None)
+        data.pop("context_servers", None)
+        data.pop("servers", None)
 
-    data.setdefault(top_key, {})
-    if not isinstance(data[top_key], dict):
-        data[top_key] = {}
+    parts = top_key.split(".")
+    node = data
+    for part in parts[:-1]:
+        child = node.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            node[part] = child
+        node = child
+    leaf_key = parts[-1]
+    node.setdefault(leaf_key, {})
+    if not isinstance(node[leaf_key], dict):
+        node[leaf_key] = {}
     # CogniGraph rebrand: replace legacy orphans instead of leaving duplicates.
     for legacy_key in LEGACY_ENTRY_NAMES:
         if legacy_key != ENTRY_NAME:
-            data[top_key].pop(legacy_key, None)
-    for name in [n for n, v in data[top_key].items()
+            node[leaf_key].pop(legacy_key, None)
+    for name in [n for n, v in node[leaf_key].items()
                  if n != ENTRY_NAME and _is_legacy_entry(n, v)]:
-        del data[top_key][name]
-    data[top_key][ENTRY_NAME] = entry
+        del node[leaf_key][name]
+    node[leaf_key][ENTRY_NAME] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(data, indent=2, ensure_ascii=False)
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
@@ -242,6 +263,7 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
     written: List[str] = []
     backups: List[str] = []
     config_errors: List[str] = []
+    warnings: List[str] = []
 
     def _safe_merge(cfg: Path, top_key: str, entry: Dict[str, Any]) -> None:
         # A corrupt/unwritable config must surface as a report entry, never
@@ -314,6 +336,34 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         portable = proj_root / ".mcp.json"
         _safe_merge(portable, "mcpServers",
                     {"command": py, "args": [server], "env": env})
+    elif agent == "zcode":
+        # ZCode: workspace .zcode/config.json with the native
+        # {"mcp": {"servers": {...}}} shape (STATIC bake). Deliberately NOT
+        # .agents/mcp.json: ZCode skips that fallback entirely once a .zcode
+        # config exists in the same scope, so writing there would go dead.
+        # CRITICAL load rule: on a same-name conflict the USER scope always
+        # wins over the workspace, so a user-global `cognigraph` entry would
+        # silently shadow this per-project wiring. Check first and warn loud.
+        try:
+            user_cfg = Path.home() / ".zcode" / "cli" / "config.json"
+            if user_cfg.is_file():
+                user_data = json.loads(user_cfg.read_text(encoding="utf-8"))
+                if (isinstance(user_data, dict)
+                        and isinstance(user_data.get("mcp"), dict)
+                        and isinstance(user_data["mcp"].get("servers"), dict)
+                        and ENTRY_NAME in user_data["mcp"]["servers"]):
+                    warnings.append(
+                        f"SHADOWING RISK: user-global {user_cfg} already defines "
+                        f"'mcp.servers.{ENTRY_NAME}' — ZCode always prefers the "
+                        "user scope over the workspace on same-name conflicts, "
+                        "so the workspace entry below will be IGNORED until the "
+                        "user-scope entry is renamed or removed. Per-project DB "
+                        "isolation will NOT work until then.")
+        except Exception as e:
+            warnings.append(f"Could not inspect user-scope ZCode config: {e}")
+        cfg = proj_root / ".zcode" / "config.json"
+        _safe_merge(cfg, "mcp.servers",
+                    {"command": py, "args": [server], "env": env})
     elif agent == "claude":
         appdata = os.environ.get("APPDATA")
         if appdata:
@@ -361,6 +411,14 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
                                      "${workspaceFolder}/.cognigraph/memory.db"}}
             }
         }
+    elif agent == "zcode":
+        snippet = {
+            "mcp": {
+                "servers": {
+                    ENTRY_NAME: {"command": py, "args": [server], "env": env}
+                }
+            }
+        }
     else:
         snippet = {
             "mcpServers": {
@@ -380,6 +438,10 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
             "Note: Zed will show a one-time trust confirmation for this "
             "project's context_servers on first open — this is expected, "
             "not a wire failure.")
+    if warnings:
+        # Warnings are impossible-to-miss: first in next_steps (the printed
+        # user output) as well as a dedicated report field.
+        next_steps = [f"WARNING: {w}" for w in warnings] + next_steps
     return {
         "status": "WIRED_WITH_ERRORS" if config_errors else "WIRED",
         "agent": agent,
@@ -388,6 +450,7 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         "config_files": written,
         "backups": backups,
         "config_errors": config_errors,
+        "warnings": warnings,
         "agents_md": agents_md_status,
         "mcp_snippet": snippet,
         "next_steps": next_steps,
@@ -415,6 +478,8 @@ def detect_agent(project_root: Optional[Path] = None,
         return "kiro"
     if (proj / ".vscode").is_dir():
         return "vscode"
+    if (proj / ".zcode").is_dir():
+        return "zcode"
     if (proj / "opencode.json").is_file():
         return "opencode"
     if (proj / ".opencode" / "opencode.json").is_file():
