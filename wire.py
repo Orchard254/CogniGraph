@@ -353,6 +353,19 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
                 ENTRY_NAME: {"command": py, "args": [server], "env": env}
             }
         }
+    next_steps = [
+        f'"{py}" "{cli}" bootstrap --root "{proj_root}"   # dry-run preview',
+        f'"{py}" "{cli}" bootstrap --root "{proj_root}" --apply   # ingest into memory',
+        "Restart your coding agent so it loads the new MCP configuration.",
+    ] + ([f"Fix config errors first: {e}" for e in config_errors] if config_errors else [])
+    if agent == "zed":
+        # User-facing (not just a code comment): project-scope
+        # context_servers triggers a one-time worktree-trust prompt on first
+        # open. Accept it — the wiring itself is complete at this point.
+        next_steps.append(
+            "Note: Zed will show a one-time trust confirmation for this "
+            "project's context_servers on first open — this is expected, "
+            "not a wire failure.")
     return {
         "status": "WIRED_WITH_ERRORS" if config_errors else "WIRED",
         "agent": agent,
@@ -363,11 +376,7 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         "config_errors": config_errors,
         "agents_md": agents_md_status,
         "mcp_snippet": snippet,
-        "next_steps": [
-            f'"{py}" "{cli}" bootstrap --root "{proj_root}"   # dry-run preview',
-            f'"{py}" "{cli}" bootstrap --root "{proj_root}" --apply   # ingest into memory',
-            "Restart your coding agent so it loads the new MCP configuration.",
-        ] + ([f"Fix config errors first: {e}" for e in config_errors] if config_errors else []),
+        "next_steps": next_steps,
     }
 
 

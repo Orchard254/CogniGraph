@@ -313,6 +313,20 @@ def test_wire_zed_top_level_env_regression(tmp_path):
     assert "settings" not in pm_entry
 
 
+def test_wire_zed_trust_note_in_output(tmp_path):
+    """Zed output tells the user the trust prompt is expected."""
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path, "zed_note_proj")
+    res = wire_agent("zed", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    assert any("one-time trust" in s for s in res["next_steps"])
+    # Non-zed agents must not carry the note.
+    res2 = wire_agent("cursor", project_root=str(proj), project_memory_root=str(pm),
+                      drop_protocol=False)
+    assert not any("one-time trust" in s for s in res2["next_steps"])
+
+
 def test_wire_generic_writes_nothing(tmp_path):
     pm = _make_pm_root(tmp_path)
     proj = _make_proj(tmp_path)
