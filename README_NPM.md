@@ -21,7 +21,7 @@ That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 14 (pa
 
 ## ✨ Features
 
-- **Universal Compatibility**: Works with Trae, Windsurf, Cursor, Claude Desktop, Zed, and any MCP-compatible IDE
+- **Universal Compatibility**: Works with Trae, Windsurf, Cursor, Claude Desktop, Zed, Kiro, VS Code, ZCode, and any MCP-compatible IDE
 - **Zero Configuration**: Auto-detects project structure and creates databases automatically
 - **Auto-Bootstrap**: Intelligently learns your project on first use
 - **Persistent Memory**: Maintains context across coding sessions
@@ -104,6 +104,42 @@ That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 14 (pa
       "env": {
         "MEMORY_DB_PATH": "<your-project>/.cognigraph/memory.db"
       }
+    }
+  }
+}
+```
+
+### Kiro
+```json
+{
+  "mcpServers": {
+    "cognigraph": {
+      "command": "npx",
+      "args": ["-y", "cognigraph"]
+    }
+  }
+}
+```
+
+### VS Code
+```json
+{
+  "mcpServers": {
+    "cognigraph": {
+      "command": "npx",
+      "args": ["-y", "cognigraph"]
+    }
+  }
+}
+```
+
+### ZCode
+```json
+{
+  "mcpServers": {
+    "cognigraph": {
+      "command": "npx",
+      "args": ["-y", "cognigraph"]
     }
   }
 }

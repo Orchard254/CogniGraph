@@ -12,7 +12,7 @@
 
 - **Languages & Versions:**
   - **Python:** Requires `>=3.12` (enforced in [pyproject.toml:11](file:///C:/PROJECT/project-memory/pyproject.toml#L11), [setup.ps1:9-13](file:///C:/PROJECT/project-memory/setup.ps1#L9-L13), and [lib.js:29-37](file:///C:/PROJECT/project-memory/lib.js#L29-L37)). Actively tested up to Python 3.13 in [.github/workflows/ci.yml:18-29](file:///C:/PROJECT/project-memory/.github/workflows/ci.yml#L18-L29).
-  - **JavaScript / Node.js:** Node.js `>=14.0.0` (specified in [package.json:32](file:///C:/PROJECT/project-memory/package.json#L32)). Tested against Node 18, 20, and 22 in CI.
+  - **JavaScript / Node.js:** Node.js `>=18.0.0` (specified in [package.json:32](file:///C:/PROJECT/project-memory/package.json#L32)). Tested against Node 18, 20, and 22 in CI.
   - **SQL:** SQLite 3.35+ dialect with FTS5 and vector extension support.
 
 - **Core Frameworks & SDKs:**
