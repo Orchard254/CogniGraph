@@ -161,7 +161,7 @@ def main():
     # wire
     wire_p = subparsers.add_parser("wire", help="Generate MCP config for a coding agent on a target project")
     wire_p.add_argument("agent", nargs="?", default=None,
-                        help="Target coding agent (antigravity, cursor, windsurf, claude, zed, roo, cline, opencode, kiro, generic). Omit for interactive menu.")
+                        help="Target coding agent (antigravity, cursor, windsurf, claude, zed, roo, cline, opencode, kiro, vscode, generic). Omit for interactive menu.")
     wire_p.add_argument("--root", help="Project root to wire (default: CWD)")
     wire_p.add_argument("--no-protocol", action="store_true", help="Skip AGENTS.md drop")
     wire_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")

@@ -30,10 +30,12 @@ SUPPORTED_AGENTS = (
     "cline",
     "opencode",
     "kiro",
+    "vscode",
     "generic",
 )
 AGENT_ALIASES = {
     "gemini": "antigravity",
+    "vs-code": "vscode",
     "roo-code": "roo",
     "roocode": "roo",
 }
@@ -47,6 +49,7 @@ AGENT_DISPLAY_NAMES = {
     "cline": "Cline (.cline/mcp.json)",
     "opencode": "OpenCode (opencode.json)",
     "kiro": "Kiro (.kiro/settings/mcp.json)",
+    "vscode": "VS Code (.vscode/mcp.json)",
     "generic": "Generic (display JSON snippet only)",
 }
 ENTRY_NAME = "cognigraph"
@@ -161,6 +164,12 @@ def _merge_json(path: Path, top_key: str, entry: Dict[str, Any]) -> None:
     elif top_key == "context_servers":
         data.pop("mcpServers", None)
         data.pop("mcp", None)
+    elif top_key == "servers":
+        # VS Code uses `servers` (not `mcpServers`); drop the other shapes so
+        # a stale key cannot linger and shadow the live entry.
+        data.pop("mcpServers", None)
+        data.pop("mcp", None)
+        data.pop("context_servers", None)
 
     data.setdefault(top_key, {})
     if not isinstance(data[top_key], dict):
@@ -267,6 +276,25 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         # resolved absolute MEMORY_DB_PATH is the only reliable wiring.
         cfg = proj_root / ".kiro" / "settings" / "mcp.json"
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
+    elif agent == "vscode":
+        # VS Code: DYNAMIC workspace variable (the only IDE in scope with a
+        # confirmed ${workspaceFolder} expansion for command/args/env).
+        # .vscode/mcp.json uses the `servers` key with a required per-entry
+        # `type: "stdio"` — NOT `mcpServers`.
+        dyn_env = {"MEMORY_DB_PATH": "${workspaceFolder}/.cognigraph/memory.db"}
+        cfg = proj_root / ".vscode" / "mcp.json"
+        _safe_merge(cfg, "servers", {"type": "stdio", "command": py,
+                                     "args": [server], "cwd": "${workspaceFolder}",
+                                     "env": dyn_env})
+        # Portable fallback: VS Code's Agent Host does not read
+        # .vscode/mcp.json directly (it receives a forwarded copy, and
+        # ${input:...} servers are excluded). A root-level .mcp.json with the
+        # STATIC resolved absolute path is read natively by Agent Host /
+        # Copilot tooling (~/.copilot/mcp-config.json user equivalent), so
+        # both files are written: DYNAMIC for the editor, STATIC for portability.
+        portable = proj_root / ".mcp.json"
+        _safe_merge(portable, "mcpServers",
+                    {"command": py, "args": [server], "env": env})
     elif agent == "claude":
         appdata = os.environ.get("APPDATA")
         if appdata:
@@ -303,6 +331,15 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
             "mcp": {
                 ENTRY_NAME: {"type": "local", "command": [py, server],
                              "environment": env, "enabled": True}
+            }
+        }
+    elif agent == "vscode":
+        snippet = {
+            "servers": {
+                ENTRY_NAME: {"type": "stdio", "command": py, "args": [server],
+                             "cwd": "${workspaceFolder}",
+                             "env": {"MEMORY_DB_PATH":
+                                     "${workspaceFolder}/.cognigraph/memory.db"}}
             }
         }
     else:
@@ -348,6 +385,8 @@ def detect_agent(project_root: Optional[Path] = None,
         return "zed"
     if (proj / ".kiro").is_dir():
         return "kiro"
+    if (proj / ".vscode").is_dir():
+        return "vscode"
     if (proj / "opencode.json").is_file():
         return "opencode"
     if (proj / ".agents").is_dir():

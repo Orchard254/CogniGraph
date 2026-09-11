@@ -415,6 +415,44 @@ def test_detect_agent_kiro_marker(tmp_path):
     assert detect_agent(proj, env={}, home=empty_home) == "kiro"
 
 
+def test_wire_vscode_dynamic_and_portable(tmp_path):
+    """VS Code: DYNAMIC .vscode/mcp.json (servers+type) + STATIC .mcp.json."""
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path, "vscode_proj")
+    vsc = proj / ".vscode"
+    vsc.mkdir()
+    existing = vsc / "mcp.json"
+    existing.write_text(json.dumps({"servers": {"other": {"type": "stdio",
+                                                          "command": "other"}}}),
+                        encoding="utf-8")
+    res = wire_agent("vscode", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    data = json.loads(existing.read_text(encoding="utf-8"))
+    assert "mcpServers" not in data  # VS Code uses `servers`, never `mcpServers`
+    assert data["servers"]["other"] == {"type": "stdio", "command": "other"}
+    entry = data["servers"]["cognigraph"]
+    assert entry["type"] == "stdio"
+    assert entry["cwd"] == "${workspaceFolder}"
+    assert entry["env"]["MEMORY_DB_PATH"] == "${workspaceFolder}/.cognigraph/memory.db"
+    assert entry["args"][0].endswith("server.py")
+    # Portable Agent Host fallback carries the STATIC resolved absolute path.
+    portable = json.loads((proj / ".mcp.json").read_text(encoding="utf-8"))
+    p_entry = portable["mcpServers"]["cognigraph"]
+    assert p_entry["env"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
+    assert "${workspaceFolder}" not in p_entry["env"]["MEMORY_DB_PATH"]
+    assert str(existing) in res["config_files"]
+    assert str(proj / ".mcp.json") in res["config_files"]
+
+
+def test_detect_agent_vscode_marker(tmp_path):
+    proj = _make_proj(tmp_path, "vscode_detect")
+    empty_home = tmp_path / "vscode_empty_home"
+    empty_home.mkdir(exist_ok=True)
+    (proj / ".vscode").mkdir()
+    assert detect_agent(proj, env={}, home=empty_home) == "vscode"
+
+
 def test_wire_alias_normalization(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
