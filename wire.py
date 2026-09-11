@@ -29,6 +29,7 @@ SUPPORTED_AGENTS = (
     "roo",
     "cline",
     "opencode",
+    "kiro",
     "generic",
 )
 AGENT_ALIASES = {
@@ -45,6 +46,7 @@ AGENT_DISPLAY_NAMES = {
     "roo": "Roo Code (.roo/mcp.json)",
     "cline": "Cline (.cline/mcp.json)",
     "opencode": "OpenCode (opencode.json)",
+    "kiro": "Kiro (.kiro/settings/mcp.json)",
     "generic": "Generic (display JSON snippet only)",
 }
 ENTRY_NAME = "cognigraph"
@@ -257,6 +259,14 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
     elif agent == "cline":
         cfg = proj_root / ".cline" / "mcp.json"
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
+    elif agent == "kiro":
+        # Kiro: workspace .kiro/settings/mcp.json (project-local, STATIC bake).
+        # Global ~/.kiro/settings/mcp.json is intentionally NOT written: it
+        # would bleed one project's DB path into every other workspace.
+        # Kiro supports ${VAR} env expansion but no ${workspaceFolder}, so a
+        # resolved absolute MEMORY_DB_PATH is the only reliable wiring.
+        cfg = proj_root / ".kiro" / "settings" / "mcp.json"
+        _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
     elif agent == "claude":
         appdata = os.environ.get("APPDATA")
         if appdata:
@@ -336,6 +346,8 @@ def detect_agent(project_root: Optional[Path] = None,
         return "cline"
     if (proj / ".zed").is_dir():
         return "zed"
+    if (proj / ".kiro").is_dir():
+        return "kiro"
     if (proj / "opencode.json").is_file():
         return "opencode"
     if (proj / ".agents").is_dir():

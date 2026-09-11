@@ -385,6 +385,36 @@ def test_wire_roo_and_cline_config(tmp_path):
     assert (proj_cline / ".cline" / "mcp.json").exists()
 
 
+def test_wire_kiro_project_config(tmp_path):
+    """Kiro writes project-local .kiro/settings/mcp.json, merging siblings."""
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path, "kiro_proj")
+    existing_dir = proj / ".kiro" / "settings"
+    existing_dir.mkdir(parents=True)
+    existing = existing_dir / "mcp.json"
+    existing.write_text(json.dumps({"mcpServers": {"other": {"command": "other"}}}),
+                        encoding="utf-8")
+    res = wire_agent("kiro", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    assert len(res["backups"]) == 1
+    data = json.loads(existing.read_text(encoding="utf-8"))
+    assert "mcpServers" in data
+    assert data["mcpServers"]["other"] == {"command": "other"}  # sibling preserved
+    entry = data["mcpServers"]["cognigraph"]
+    assert entry["args"][0].endswith("server.py")
+    assert entry["env"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
+    assert str(existing) in res["config_files"]
+
+
+def test_detect_agent_kiro_marker(tmp_path):
+    proj = _make_proj(tmp_path, "kiro_detect")
+    empty_home = tmp_path / "kiro_empty_home"
+    empty_home.mkdir(exist_ok=True)
+    (proj / ".kiro").mkdir()
+    assert detect_agent(proj, env={}, home=empty_home) == "kiro"
+
+
 def test_wire_alias_normalization(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
