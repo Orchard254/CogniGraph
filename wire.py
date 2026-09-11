@@ -250,9 +250,14 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
             config_errors.append(f"{cfg}: {e}")
 
     if agent == "opencode":
+        # OpenCode checks both ./opencode.json and ./.opencode/opencode.json;
+        # write both so either lookup finds the wiring. Schema unchanged.
+        oc_entry = {"type": "local", "command": [py, server],
+                    "environment": env, "enabled": True}
         cfg = proj_root / "opencode.json"
-        _safe_merge(cfg, "mcp", {"type": "local", "command": [py, server],
-                                 "environment": env, "enabled": True})
+        _safe_merge(cfg, "mcp", oc_entry)
+        alias = proj_root / ".opencode" / "opencode.json"
+        _safe_merge(alias, "mcp", oc_entry)
     elif agent == "cursor":
         cfg = proj_root / ".cursor" / "mcp.json"
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
@@ -388,6 +393,8 @@ def detect_agent(project_root: Optional[Path] = None,
     if (proj / ".vscode").is_dir():
         return "vscode"
     if (proj / "opencode.json").is_file():
+        return "opencode"
+    if (proj / ".opencode" / "opencode.json").is_file():
         return "opencode"
     if (proj / ".agents").is_dir():
         return "antigravity"

@@ -213,6 +213,34 @@ def test_wire_opencode_cleans_legacy_mcpservers(tmp_path):
     assert cfg["mcp"]["cognigraph"]["type"] == "local"
 
 
+def test_wire_opencode_writes_alias_path(tmp_path):
+    """Both ./opencode.json and ./.opencode/opencode.json get the entry."""
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path, "oc_alias_proj")
+    alias_dir = proj / ".opencode"
+    alias_dir.mkdir()
+    alias = alias_dir / "opencode.json"
+    alias.write_text(json.dumps({"mcp": {"other": {"type": "local",
+                                                   "command": ["x"],
+                                                   "environment": {}}}}),
+                     encoding="utf-8")
+    res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm),
+                     drop_protocol=False)
+    assert res["status"] == "WIRED"
+    for path in (proj / "opencode.json", alias):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert "mcpServers" not in data
+        entry = data["mcp"]["cognigraph"]
+        assert entry["type"] == "local"
+        assert isinstance(entry["command"], list)
+        assert entry["environment"]["MEMORY_DB_PATH"].endswith(".cognigraph/memory.db")
+    # Sibling in the alias file is preserved, not clobbered.
+    assert json.loads(alias.read_text(encoding="utf-8"))["mcp"]["other"] == {
+        "type": "local", "command": ["x"], "environment": {}}
+    assert str(proj / "opencode.json") in res["config_files"]
+    assert str(alias) in res["config_files"]
+
+
 def test_wire_cursor_nested_and_existing_backup(tmp_path):
     pm = _make_pm_root(tmp_path)
     proj = _make_proj(tmp_path)
