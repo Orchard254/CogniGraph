@@ -10,8 +10,8 @@ Hermeticity:
   server._ensure_first_time_setup to a no-op, so the live DB
   (C:/PROJECT/project-memory/.cognigraph/memory.db) is never touched,
   even if a test forgets to install a store fixture.
-- Real-DB round-trips are limited to 2 tool writes total (embedding cost);
-  seeds use embed=False/force=True where semantics are not under test.
+- Real-DB round-trips keep embedded writes few (embedding cost); seeds use
+  embed=False/force=True where semantics are not under test.
 - No subprocess, no network, no git dependence.
 """
 
@@ -237,6 +237,119 @@ def test_duplicate_write_status_path(real_db):
     res = server.memory_write(category="decision", content=content)
     assert res["status"] == "DUPLICATE_DETECTED"
     assert res["id"] == seed_id
+
+
+def test_stats_real_db(real_db):
+    out = server.memory_stats()
+    for key in ("active_by_category", "total_active", "total_deprecated",
+                "total_edges", "embedded_facts", "semantic_backend",
+                "background_failures", "db_path"):
+        assert key in out
+    assert out["total_active"] == 0
+    assert out["background_failures"] == {
+        "vec_sync": 0, "structural_sync": 0, "re_embed": 0, "fact_linking": 0,
+    }
+
+
+def test_get_file_context_real_db(real_db):
+    marker = "file-context probe fact kx92"
+    seed = MemoryStore(real_db)
+    try:
+        seed.write(category="component", content=marker,
+                   file_path="src/widget.py", force=True, embed=False)
+    finally:
+        seed.close()
+    out = server.memory_get_file_context("src/widget.py")
+    assert out["file_path"] == "src/widget.py"
+    assert marker in out["briefing_markdown"]
+
+
+def test_check_safety_real_db(real_db):
+    out = server.memory_check_safety(["src/a.py", "src/b.py"])
+    assert out["status"] == "CHECKED"
+    assert out["files_analyzed"] == 2
+    assert out["cross_dependencies"] == []
+    assert set(out["briefings"]) == {"src/a.py", "src/b.py"}
+
+    empty = server.memory_check_safety([])
+    assert empty["status"] == "NO_FILES_PROVIDED"
+
+
+def test_prepare_task_real_db(real_db):
+    out = server.memory_prepare_task("implement caching layer")
+    assert out["intent"] == "implement caching layer"
+    assert isinstance(out["briefing_markdown"], str)
+    assert out["briefing_markdown"]
+
+
+def test_checkpoint_task_real_db(real_db):
+    out = server.memory_checkpoint_task(
+        summary="step-4 checkpoint probe qj17",
+        components=[{"content": "component probe qj17"}],
+        decisions=[{"content": "decision probe qj17"}],
+        test_baseline="n/a",
+        failures=[{"content": "failed approach probe qj17", "rationale": "probe"}],
+    )
+    assert out["status"] == "CHECKPOINT_RECORDED"
+    assert out["state_id"] > 0
+    assert out["total_facts_written"] == 4  # failure + decision + component + state
+    assert out["duplicates_skipped"] == 0
+    assert all(i > 0 for i in out["fact_ids"])
+
+
+def test_who_calls_real_db(real_db):
+    now = "2026-09-11T00:00:00"
+    seed = MemoryStore(real_db)
+    try:
+        seed.conn.execute(
+            "INSERT INTO structural_nodes (node_type, name, class_name, file_path, "
+            "line_start, line_end, language, created_at, last_seen_at) "
+            "VALUES ('function', 'probe_fn_qj17', '', 'src/probe.py', 1, 5, 'python', ?, ?)",
+            (now, now),
+        )
+    finally:
+        seed.close()
+
+    out = server.memory_who_calls("probe_fn_qj17")
+    assert out["found"] is True
+    assert [d["file_path"] for d in out["definitions"]] == ["src/probe.py"]
+    assert out["callers"] == []
+
+    missing = server.memory_who_calls("no_such_symbol_qj17")
+    assert missing["found"] is False
+    assert missing["definitions"] == []
+
+
+def test_project_shape_real_db(real_db):
+    out = server.memory_project_shape()
+    assert "Project Shape" in out["markdown"]
+
+
+def test_flag_fact_real_db(real_db):
+    seed = MemoryStore(real_db)
+    try:
+        fid = seed.write(category="decision", content="flag probe fact mt63",
+                         force=True, embed=False)
+    finally:
+        seed.close()
+    assert fid > 0
+
+    out = server.memory_flag_fact(fact_id=fid, note="misleading probe")
+    assert out == {"status": "FLAGGED", "fact_id": fid, "flag_type": "misleading"}
+
+    verify = MemoryStore(real_db)
+    try:
+        row = verify.conn.execute(
+            "SELECT note FROM fact_flags WHERE fact_id = ?", (fid,)
+        ).fetchone()
+    finally:
+        verify.close()
+    assert row is not None and row["note"] == "misleading probe"
+
+
+def test_flag_fact_missing_id_raises(real_db):
+    with pytest.raises(ValueError, match="no fact with id"):
+        server.memory_flag_fact(fact_id=999999)
 
 
 # ---------------------------------------------------------------------------
