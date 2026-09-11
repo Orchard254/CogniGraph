@@ -39,6 +39,12 @@ scratch/
 .mcp.json
 .opencode/
 opencode.json
+# Shared-settings files with merged MCP entries — file-level only (not
+# dir-level) so other files in these dirs stay committable. Each carries
+# absolute local paths, so teams share general settings separately
+# (e.g. a .example/template file).
+.zed/settings.json
+.zcode/config.json
 
 # Coverage artifacts
 .coverage

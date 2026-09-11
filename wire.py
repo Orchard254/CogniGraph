@@ -438,6 +438,25 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
             "Note: Zed will show a one-time trust confirmation for this "
             "project's context_servers on first open — this is expected, "
             "not a wire failure.")
+        # User-facing: .zed/settings.json is gitignored (absolute local
+        # paths) yet shares one file with general editor settings — share
+        # those separately if the team wants them tracked.
+        next_steps.append(
+            "Note: .zed/settings.json is gitignored because the merged "
+            "context_servers entry contains absolute local paths — general "
+            "editor settings in the same file will not be committed, so "
+            "share them separately (e.g. a .example/template file) if the "
+            "team wants them tracked.")
+    if agent == "zcode":
+        # User-facing: .zcode/config.json is gitignored (absolute local
+        # paths) yet shares one file with general agent settings — share
+        # those separately if the team wants them tracked.
+        next_steps.append(
+            "Note: .zcode/config.json is gitignored because the merged "
+            "mcp.servers entry contains absolute local paths — general "
+            "agent settings in the same file will not be committed, so "
+            "share them separately (e.g. a .example/template file) if the "
+            "team wants them tracked.")
     if warnings:
         # Warnings are impossible-to-miss: first in next_steps (the printed
         # user output) as well as a dedicated report field.
