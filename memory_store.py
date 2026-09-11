@@ -84,7 +84,6 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
         self._ensure_schema_migrations()
-        self._ensure_canonical_schema()
         self._ensure_embedding_schema()
 
         # Attempt to load sqlite-vec extension and create vec0-backed table for fast KNN
@@ -127,6 +126,11 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                 # Extension load failed; leave vec unavailable
                 self._vec_available = False
 
+        # The canonical schema includes a vec0 virtual table
+        # (phase1_episodic_embeddings.sql), so it must run after the
+        # sqlite-vec extension load above.
+        self._ensure_canonical_schema()
+
     def _ensure_canonical_schema(self):
         """Ensure Phase 0/1/2 canonical tables + triggers exist for fresh installs.
 
@@ -140,7 +144,7 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             exists = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='repositories'").fetchone()
             if exists is None:
                 base = Path(__file__).resolve().parent
-                for fname in ["phase0_schema.sql", "phase1_episodic.sql", "phase2_branch_admin.sql", "episodic_fts.sql", "phase0_spike_recursion.sql"]:
+                for fname in ["phase0_schema.sql", "phase1_episodic.sql", "phase1_episodic_embeddings.sql", "phase2_branch_admin.sql", "episodic_fts.sql", "legacy_provenance.sql"]:
                     p = base / fname
                     if p.exists():
                         try:
@@ -151,15 +155,15 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
 # Ensure episodic_fts exists even if episodic_fts.sql missing triggers
                 try:
                     self.conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS episodic_fts USING fts5(content, tags, content='episodic_memories', content_rowid='memory_id')")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("episodic_fts ensure failed: %r", e)
                 # Ensure index on episodic_memories.created_revision for promotion queries
                 try:
                     self.conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_created_revision ON episodic_memories(created_revision)")
-                except Exception:
-                    pass
-        except Exception:
-            pass  # canonical schema is best-effort on legacy DBs; tests use copy-of-live path
+                except Exception as e:
+                    logger.warning("idx_episodic_created_revision ensure failed: %r", e)
+        except Exception as e:
+            logger.error("canonical schema init failed: %r", e)
 
     def _ensure_embedding_schema(self):
         """Ensure memory_embeddings table exists (safe to call multiple times)."""
