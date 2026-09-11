@@ -15,9 +15,9 @@ For the full agent-orientation deep dive — tech stack, annotated file tree, co
 3. **Automatic Context Expansion (`memory_get_context`)**: Searching for a topic automatically expands connected graph relationship trees into a single context briefing.
 4. **File Impact Analysis (`memory_get_file_context`)**: Pre-edit briefing for any source file listing its stored components, decisions, constraints, and all linked dependent files.
 5. **Multi-File Refactor Safety Matrix (`memory_check_safety`)**: Scans batches of target files before refactoring to detect cross-file breaking risks.
-6. **Code-Anchored Self-Healing Provenance (`memory_verify_provenance`)**: Anchors line numbers and SHA256 snippet hashes with neighborhood shift detection that self-heals line range shifts automatically.
+6. **Code-Anchored Self-Healing Provenance**: Anchors line numbers and SHA256 snippet hashes with neighborhood shift detection that self-heals line range shifts automatically. Exposed via the CLI (`memory_cli.py scan-provenance`, `memory_cli.py verify`), not as an MCP tool.
 7. **Swarm Concurrency & Advisory Locks**: Optimistic Concurrency Control (`version` checking) + advisory locks (`memory_locks`) preventing race conditions across multi-agent swarms.
-8. **Interactive Visual Web UI (`memory_export_ui`)**: Standalone, self-contained HTML visualizer ([`memory_graph.html`](file:///.cognigraph/memory_graph.html)) for exploring the knowledge graph in 2D.
+8. **Interactive Visual Web UI**: Standalone, self-contained HTML visualizer ([`memory_graph.html`](file:///.cognigraph/memory_graph.html)) for exploring the knowledge graph in 2D, generated via `memory_cli.py export-ui`.
 9. **Priming Eval Harness (`eval_priming.py`)**: Scores retrieval quality for realistic coding tasks — whether the facts an LLM needs (by content or file anchor) land in the top-K of `query_hybrid`. Run `python eval_priming.py` to regress-check priming quality after ranking changes.
 10. **Code Graph & Trust Layer (`structural_edges`)**: AST-ground-truth call and import edges across the codebase, rebuilt on every structural sync. One-hop mid-reasoning queries via `memory_who_calls` ("who calls X? who imports Y?"), project orientation via `memory_project_shape`, and a trust layer: unmapped files are flagged explicitly, flagged/unverified facts are stamped inline at priming time (`memory_flag_fact` correction hook), and `memory_checkpoint_task` captures failed approaches as negative-knowledge constraints.
 
@@ -28,9 +28,9 @@ For the full agent-orientation deep dive — tech stack, annotated file tree, co
 The database has two fact stores with distinct roles:
 
 - **`memory`** — the live intake table. Every `memory_write` / `memory_write_batch` / `memory_checkpoint_task` lands here, along with all lifecycle operations (supersede, deprecate, consolidate, prune, provenance verification, graph edges).
-- **`episodic_memories`** — the historical archive created by the genesis migration on 2026-08-24 (108 legacy facts), plus the branch/revision bookkeeping used by `memory_create_branch` / `memory_promote_branch` / `memory_discard_branch`. It is read-only for intake.
+- **`episodic_memories`** — the historical archive created by the genesis migration on 2026-08-24 (108 legacy facts), plus the branch/revision bookkeeping managed via `memory_cli.py branch create|discard|list` and `memory_cli.py promote` (branch_promotion.py). It is read-only for intake.
 
-Retrieval (`memory_query_hybrid`, `memory_get_context`) fuses both stores through 7-lane RRF, so agents see one unified memory. New facts are intentionally memory-bound by contract; episodic_memories is not an intake target.
+Retrieval (`memory_query`, `memory_get_context`) fuses both stores through 7-lane RRF, so agents see one unified memory. New facts are intentionally memory-bound by contract; episodic_memories is not an intake target.
 
 ## Code module structure
 
@@ -108,12 +108,12 @@ Zed (`.zed/settings.json`, `context_servers` - `env` is a sibling of `command`/`
 ```markdown
 ## Mandatory CogniGraph Protocol
 At the start of every session:
-1. Call `memory_get_state` or `memory_stats` to load existing project context.
+1. Call `memory_stats` to load existing project context.
 2. Call `memory_get_context(query)` before asking broad architecture questions.
 3. Call `memory_get_file_context(file_path)` BEFORE editing any source file.
 4. Call `memory_write` or `memory_write_batch` when learning new facts (include `file_path` and `line_start`/`line_end` for provenance).
 5. Call `memory_supersede` (not a new `memory_write`) when correcting an outdated fact.
-6. Call `memory_link_facts` to record architectural dependencies between facts.
+6. Record architectural dependencies between facts via the CLI (`memory_cli.py link <from_id> <to_id> <edge_type>`); linking is not exposed as an MCP tool.
 ```
 
 ---

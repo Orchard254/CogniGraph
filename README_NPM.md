@@ -149,29 +149,31 @@ Create `.cognigraph/config.json` in your project root:
 
 ## 🛠️ Available MCP Tools
 
+The server registers 14 tools.
+
 ### Core Memory Operations
-- `memory_write` - Record new facts with provenance
-- `memory_query` - Search by keywords/tags
-- `memory_query_hybrid` - Advanced semantic + keyword search
-- `memory_get_context` - Get formatted context for coding questions
-- `memory_stats` - View database statistics
+- `memory_write` - Record a new fact with provenance (secrets are refused)
+- `memory_write_batch` - Atomic batch form of `memory_write`
+- `memory_query` - Hybrid lexical + semantic + code-structure search
+- `memory_get_context` - Token-budgeted Markdown briefing on a topic
+- `memory_stats` - Database health: counts, category breakdown, edges
 
 ### File Operations
-- `memory_get_file_context` - Pre-edit file impact analysis
-- `memory_check_safety` - Multi-file refactor safety check
-- `memory_verify_provenance` - Code drift detection
+- `memory_get_file_context` - Pre-edit file impact briefing
+- `memory_check_safety` - Dependency risk matrix for multi-file refactors
 
-### Advanced Features
+### Lifecycle
+- `memory_supersede` - Replace an outdated fact with corrected content
+- `memory_deprecate` - Mark a fact obsolete without replacement
 - `memory_prepare_task` - Pre-coding flight briefing
-- `memory_checkpoint_task` - Post-coding task checkpoint
-- `memory_link_facts` - Record architectural relationships
-- `memory_consolidate` - Compress micro-state facts
+- `memory_checkpoint_task` - Post-task checkpoint (components, decisions, test baseline, failed approaches)
 
-### Maintenance
-- `memory_auto_maintenance` - Self-healing maintenance
-- `memory_audit` - Duplicate/conflict detection
-- `memory_prune` - Remove stale facts
-- `memory_optimize_db` - Database optimization
+### Code Graph & Trust
+- `memory_who_calls` - Where a symbol is defined, its call sites, and importing files
+- `memory_project_shape` - Indexed file inventory and code-graph size
+- `memory_flag_fact` - Flag a misleading/unverified fact so future briefings carry a warning
+
+Maintenance tasks (audit, prune, backfill, optimize, export-ui, branch, promote, backup, scan-provenance) run via `memory_cli.py` subcommands, not MCP tools.
 
 ## 📊 What Gets Stored Automatically
 
@@ -263,7 +265,7 @@ Agent: "I decided to use Redis for caching"
 
 ### Poor search results
 - Give it time - the system learns more with each session
-- Try the `memory_bootstrap_project` tool with `full=true`
+- Run `python memory_cli.py bootstrap --root <project> --apply` to ingest more project context
 - Use `memory_prepare_task` before complex tasks
 
 ## 📈 Performance
