@@ -73,6 +73,23 @@ __all__ = [
 ]
 
 
+# Process-wide counters for best-effort background work that must not crash its
+# caller (vec sync, structural sync, re-embedding, fact linking). Surfaced via
+# stats() so sync drift is diagnosable without reading logs.
+_BACKGROUND_FAILURES = {
+    "vec_sync": 0,
+    "structural_sync": 0,
+    "re_embed": 0,
+    "fact_linking": 0,
+}
+
+
+def bump_background_failure(kind: str) -> None:
+    """Increment a named background-failure counter (never raises)."""
+    if kind in _BACKGROUND_FAILURES:
+        _BACKGROUND_FAILURES[kind] += 1
+
+
 class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or default_db_path()
@@ -198,9 +215,10 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                     "INSERT OR REPLACE INTO vec_memory(rowid, embedding) VALUES (?, ?)",
                     (fact_id, blob),
                 )
-            except Exception:
+            except Exception as e:
                 # Best-effort: don't fail the store operation if vec sync fails
-                pass
+                logger.warning("vec_memory sync failed for fact %s: %r", fact_id, e)
+                bump_background_failure("vec_sync")
         return True
 
     def _store_episodic_embedding(self, memory_id: int, text: str) -> bool:
@@ -227,8 +245,9 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                     "INSERT OR REPLACE INTO vec_episodic_memory(rowid, embedding) VALUES (?, ?)",
                     (memory_id, blob),
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("vec_episodic_memory sync failed for memory %s: %r", memory_id, e)
+                bump_background_failure("vec_sync")
         return True
 
     def _ensure_schema_migrations(self):
@@ -316,8 +335,8 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                     INSERT INTO memory_fts(rowid, content, rationale, tags, file_path) VALUES (new.id, new.content, new.rationale, new.tags, new.file_path);
                 END;
                 """)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("memory_fts rebuild failed: %r", e)
 
         # Widen structural_nodes.node_type CHECK to include module_ref
         # (rows created by other files' import resolution). Old databases
@@ -405,11 +424,12 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                     CREATE INDEX IF NOT EXISTS idx_fact_node_links_node ON fact_node_links(node_id);
                     """)
                 self.conn.execute("PRAGMA foreign_keys=ON")
-        except Exception:
+        except Exception as e:
+            logger.warning("structural_nodes rebuild/repair failed: %r", e)
             try:
                 self.conn.execute("PRAGMA foreign_keys=ON")
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.warning("foreign_keys re-enable after failed rebuild failed: %r", e2)
 
     def close(self):
         self.conn.close()
@@ -923,14 +943,14 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             except sqlite3.IntegrityError:
                 try:
                     self.conn.execute("ROLLBACK")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("lock rollback failed (resource=%s): %r", resource, e)
                 return False
         except Exception:
             try:
                 self.conn.execute("ROLLBACK")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("lock rollback failed (resource=%s): %r", resource, e)
             raise
 
     def release_lock(self, resource: str, locked_by: str) -> bool:
@@ -1071,6 +1091,7 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             "total_edges": total_edges,
             "embedded_facts": embedded,
             "semantic_backend": _SEMANTIC_AVAILABLE,
+            "background_failures": dict(_BACKGROUND_FAILURES),
             "db_path": self.db_path,
         }
 

@@ -16,7 +16,7 @@ import hashlib
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
-from memory_store import MemoryStore
+from memory_store import MemoryStore, bump_background_failure
 from structural_extract import extract_structures
 
 logger = logging.getLogger(__name__)
@@ -473,10 +473,12 @@ def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True
                                 if getattr(store, '_vec_available', False) and not getattr(store, '_vec_triggers', False):
                                     try:
                                         store.conn.execute("INSERT OR REPLACE INTO vec_memory(rowid, embedding) VALUES (?, ?)", (fid, blob))
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
+                                    except Exception as e:
+                                        logger.warning("bootstrap vec_memory sync failed for fact %s: %r", fid, e)
+                                        bump_background_failure("vec_sync")
+                            except Exception as e:
+                                logger.warning("bootstrap embedding insert failed for fact %s: %r", fid, e)
+                                bump_background_failure("re_embed")
                         store.conn.commit()
                 else:
                     # Fallback to per-fact _store_embedding if model not available
@@ -485,8 +487,9 @@ def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True
                         if row:
                             try:
                                 store._store_embedding(fid, f"{row['content']} {row['rationale'] or ''}")
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.warning("bootstrap per-fact embedding failed for fact %s: %r", fid, e)
+                                bump_background_failure("re_embed")
             except Exception as e:
                 logger.warning("bootstrap batched embedding backfill failed: %r", e)
         

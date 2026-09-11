@@ -25,9 +25,12 @@ except ImportError:
     FileSystemEventHandler = object
 
 try:
-    from memory_store import MemoryStore
+    from memory_store import MemoryStore, bump_background_failure
 except ImportError:
     MemoryStore = None
+
+    def bump_background_failure(kind):
+        pass
 
 try:
     from structural_extract import extract_structures
@@ -104,7 +107,8 @@ def _sync_file(file_path: Path, root: Path, store: MemoryStore):
                 nodes = extract_structures(file_path)
                 store.sync_structural_nodes(rel, nodes, project_root=str(root))
             except Exception as e:
-                logger.debug("watcher structural sync failed %s: %r", rel, e)
+                logger.warning("watcher structural sync failed %s: %r", rel, e)
+                bump_background_failure("structural_sync")
         # 2. File fact upsert (hash + lines)
         try:
             data = file_path.read_bytes()
@@ -142,7 +146,8 @@ def _sync_file(file_path: Path, root: Path, store: MemoryStore):
                         try:
                             store._store_embedding(fid, content)
                         except Exception as e:
-                            logger.debug("watcher re-embed failed for fact %s: %r", fid, e)
+                            logger.warning("watcher re-embed failed for fact %s: %r", fid, e)
+                            bump_background_failure("re_embed")
             else:
                 # New file — "other" like bootstrap's template facts, so stubs
                 # never ride intent boosts meant for curated knowledge.
@@ -150,8 +155,9 @@ def _sync_file(file_path: Path, root: Path, store: MemoryStore):
             # Link to structural nodes
             try:
                 store.link_facts_to_structural_nodes(rel)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("watcher fact linking failed %s: %r", rel, e)
+                bump_background_failure("fact_linking")
         except Exception as e:
             logger.debug("watcher file fact sync failed %s: %r", file_path, e)
     except Exception as e:

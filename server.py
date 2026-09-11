@@ -36,8 +36,8 @@ def _store() -> Iterator["MemoryStore"]:
     finally:
         try:
             store.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("store close failed: %r", e)
 
 def _clamp_limit(limit: int, default: int = 10, maximum: int = 100) -> int:
     try:
