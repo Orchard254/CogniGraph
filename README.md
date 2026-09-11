@@ -59,7 +59,7 @@ The `MemoryStore` class is composed from focused mixins, one per architectural l
 .\venv\Scripts\python.exe memory_cli.py bootstrap --root C:\path\to\your\project --apply
 ```
 
-Setup detail: setup.ps1 creates venv/, installs requirements.txt, then runs the full suite (setup.ps1:16-29). Re-run manually with .\venv\Scripts\python.exe -m pytest -q --ignore=scratch. 14 test_*.py files are present at repo root (test_call_tool, test_env, test_env2, test_final, test_list, test_list2, test_llm_priming, test_memory_cli, test_methods, test_phase3_priming, test_server_tools, test_tools_call, test_watcher, test_wire_bootstrap); pytest --collect-only -q --ignore=scratch collected 205 tests as of 2026-09-10, contributed by test_llm_priming, test_phase3_priming, test_wire_bootstrap, test_memory_cli, test_watcher and test_server_tools (remaining test_*.py files are manual/helper scripts; scratch/ holds a live-watcher probe excluded from the suite).
+Setup detail: setup.ps1 creates venv/, installs requirements.txt, then runs the full suite (setup.ps1:16-29). Re-run manually with .\venv\Scripts\python.exe -m pytest -q --ignore=scratch. The collected test modules at repo root include test_llm_priming, test_memory_cli, test_phase3_priming, test_server_tools, test_watcher and test_wire_bootstrap; pytest --collect-only -q --ignore=scratch collected 205 tests as of 2026-09-10, contributed by test_llm_priming, test_phase3_priming, test_wire_bootstrap, test_memory_cli, test_watcher and test_server_tools (scratch/ holds a live-watcher probe excluded from the suite).
 
 Restart your coding agent. It now starts every session with full project context.
 

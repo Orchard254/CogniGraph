@@ -5,8 +5,9 @@ calls the @mcp.tool() functions directly) cannot: real child-process spawn,
 stdio JSON-RPC framing (initialize -> notifications/initialized -> tools/list),
 and clean child teardown.
 
-Handshake pattern reused from test_final.py / test_tools_call.py
-(initialize with protocolVersion 2024-11-05, then the mandatory
+Handshake pattern mirrors the retired standalone scripts
+test_final.py / test_tools_call.py (removed; initialize with
+protocolVersion 2024-11-05, then the mandatory
 notifications/initialized notification before any further request).
 
 Read-only: this test issues NO tools/call at all, so it performs zero DB
@@ -105,7 +106,7 @@ def test_server_stdio_framing(tmp_path, monkeypatch):
         cwd=ROOT,
     )
     # Drain stderr in the background so a verbose server can never block on a
-    # full pipe buffer while we wait on stdout (same mitigation as _test_lib).
+    # full pipe buffer while we wait on stdout (same mitigation as the retired _test_lib harness).
     stderr_lines = []
 
     def _drain_stderr():

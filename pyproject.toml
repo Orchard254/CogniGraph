@@ -59,7 +59,6 @@ py-modules = [
     "bootstrap",
     "watcher",
     "structural_extract",
-    "_test_lib",
 ]
 
 [tool.setuptools.packages.find]

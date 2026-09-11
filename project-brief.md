@@ -55,19 +55,15 @@ C:\PROJECT\project-memory
 ├── bench/
 │   ├── baseline_20260910.json         # Performance regression baseline metrics
 │   └── bench_memory.py                # Microbenchmark suite for store init, writes, AST sync, and bootstrap
-├── fixtures/                          # Test code fixtures for AST extraction (Python, JS, TS, Rust)
 ├── hooks/
 │   └── git_hook.py                    # Git post-commit hook parsing [decision], [constraint], etc. into memory
 ├── test-js/
 │   └── lib.test.js                    # Node.js built-in test runner suite (26 tests for JS wrapper logic)
-├── tests/                             # Pytest fixtures directory (unit tests reside in repo root)
-│   └── fixtures/
-│       └── phase0_schema.sql          # Test SQL fixtures for legacy schema validation
 ├── __init__.py                        # Package init re-exporting MemoryStore and default_db_path
 ├── AGENTS.md                          # Mandatory operational protocol for AI coding agents connecting to memory
 ├── bootstrap.py                       # Project onboarding scanner (file tree, manifests, markdown docs, git history)
 ├── branch_promotion.py                # Experimental branch creation, discard, and KEEP_BOTH promotion engine
-├── conftest.py                        # Pytest config: ignores manual scripts, auto-caches git rev-parse subprocesses
+├── conftest.py                        # Pytest config: auto-caches git rev-parse subprocesses
 ├── episodic_fts.sql                   # SQL triggers and FTS5 table definitions for episodic memory search
 ├── eval_priming.py                    # Evaluation harness assessing top-K retrieval relevance for coding tasks
 ├── genesis_migrate.py                 # Historical migration script converting flat memory tables to episodic substrate
@@ -348,8 +344,7 @@ The context-building mechanism operates across five concrete stages:
 > [!WARNING]
 > 1. **`npm ci` in CI Workflow is Broken:** [.github/workflows/ci.yml:100](file:///C:/PROJECT/project-memory/.github/workflows/ci.yml#L100) specifies `npm ci`, but **no `package-lock.json` exists in the repository root**. Running `npm ci` on a fresh runner without a lockfile causes `npm ERR! code ENOSELF / ENOKEY` and fails.
 > 2. **Ruff Linter is Undocumented and Uninstalled:** While `[tool.ruff]` is configured in `pyproject.toml`, `ruff` is not included in `requirements.txt`, not installed by `setup.ps1`, not present in `package.json` scripts, and not executed in `.github/workflows/ci.yml`.
-> 3. **Standalone E2E Test Scripts Excluded from Pytest:** `test_call_tool.py`, `test_env.py`, `test_env2.py`, `test_final.py`, `test_list.py`, `test_list2.py`, `test_methods.py`, and `test_tools_call.py` are explicitly excluded from test collection in [conftest.py:7-16](file:///C:/PROJECT/project-memory/conftest.py#L7-L16). They are manual subprocess invocation scripts requiring a live server process and will fail if executed as regular pytest unit tests.
-> 4. **Pytest Inconsistency in `pyproject.toml`:** [pyproject.toml:106](file:///C:/PROJECT/project-memory/pyproject.toml#L106) declares `testpaths = ["tests"]`, but all primary test files reside in the root directory (`test_*.py`), while `tests/` only contains fixtures. Running `pytest` works solely because [pytest.ini](file:///C:/PROJECT/project-memory/pytest.ini) overrides `pyproject.toml` without specifying `testpaths`. If `pytest.ini` were deleted, `pytest` would collect zero tests.
+> 3. **Pytest Inconsistency in `pyproject.toml`:** [pyproject.toml:106](file:///C:/PROJECT/project-memory/pyproject.toml#L106) declares `testpaths = ["tests"]`, but all primary test files reside in the root directory (`test_*.py`), while `tests/` holds no test modules. Running `pytest` works solely because [pytest.ini](file:///C:/PROJECT/project-memory/pytest.ini) overrides `pyproject.toml` without specifying `testpaths`. If `pytest.ini` were deleted, `pytest` would collect zero tests.
 
 ---
 
@@ -443,6 +438,3 @@ Every documentation file present in the repository, its purpose, and any noted c
 5. **[cognigraph_master_engineering_blueprint_v2_3_0.md](file:///C:/PROJECT/project-memory/cognigraph_master_engineering_blueprint_v2_3_0.md):**
    - *Description:* Definitive Phase 0 architectural specification defining the canonical substrate, two-table model, revision invariants, and Phase IV deferrals.
    - *Status:* Accurate architectural baseline reconciling live Tree-sitter implementation with episodic storage.
-6. **[scripts/dev/PHASE_B_RECON_REPORT.md](file:///C:/PROJECT/project-memory/scripts/dev/PHASE_B_RECON_REPORT.md):**
-   - *Description:* Historical development reconnaissance report documenting `bootstrap.py` and `wire.py` prior to the Phase B Tree-sitter integration.
-   - *Outdated Notice:* Describes `scan_file_tree()` as lacking an AST extraction loop, which has since been fully implemented via `structural_extract.py`.
