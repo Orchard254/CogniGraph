@@ -28,6 +28,7 @@ scratch/
 *.db-shm
 
 # IDE / agent local state
+.agents/
 .kiro/
 .trae/
 opencode.json
