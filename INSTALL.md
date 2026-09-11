@@ -2,7 +2,7 @@
 
 ## Installation
 
-Prerequisites: Python 3.12+ on PATH (setup.ps1:9-13 enforces this; index.js/postinstall.js probe python3 -> python for 3.12+) and Node.js >= 14 for the npx wrapper (package.json engines). On first run the wrapper creates venv/ inside the package, runs pip install -r requirements.txt, and launches server.py (index.js:98-132,171-232). Only mcp is hard-required - missing sqlite-vec/tree-sitter*/fastembed/numpy lanes degrade with a warning, not a failure. A pre-spawn py_compile gate plus a 5 s startup watchdog fail fast on broken installs (index.js:245-285); postinstall.js is best-effort and leaves a .postinstall-incomplete marker that index.js:175-183 re-verifies on next startup.
+Prerequisites: Python 3.12+ on PATH (setup.ps1:9-13 enforces this; index.js/postinstall.js probe python3 -> python for 3.12+) and Node.js >= 18 for the npx wrapper (package.json engines). On first run the wrapper creates venv/ inside the package, runs pip install -r requirements.txt, and launches server.py (index.js:98-132,171-232). Only mcp is hard-required - missing sqlite-vec/tree-sitter*/fastembed/numpy lanes degrade with a warning, not a failure. A pre-spawn py_compile gate plus a 5 s startup watchdog fail fast on broken installs (index.js:245-285); postinstall.js is best-effort and leaves a .postinstall-incomplete marker that index.js:175-183 re-verifies on next startup.
 
 ## Setup (30 seconds)
 
