@@ -3,7 +3,7 @@ Agent wiring module for CogniGraph.
 
 Generates the correct MCP server configuration for a given coding agent,
 pinned to the target project's own .cognigraph/memory.db (legacy
-.project-memory/ migrated on first use), and drops the
+.project-memory/ migrated on first use), and syncs the
 AGENTS.md protocol file. Existing agent configs are merged (never clobbered)
 and backed up first.
 
@@ -11,14 +11,16 @@ Usage:
     python memory_cli.py wire cursor --root C:/path/to/project
 """
 import os
+import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 SUPPORTED_AGENTS = (
     "antigravity",
@@ -220,6 +222,153 @@ def _merge_json(path: Path, top_key: str, entry: Dict[str, Any]) -> None:
         raise
 
 
+# ---------------------------------------------------------------------------
+# AGENTS.md protocol sync (shared by wire_agent and bootstrap.drop_agents_md)
+# ---------------------------------------------------------------------------
+AGENTS_TEMPLATE_MARKER_RE = re.compile(
+    r"^[ \t]*<!--[ \t]*cognigraph-template[ \t]+sha256:([0-9a-f]{64})[ \t]*-->[ \t]*$"
+)
+
+# SHA-256 over the LF-normalized, marker-line-excluded template body, for every
+# AGENTS.md revision ever shipped (oldest first). Seeded 2026-09-12 from
+# `git log --follow -- AGENTS.md` (8 blobs; all LF, no CR — no dedup needed).
+# Append the new body hash here whenever the template changes; never remove an
+# entry, so pre-versioning copies stay classifiable as stale (not customized).
+KNOWN_AGENTS_TEMPLATE_HASHES = frozenset({
+    # b439782 Initial commit: project-memory MCP server
+    "0f660ec93bbfc0f5662f65baa8727ee3c251a323e7016ee8bad6d09b3584ed1f",
+    # bbff37c Refresh docs: Zed env, wire schema, reliability notes
+    "093a4ea315f936ad40b38e0d01151e6aad0721c8f081b1d185717cd4ccc229cc",
+    # d85f97d docs(rebrand): CogniGraph identity across living documentation
+    "aab953f23d61cf8a914e6c7d7d7ae8d3f3c59b524093ee568ed6b415bc0d4e26",
+    # 39869fa docs(tools): reflect 14-tool surface across README, AGENTS and brief
+    "aa1e9a28fece113e79d3198d163b814948277196840ed552a1baf9589c57f2a1",
+    # ccd75f2 docs(agents): add session-start canary for disconnected memory server
+    "d8e1bfb42c0c036b14837fb6d2f9b17b4618b20f8cf4c4a2e0a8bfd6a795e4f6",
+    # 4dcc1ea feat(backup): timestamped full-DB snapshots in maintenance/migrations
+    "4e7139018b65c860f4f4cdc0ec291aac3fdf8563dba54b6d98e7730f37c60363",
+    # ad9c3c5 chore(docs): drop sythion MEMORY_SNAPSHOT.md refs; fix checkpoint sig
+    "b7cf0080793025052ead6751c253c3e5b574662d77777dd81185a7f43d246621",
+    # 2a47e14 docs: frame blast-radius and code-graph tools for planning-phase use
+    "52230ced414bbbc78df005fecc5944ddf5a3d7edb576f9f13d1a5cf9e933aa76",
+})
+
+
+def _normalize_agents_text(text: str) -> str:
+    """LF-normalize so CRLF checkouts hash identically to the stored blobs."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _split_agents_marker(text: str) -> Tuple[str, Optional[str]]:
+    """Split file text into (body, marker_hash). Marker lines are dropped from
+    the body; when several markers exist the last one wins. No marker -> None."""
+    norm = _normalize_agents_text(text)
+    marker: Optional[str] = None
+    kept = []
+    for line in norm.split("\n"):
+        m = AGENTS_TEMPLATE_MARKER_RE.match(line)
+        if m:
+            marker = m.group(1)
+        else:
+            kept.append(line)
+    return "\n".join(kept), marker
+
+
+def _agents_body_hash(body: str) -> str:
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _render_agents_template(body: str) -> str:
+    """Template body plus a footer marker stamping its own hash, so a future run
+    can tell 'pristine shipped copy' from 'user-edited'."""
+    return body + f"<!-- cognigraph-template sha256:{_agents_body_hash(body)} -->\n"
+
+
+def _current_agents_template(pm_root: Path) -> Optional[Tuple[str, str]]:
+    """Read the canonical template; return (rendered, body_hash), or None when
+    the install root ships no AGENTS.md (skipped_no_template)."""
+    src = Path(pm_root) / "AGENTS.md"
+    if not src.exists():
+        return None
+    body, _ = _split_agents_marker(src.read_text(encoding="utf-8"))
+    return _render_agents_template(body), _agents_body_hash(body)
+
+
+def classify_agents_md(existing_text: str, current_hash: str,
+                       known_hashes=None) -> str:
+    """Classify an existing AGENTS.md against the current template hash.
+
+    missing is handled by the caller (no file). Otherwise exactly one of:
+    up_to_date (current marker, matching body — no-op), stale_unmodified
+    (body is a pristine shipped revision and the marker agrees or is absent —
+    safe to overwrite), or customized (unknown body, unknown marker, or
+    marker/body mismatch — never touch).
+    """
+    if known_hashes is None:
+        known_hashes = KNOWN_AGENTS_TEMPLATE_HASHES
+    body, marker = _split_agents_marker(existing_text)
+    body_hash = _agents_body_hash(body)
+    if marker == current_hash and body_hash == current_hash:
+        return "up_to_date"
+    if body_hash in known_hashes and (marker is None or marker == body_hash):
+        return "stale_unmodified"
+    return "customized"
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    """Atomic text write (tmp + fsync + os.replace), same idiom as _merge_json,
+    so a mid-write crash cannot leave a half-written protocol file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent),
+                                    prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except Exception:
+            pass
+        raise
+
+
+def sync_agents_md(target: Path, pm_root: Path) -> Dict[str, Any]:
+    """Version-aware AGENTS.md sync shared by wire_agent and bootstrap.
+
+    Returns {"status", "new_file", "backup"}: new_file is the .new sibling
+    (customized case only; overwrites any stale sibling from a prior run) and
+    backup is the rotated backup (stale case only). An unreadable existing file
+    is treated as customized — the real file is never touched in that case.
+    """
+    target = Path(target)
+    current = _current_agents_template(pm_root)
+    if current is None:
+        return {"status": "skipped_no_template", "new_file": None, "backup": None}
+    rendered, current_hash = current
+    if not target.exists():
+        _write_text_atomic(target, rendered)
+        return {"status": "created", "new_file": None, "backup": None}
+    try:
+        existing_text: Optional[str] = target.read_text(encoding="utf-8")
+    except Exception:
+        existing_text = None
+    classification = (classify_agents_md(existing_text, current_hash)
+                      if existing_text is not None else "customized")
+    if classification == "up_to_date":
+        return {"status": "up_to_date", "new_file": None, "backup": None}
+    if classification == "stale_unmodified":
+        backup = _backup(target)
+        _write_text_atomic(target, rendered)
+        return {"status": "updated_clean", "new_file": None, "backup": backup}
+    new_file = target.with_name(target.name + ".new")
+    _write_text_atomic(new_file, rendered)
+    return {"status": "skipped_customized_update_available",
+            "new_file": str(new_file), "backup": None}
+
+
 def wire_agent(agent: str, project_root: Optional[str] = None,
                project_memory_root: Optional[str] = None,
                drop_protocol: bool = True,
@@ -383,17 +532,19 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         written.append("(none — paste the snippet below into your agent's MCP config)")
 
     agents_md_status = "skipped_disabled"
+    agents_md_new_file: Optional[str] = None
     if drop_protocol:
-        target = proj_root / "AGENTS.md"
-        if target.exists():
-            agents_md_status = "skipped_exists"
-        else:
-            src = pm_root / "AGENTS.md"
-            if src.exists():
-                target.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-                agents_md_status = "created"
-            else:
-                agents_md_status = "skipped_no_template"
+        sync = sync_agents_md(proj_root / "AGENTS.md", pm_root)
+        agents_md_status = sync["status"]
+        agents_md_new_file = sync["new_file"]
+        if sync["backup"]:
+            backups.append(sync["backup"])
+        if agents_md_status == "skipped_customized_update_available":
+            warnings.append(
+                "AGENTS.md update available: your AGENTS.md appears customized, so it "
+                "was left untouched. The latest protocol was written to "
+                f"{agents_md_new_file} — diff/merge it into AGENTS.md at your "
+                "convenience.")
 
     if agent == "opencode":
         snippet = {
@@ -461,7 +612,7 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         # Warnings are impossible-to-miss: first in next_steps (the printed
         # user output) as well as a dedicated report field.
         next_steps = [f"WARNING: {w}" for w in warnings] + next_steps
-    return {
+    report: Dict[str, Any] = {
         "status": "WIRED_WITH_ERRORS" if config_errors else "WIRED",
         "agent": agent,
         "project_root": str(proj_root),
@@ -474,6 +625,9 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         "mcp_snippet": snippet,
         "next_steps": next_steps,
     }
+    if agents_md_new_file:
+        report["agents_md_new_file"] = agents_md_new_file
+    return report
 
 
 def detect_agent(project_root: Optional[Path] = None,

@@ -18,6 +18,7 @@ from typing import Dict, Any, List, Tuple
 
 from memory_store import MemoryStore, bump_background_failure
 from structural_extract import extract_structures
+from wire import sync_agents_md
 
 logger = logging.getLogger(__name__)
 
@@ -357,14 +358,9 @@ def install_git_hook(root: Path) -> str:
 
 
 def drop_agents_md(root: Path) -> str:
-    target = root / "AGENTS.md"
-    if target.exists():
-        return "skipped_exists"
-    src = Path(__file__).resolve().parent / "AGENTS.md"
-    if not src.exists():
-        return "skipped_no_template"
-    target.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    return "created"
+    """Sync the AGENTS.md protocol file (versioned logic shared with wire.py)."""
+    return sync_agents_md(Path(root) / "AGENTS.md",
+                          Path(__file__).resolve().parent)["status"]
 
 
 def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True,
@@ -389,7 +385,13 @@ def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True
         # Dry-run never touches the target repo.
         if not dry_run:
             hook_status = install_git_hook(root_path) if install_hook else "skipped_disabled"
-            agents_status = drop_agents_md(root_path) if drop_protocol else "skipped_disabled"
+            agents_status = "skipped_disabled"
+            agents_new_file = None
+            if drop_protocol:
+                agents_sync = sync_agents_md(root_path / "AGENTS.md",
+                                             Path(__file__).resolve().parent)
+                agents_status = agents_sync["status"]
+                agents_new_file = agents_sync["new_file"]
 
         planned: List[Dict[str, Any]] = [{
             "category": "component",
@@ -501,7 +503,7 @@ def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True
         if not dry_run:
             store.link_facts_to_structural_nodes()
 
-        return {
+        result = {
             "status": "BOOTSTRAPPED",
             "root": str(root_path),
             "facts_written": len(written),
@@ -512,6 +514,9 @@ def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True
             "agents_md": agents_status,
             "fact_ids": written,
         }
+        if agents_new_file:
+            result["agents_md_new_file"] = agents_new_file
+        return result
     finally:
         if own_store:
             store.close()

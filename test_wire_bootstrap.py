@@ -7,6 +7,7 @@ FakeStore whose writes all report duplicates so the embedding backfill is
 never reached.
 """
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -15,7 +16,8 @@ import pytest
 
 import bootstrap
 import wire
-from wire import _backup, _merge_json, _python_exe, wire_agent, detect_agent, prompt_agent_choice
+from wire import (_backup, _merge_json, _python_exe, wire_agent, detect_agent,
+                  prompt_agent_choice, sync_agents_md, classify_agents_md)
 
 
 # --------------------------------------------------------------------------
@@ -186,7 +188,10 @@ def test_wire_opencode_entry(tmp_path):
     res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm))
     assert res["status"] == "WIRED"
     assert res["agents_md"] == "created"
-    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "# Protocol\n"
+    content = (proj / "AGENTS.md").read_text(encoding="utf-8")
+    body, marker = wire._split_agents_marker(content)
+    assert body == "# Protocol\n"
+    assert marker == wire._agents_body_hash(body)
     cfg = json.loads((proj / "opencode.json").read_text(encoding="utf-8"))
     assert "mcpServers" not in cfg  # opencode uses `mcp`, never `mcpServers`
     entry = cfg["mcp"]["cognigraph"]
@@ -364,13 +369,141 @@ def test_wire_corrupt_config_reports_not_raises(tmp_path):
     assert any("Fix config errors first" in s for s in res["next_steps"])
 
 
-def test_wire_protocol_skipped_exists(tmp_path):
+def test_wire_protocol_missing_creates_stamped_copy(tmp_path):
     pm = _make_pm_root(tmp_path)
     proj = _make_proj(tmp_path)
-    (proj / "AGENTS.md").write_text("existing", encoding="utf-8")
     res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm))
-    assert res["agents_md"] == "skipped_exists"
-    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "existing"
+    assert res["agents_md"] == "created"
+    assert "agents_md_new_file" not in res
+    content = (proj / "AGENTS.md").read_text(encoding="utf-8")
+    body, marker = wire._split_agents_marker(content)
+    assert body == "# Protocol\n"
+    assert marker == wire._agents_body_hash(body)
+    # Second run is a no-op with an explicit status.
+    res2 = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm))
+    assert res2["agents_md"] == "up_to_date"
+    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == content
+
+
+def test_wire_protocol_customized_writes_new_sibling(tmp_path):
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    (proj / "AGENTS.md").write_text("# Protocol\n\nMy team edits.\n", encoding="utf-8")
+    res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm))
+    assert res["agents_md"] == "skipped_customized_update_available"
+    # Real file untouched; no backup taken since nothing was overwritten.
+    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "# Protocol\n\nMy team edits.\n"
+    assert not list(proj.glob("AGENTS.md.bak*"))
+    new_file = Path(res["agents_md_new_file"])
+    assert new_file == proj / "AGENTS.md.new"
+    body, marker = wire._split_agents_marker(new_file.read_text(encoding="utf-8"))
+    assert body == "# Protocol\n"
+    assert marker == wire._agents_body_hash(body)
+    assert any("AGENTS.md.new" in s for s in res["next_steps"])
+    # No .new written -> the optional report field stays absent entirely.
+    res_quiet = wire_agent("cursor", project_root=str(proj), project_memory_root=str(pm),
+                           drop_protocol=False)
+    assert "agents_md_new_file" not in res_quiet
+
+
+def test_wire_protocol_stale_unmodified_overwrites_with_backup(tmp_path, monkeypatch):
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    old_body = "# Older protocol\n"
+    old_hash = wire._agents_body_hash(old_body)
+    monkeypatch.setattr(wire, "KNOWN_AGENTS_TEMPLATE_HASHES", frozenset({old_hash}))
+    old_rendered = old_body + f"<!-- cognigraph-template sha256:{old_hash} -->\n"
+    (proj / "AGENTS.md").write_text(old_rendered, encoding="utf-8")
+    res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm))
+    assert res["agents_md"] == "updated_clean"
+    assert "agents_md_new_file" not in res
+    content = (proj / "AGENTS.md").read_text(encoding="utf-8")
+    body, marker = wire._split_agents_marker(content)
+    assert body == "# Protocol\n"  # current template installed
+    assert marker == wire._agents_body_hash(body)
+    assert (proj / "AGENTS.md.bak").read_text(encoding="utf-8") == old_rendered
+    assert str(proj / "AGENTS.md.bak") in res["backups"]
+
+
+def test_wire_protocol_unmarked_known_body_is_stale(tmp_path, monkeypatch):
+    # Pre-versioning copy, byte-identical to a shipped revision: safe to stamp.
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    old_body = "# Older protocol\n"
+    old_hash = wire._agents_body_hash(old_body)
+    monkeypatch.setattr(wire, "KNOWN_AGENTS_TEMPLATE_HASHES", frozenset({old_hash}))
+    (proj / "AGENTS.md").write_text(old_body, encoding="utf-8")  # no marker at all
+    res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm))
+    assert res["agents_md"] == "updated_clean"
+    body, marker = wire._split_agents_marker(
+        (proj / "AGENTS.md").read_text(encoding="utf-8"))
+    assert body == "# Protocol\n"
+    assert marker == wire._agents_body_hash(body)
+
+
+def test_wire_protocol_new_sibling_overwritten(tmp_path):
+    # AGENTS.md.new is our own artifact: a stale one is replaced, and the real
+    # file is still never touched or backed up.
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    (proj / "AGENTS.md").write_text("mine\n", encoding="utf-8")
+    (proj / "AGENTS.md.new").write_text("stale leftover\n", encoding="utf-8")
+    res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm))
+    assert res["agents_md"] == "skipped_customized_update_available"
+    body, _ = wire._split_agents_marker(
+        (proj / "AGENTS.md.new").read_text(encoding="utf-8"))
+    assert body == "# Protocol\n"
+    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "mine\n"
+    assert not list(proj.glob("AGENTS.md.bak*"))
+
+
+def test_classify_agents_md_four_outcomes():
+    cur_body = "# Protocol\n"
+    cur = wire._agents_body_hash(cur_body)
+    old_body = "# Older protocol\n"
+    old = wire._agents_body_hash(old_body)
+    known = frozenset({old, cur})
+
+    def stamped(body, h):
+        return body + f"<!-- cognigraph-template sha256:{h} -->\n"
+
+    assert classify_agents_md(stamped(cur_body, cur), cur, known) == "up_to_date"
+    assert classify_agents_md(stamped(old_body, old), cur, known) == "stale_unmodified"
+    assert classify_agents_md(old_body, cur, known) == "stale_unmodified"  # pre-versioning
+    assert classify_agents_md(cur_body, cur, known) == "stale_unmodified"  # needs marker stamp
+    assert classify_agents_md("# Protocol\n\nedited\n", cur, known) == "customized"
+    # Current marker but edited body: the marker is stale evidence, not a pass.
+    assert classify_agents_md(stamped("# Protocol\n\nedited\n", cur), cur, known) == "customized"
+    # Marker/body mismatch and unknown markers are edit signals, not passes.
+    assert classify_agents_md(stamped(cur_body, old), cur, known) == "customized"
+    assert classify_agents_md(stamped(cur_body, "0" * 64), cur, known) == "customized"
+    # CRLF checkouts normalize to the same verdict as LF.
+    assert classify_agents_md(stamped(cur_body, cur).replace("\n", "\r\n"),
+                              cur, known) == "up_to_date"
+
+
+def test_known_hashes_cover_shipped_history():
+    assert len(wire.KNOWN_AGENTS_TEMPLATE_HASHES) == 8
+    assert all(re.fullmatch(r"[0-9a-f]{64}", h)
+               for h in wire.KNOWN_AGENTS_TEMPLATE_HASHES)
+    real = Path(wire.__file__).resolve().parent / "AGENTS.md"
+    body, marker = wire._split_agents_marker(real.read_text(encoding="utf-8"))
+    assert marker == wire._agents_body_hash(body)  # shipped file stamps its own hash
+    assert marker in wire.KNOWN_AGENTS_TEMPLATE_HASHES  # ... and it is a known revision
+
+
+def test_wire_and_bootstrap_share_helper(tmp_path):
+    # Both paths read the same canonical template: identical file, identical
+    # verdict. Uses the real install root so both sides see the real template.
+    real_pm = Path(wire.__file__).resolve().parent
+    proj = _make_proj(tmp_path, "agree_fresh")
+    assert sync_agents_md(proj / "AGENTS.md", real_pm)["status"] == "created"
+    assert bootstrap.drop_agents_md(proj) == "up_to_date"
+    proj2 = _make_proj(tmp_path, "agree_custom")
+    (proj2 / "AGENTS.md").write_text("hand-edited\n", encoding="utf-8")
+    assert (sync_agents_md(proj2 / "AGENTS.md", real_pm)["status"]
+            == bootstrap.drop_agents_md(proj2)
+            == "skipped_customized_update_available")
 
 
 def test_wire_protocol_no_template(tmp_path):
@@ -767,7 +900,7 @@ def test_install_git_hook_states(tmp_path):
 def test_drop_agents_md(tmp_path):
     assert bootstrap.drop_agents_md(tmp_path) == "created"
     assert (tmp_path / "AGENTS.md").exists()
-    assert bootstrap.drop_agents_md(tmp_path) == "skipped_exists"
+    assert bootstrap.drop_agents_md(tmp_path) == "up_to_date"
 
 
 def test_bootstrap_dry_run_previews_without_touching(tmp_path):

@@ -44,3 +44,4 @@ Code graph (one-hop queries — ask these mid-reasoning instead of re-reading fi
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.
 - If `memory_cli.py wire` reports `WIRED_WITH_ERRORS`, fix `config_errors` first - the listed config was not written (wire.py:207-222).
+<!-- cognigraph-template sha256:52230ced414bbbc78df005fecc5944ddf5a3d7edb576f9f13d1a5cf9e933aa76 -->
