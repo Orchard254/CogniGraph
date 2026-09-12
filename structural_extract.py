@@ -20,6 +20,7 @@ anything else -> empty list with explicit skip note.
 """
 
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -201,6 +202,120 @@ def _js_heritage_bases(class_node) -> list:
     return []
 
 
+# Annotations that never name a class (last-identifier extraction skips them).
+_NON_CLASS_ANNOTATIONS = frozenset({
+    "None", "Any", "bool", "int", "float", "str", "bytes", "list", "dict",
+    "tuple", "set", "frozenset", "type", "object",
+})
+
+
+def _python_factories(root) -> dict:
+    """Map module-level factory function name -> returned class name.
+
+    Bounded local inference only (no cross-file lookup, no general type
+    inference):
+    (a) return-annotation tail — `def _store() -> Iterator["MemoryStore"]`
+        yields `_store -> MemoryStore` (last identifier of the annotation);
+    (b) constructor return — `return MemoryStore()` where MemoryStore is a
+        class defined in the same file (covers unannotated `_get_store`).
+    Anything else stays unknown and its aliases never rewrite (conservative:
+    today's dropped-edge behavior).
+    """
+    classes = set()
+    funcs = []
+    for child in root.children:
+        node = child
+        # Unwrap decorated definitions (@contextmanager def _store ...).
+        if node.type == "decorated_definition":
+            for sub in node.children:
+                if sub.type == "function_definition":
+                    node = sub
+                    break
+        if node.type == "class_definition":
+            name_node = node.child_by_field_name("name")
+            if name_node is not None:
+                classes.add(_node_text(name_node))
+        elif node.type == "function_definition":
+            funcs.append(node)
+    out = {}
+    for fn in funcs:
+        name_node = fn.child_by_field_name("name")
+        fname = _node_text(name_node) if name_node is not None else ""
+        if not fname or fname in out:
+            continue
+        ret = fn.child_by_field_name("return_type")
+        if ret is not None:
+            idents = re.findall(r"[A-Za-z_]\w*", _node_text(ret))
+            tail = idents[-1] if idents else ""
+            if tail and tail not in _NON_CLASS_ANNOTATIONS:
+                out[fname] = tail
+                continue
+        found = _find_returned_class(fn, classes)
+        if found:
+            out[fname] = found
+    return out
+
+
+def _find_returned_class(fn_node, classes: set) -> str | None:
+    """Class (from the file's own class set) constructed in a `return` stmt."""
+    result = None
+
+    def visit(n):
+        nonlocal result
+        if result is not None:
+            return
+        if n.type == "return_statement":
+            for ch in n.children:
+                if ch.type == "call":
+                    callee = ch.child_by_field_name("function")
+                    if callee is not None and callee.type == "identifier":
+                        cname = _node_text(callee)
+                        if cname in classes:
+                            result = cname
+                            return
+            return
+        # Do not descend into nested definitions: their returns belong to
+        # another scope.
+        if n is not fn_node and n.type in ("function_definition", "lambda"):
+            return
+        for ch in n.children:
+            visit(ch)
+
+    visit(fn_node)
+    return result
+
+
+def _with_aliases(with_node, factories: dict) -> list:
+    """(alias, class) pairs bound by `with FACTORY() as VAR` items in one
+    with_statement. Only factories with an inferred class contribute."""
+    pairs = []
+    for clause in with_node.children:
+        if clause.type != "with_clause":
+            continue
+        for item in clause.children:
+            if item.type != "with_item":
+                continue
+            call_node, target = None, None
+            for sub in item.children:
+                if sub.type == "as_pattern":
+                    for part in sub.children:
+                        if part.type == "call" and call_node is None:
+                            call_node = part
+                        elif part.type == "as_pattern_target" and target is None:
+                            target = part
+            if call_node is None or target is None:
+                continue
+            callee = call_node.child_by_field_name("function")
+            if callee is None or callee.type != "identifier":
+                continue
+            cls = factories.get(_node_text(callee))
+            var_node = target.child_by_field_name("name")
+            var = _node_text(var_node) if var_node is not None else _node_text(target)
+            if cls and var:
+                pairs.append((var, cls))
+    return pairs
+
+
 # ------------------------------------------------------------------
 # Python recursive extraction (full tree walk, not just root children)
 # ------------------------------------------------------------------
@@ -211,13 +326,26 @@ def _extract_python(file_path: Path):
     tree = parser.parse(source)
     root = tree.root_node
     items = []
+    factories = _python_factories(root)
 
     # Stack holds (node, current_class_name_or_None)
-    def walk(node, current_class: str | None = None, scope_item: dict | None = None):
+    def walk(node, current_class: str | None = None, scope_item: dict | None = None,
+             aliases: tuple = ()):
         # Capture calls into the innermost enclosing definition so call edges
         # can be derived later without a second AST pass.
         if node.type == "call" and scope_item is not None:
             callee = _callee_name(node)
+            if callee and "." in callee:
+                # Bounded instance-alias rewrite: VAR.method inside the
+                # `with FACTORY() as VAR:` body that binds VAR becomes
+                # Class.method (innermost binding wins); anything outside the
+                # block keeps the VAR.method form and still drops at resolve
+                # time, exactly as before.
+                base, _tail = callee.split(".", 1)
+                for aname, acls in reversed(aliases):
+                    if base == aname:
+                        callee = f"{acls}.{_tail}"
+                        break
             if callee and callee not in scope_item.setdefault("calls", []):
                 scope_item["calls"].append(callee)
 
@@ -247,8 +375,23 @@ def _extract_python(file_path: Path):
                 item["class_name"] = current_class
             items.append(item)
             # Recurse into function body with current_class=None (closure/local)
+            # and no aliases: bindings never cross function boundaries.
             for ch in node.children:
-                walk(ch, current_class=None, scope_item=item)
+                walk(ch, current_class=None, scope_item=item, aliases=())
+            return
+
+        # --- With-blocks: extend aliases for the body only ---
+        elif node.type == "with_statement":
+            bound = tuple(_with_aliases(node, factories))
+            for ch in node.children:
+                if ch.type == "block":
+                    walk(ch, current_class=current_class, scope_item=scope_item,
+                         aliases=aliases + bound)
+                else:
+                    # with_clause (context expressions evaluate in the outer
+                    # scope) and punctuation: outer aliases.
+                    walk(ch, current_class=current_class, scope_item=scope_item,
+                         aliases=aliases)
             return
 
         # --- Classes ---
@@ -265,12 +408,12 @@ def _extract_python(file_path: Path):
             })
             # Walk children with this class in scope; nested functions become methods
             for ch in node.children:
-                walk(ch, current_class=class_name, scope_item=scope_item)
+                walk(ch, current_class=class_name, scope_item=scope_item, aliases=aliases)
             return  # children already walked with class scope; don't double-walk
 
         # --- General recursive descent for anything else ---
         for ch in node.children:
-            walk(ch, current_class=current_class, scope_item=scope_item)
+            walk(ch, current_class=current_class, scope_item=scope_item, aliases=aliases)
 
     walk(root)
     return items
@@ -865,7 +1008,9 @@ def extract_structures(file_path: Path) -> list[dict]:
         - bases: list[str] (only for classes, ordered base-class name tails;
           dotted bases collapse to the last segment; [] when no heritage)
         - calls: list[str] (callee texts seen inside the definition body,
-          e.g. 'query_hybrid' or 'self.write'; definitions only)
+          e.g. 'query_hybrid', 'self.write', or 'MemoryStore.write' for a
+          `with`-block instance alias rewritten to its inferred class;
+          definitions only)
 
     For unsupported extensions returns [] and logs
     an explicit skip message so unsupported and "found nothing" are

@@ -389,6 +389,26 @@ class StructuralMixin:
                         rows = find_in_file(target, suffix, types=("function", "method", "class"))
                         if rows:
                             return rows[0]["id"]
+                # Instance-alias rewrite (extraction): VAR.method inside a
+                # `with FACTORY() as VAR` body arrives as Class.method
+                # (e.g. server.py `with _store() as _s` -> MemoryStore.*).
+                # Own class first, then its composition family (b2a/b2b).
+                # A known class with no such method resolves to nothing —
+                # never leak into the repo-wide-unique fallback below.
+                if prefix in class_bases:
+                    own = self.conn.execute(
+                        "SELECT id FROM structural_nodes WHERE name = ? AND class_name = ? "
+                        "AND node_type IN ('method','function')",
+                        (suffix, prefix),
+                    ).fetchall()
+                    if own:
+                        if len(own) > 1:
+                            logger.warning(
+                                "ambiguous %s.%s: %d definitions; first row wins",
+                                prefix, suffix, len(own),
+                            )
+                        return own[0]["id"]
+                    return resolve_in_composition(prefix, suffix)
                 return None
             key = ("function", callee_text, "")
             if key in defs:
