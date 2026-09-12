@@ -10,7 +10,7 @@ At the start of EVERY session:
 1. Call `memory_stats` to confirm the database location and counts.
 2. Call `memory_query` BEFORE reading or editing any file. If memory has the answer, trust it — do not re-explore code you already know. Pass `intent` (fix/implement/refactor/optimize/...) so ranking boosts the right categories; it is auto-detected from the text if omitted.
 3. Call `memory_prepare_task(intent, file_paths)` before writing any code.
-4. Call `memory_get_file_context(file_path)` before modifying any specific file — it now includes the file's code structure (functions/classes/imports) from the structural index.
+4. Call `memory_get_file_context(file_path)` while planning an approach to a file, and before modifying it — it now includes the file's code structure (functions/classes/imports) from the structural index.
 
 LLM priming (context retrieval):
 - Prefer `memory_get_context(query, agent_type=..., max_tokens=..., intent=...)` for a single Markdown briefing; it auto-detects intent, expands related constraints/decisions, and prioritizes critical facts.
@@ -38,7 +38,8 @@ Structural layer (tree-sitter, Python/JS/TS/TSX):
 - Run `bootstrap.scan` or `sync_structural_nodes` after editing source files to keep structural index current; `memory_query` automatically uses the structural lane (no extra call needed) but requires up-to-date nodes.
 
 Code graph (one-hop queries — ask these mid-reasoning instead of re-reading files):
-- `memory_who_calls(symbol)` — definitions, callers, and importing files for a symbol, from AST ground truth. Accepts `query` or `MemoryStore.write`.
+- `memory_blast_radius(symbol)` — transitive blast radius ("what breaks if I change this"): call this while planning an approach or estimating effort, before making changes — not just as a pre-edit gate.
+- `memory_who_calls(symbol)` — definitions, callers, and importing files for a symbol, from AST ground truth. Accepts `query` or `MemoryStore.write`. Ask mid-reasoning while planning, not just before a rename.
 - `memory_project_shape()` — indexed file inventory and code-graph size; call once early for orientation.
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.

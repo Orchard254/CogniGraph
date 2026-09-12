@@ -333,7 +333,7 @@ def memory_get_context(query: str, agent_type: str = "default", max_tokens: int 
 
 @mcp.tool()
 def memory_get_file_context(file_path: str) -> dict:
-    """Call BEFORE editing a file: its symbols, anchored facts, callers, and call-graph edges."""
+    """Call while planning an approach to a file — and before editing it: its symbols, anchored facts, callers, and call-graph edges."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         briefing_md = _s.get_file_context(file_path)
@@ -431,7 +431,7 @@ def memory_checkpoint_task(
 
 @mcp.tool()
 def memory_who_calls(symbol: str) -> dict:
-    """Where a symbol is defined, every call site, and importing files. Call before renaming or changing a signature."""
+    """Where a symbol is defined, every call site, and importing files. Ask mid-reasoning while planning an approach — and before renaming or changing a signature."""
     with _store() as _s:
         return _s.who_calls(symbol)
 
@@ -440,7 +440,7 @@ def memory_who_calls(symbol: str) -> dict:
 def memory_blast_radius(symbol: str, class_name: str = "", file_path: str = "",
                         max_depth: int = 5, direction: str = "callers",
                         file_detail: str = "", max_symbols_per_file: int = 20) -> dict:
-    """Transitive blast radius: who depends on this symbol, transitively. Call before renaming or changing a signature."""
+    """Transitive blast radius: who depends on this symbol, transitively. Call while planning an approach or estimating effort, before making changes — not just as a pre-edit gate."""
     with _store() as _s:
         return _s.blast_radius(symbol, class_name=class_name or "",
                                file_path=file_path or "",
