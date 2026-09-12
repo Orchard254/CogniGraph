@@ -400,12 +400,13 @@ class SearchMixin:
             fact_params.append(session_id)
         fact_where = " AND ".join(fact_filters)
 
-        # Fetch structural nodes (bounded scan)
+        # Fetch all structural nodes (full scan). A bounded scan here would be
+        # an unordered pre-filter, not a ranked top-K: with no ORDER BY the
+        # capped slice silently drops real nodes before RRF fusion sees them.
         rows = self.conn.execute(
             """
             SELECT id, name, node_type, class_name
             FROM structural_nodes
-            LIMIT 200
             """
         ).fetchall()
 
@@ -680,13 +681,38 @@ class SearchMixin:
         except Exception as e:
             logger.warning("episodic semantic lane failed for query %r: %r", text[:80], e)
 
-        # --- Lane 4: Structural (memory-only, unchanged) ---
-        struct_top = self._structural_scores(text, category=category, tag=tag, session_id=session_id)
+        # Lane weights are resolved before Lane 4 so a zero-weighted
+        # structural lane can skip its scan entirely (see below).
+        # Per-agent lane weight tuning: different LLM consumers benefit from
+        # different retrieval-lane emphasis (e.g. cursor leans on structural).
+        AGENT_LANE_WEIGHTS = {
+            "default":  {"fts": 1.0,  "tok": 0.85, "sem": 1.2, "struct": 0.0,  "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
+            "cursor":   {"fts": 1.0,  "tok": 0.85, "sem": 1.3, "struct": 1.2,  "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
+
+            "claude":   {"fts": 1.1,  "tok": 0.85, "sem": 1.3, "struct": 1.0,  "epi_fts": 1.1,  "epi_tok": 0.85, "epi_sem": 1.3},
+            "opencode": {"fts": 1.0,  "tok": 0.9,  "sem": 1.2, "struct": 1.1,  "epi_fts": 1.0,  "epi_tok": 0.9,  "epi_sem": 1.2},
+            "zed":      {"fts": 1.05, "tok": 0.85, "sem": 1.2, "struct": 1.15, "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
+        }
+
+        lane_w = AGENT_LANE_WEIGHTS.get(agent_type, AGENT_LANE_WEIGHTS["default"])
+
+        # --- Lane 4: Structural (memory-only) ---
+        # The default struct weight is 0: the lane's output is ~97% whole-file
+        # stub facts, so it contributes nothing to fusion. A zero weight skips
+        # the full-table scan entirely rather than computing scores only to
+        # multiply them by zero. Non-zero agent weights (e.g. cursor) still scan.
+        struct_top = (
+            self._structural_scores(text, category=category, tag=tag, session_id=session_id)
+            if lane_w["struct"] != 0 else []
+        )
 
         # --- RRF Fusion with recency decay + importance weighting — now keyed by (source, id) ---
         rrf: Dict[tuple, float] = {}
         # k=5 chosen via holdout-validated 52-pair golden sweep (Phase 5);
         # k=60 measured near-worst (recall@5 0.583 tuning / 0.625 holdout).
+        # k stays 5 deliberately: the LIMIT-200 retune re-tested k in {1,2,3,4}
+        # and every k<5 reproduces the Phase 5 rejection (holdout #173 lost,
+        # recall@10 1.0->0.9375). The #173 loss is a k-effect, not a lane effect.
         k = 5
 
         # Fetch recency/access info for memory candidates (episodic has no access_count)
@@ -761,18 +787,8 @@ class SearchMixin:
         }
         intent_boosts = INTENT_CATEGORY_BOOSTS.get(intent, {})
 
-        # Per-agent lane weight tuning: different LLM consumers benefit from
-        # different retrieval-lane emphasis (e.g. cursor leans on structural).
-        AGENT_LANE_WEIGHTS = {
-            "default":  {"fts": 1.0,  "tok": 0.85, "sem": 1.2, "struct": 1.0,  "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
-            "cursor":   {"fts": 1.0,  "tok": 0.85, "sem": 1.3, "struct": 1.2,  "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
-
-            "claude":   {"fts": 1.1,  "tok": 0.85, "sem": 1.3, "struct": 1.0,  "epi_fts": 1.1,  "epi_tok": 0.85, "epi_sem": 1.3},
-            "opencode": {"fts": 1.0,  "tok": 0.9,  "sem": 1.2, "struct": 1.1,  "epi_fts": 1.0,  "epi_tok": 0.9,  "epi_sem": 1.2},
-            "zed":      {"fts": 1.05, "tok": 0.85, "sem": 1.2, "struct": 1.15, "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
-        }
-
-        lane_w = AGENT_LANE_WEIGHTS.get(agent_type, AGENT_LANE_WEIGHTS["default"])
+        # (AGENT_LANE_WEIGHTS lives above Lane 4 so a zero struct weight can
+        # skip the structural scan; lane_w is already resolved there.)
         usage_boosts = self._usage_boost(text)
 
         def rrf_add(source: str, fact_id: int, rank: int, lane_weight: float = 1.0):

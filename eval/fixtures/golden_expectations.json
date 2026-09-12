@@ -2,8 +2,8 @@
   "description": "Committed eval-gate baseline for golden_fixture.db. Regenerate both files together via scripts/freeze_eval_fixture.py.",
   "pinned_now": "2026-09-11T00:00:00+00:00",
   "rrf_k": 5,
-  "created_at_utc": "2026-09-10T22:44:57.560134+00:00",
-  "git_commit_sha": "f8de50e4d338e92128c8748b8774fe92df307cde",
+  "created_at_utc": "2026-09-12T18:26:31.553643+00:00",
+  "git_commit_sha": "e92bc4b90e82a33459f4b74f337293ae3335bcdf",
   "fixture": {
     "path": "eval/fixtures/golden_fixture.db",
     "source_db": "C:\\PROJECT\\project-memory\\.cognigraph\\memory.db",
@@ -17,9 +17,9 @@
   "splits": {
     "tuning": {
       "n": 36,
-      "recall@5": 0.8333,
+      "recall@5": 0.9167,
       "recall@10": 0.9444,
-      "mrr": 0.5672,
+      "mrr": 0.5796,
       "missed_fact_ids": [
         111,
         153
@@ -29,7 +29,7 @@
       "n": 16,
       "recall@5": 0.75,
       "recall@10": 1.0,
-      "mrr": 0.5298,
+      "mrr": 0.561,
       "missed_fact_ids": []
     }
   }
