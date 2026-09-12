@@ -347,8 +347,15 @@ def _extract_python(file_path: Path):
                     if base == aname:
                         callee = f"{acls}.{_tail}"
                         break
-            if callee and callee not in scope_item.setdefault("calls", []):
-                scope_item["calls"].append(callee)
+            if callee:
+                if callee not in scope_item.setdefault("calls", []):
+                    scope_item["calls"].append(callee)
+                # Per-site lines for the same callee (a caller often repeats
+                # a callee across branches); recorded under the rewritten name.
+                ln = _line_1(node)
+                lines = scope_item.setdefault("call_sites", {}).setdefault(callee, [])
+                if ln not in lines:
+                    lines.append(ln)
 
         # --- Imports (must find nested ones inside try/except/if/etc) ---
         if node.type in ("import_statement", "import_from_statement"):
@@ -455,8 +462,13 @@ def _extract_js(file_path: Path):
         # can be derived later without a second AST pass.
         if node.type == "call_expression" and scope_item is not None:
             callee = _js_callee_name(node)
-            if callee and callee not in scope_item.setdefault("calls", []):
-                scope_item["calls"].append(callee)
+            if callee:
+                if callee not in scope_item.setdefault("calls", []):
+                    scope_item["calls"].append(callee)
+                ln = _line_1(node)
+                lines = scope_item.setdefault("call_sites", {}).setdefault(callee, [])
+                if ln not in lines:
+                    lines.append(ln)
 
         # --- ES import statements ---
         if node.type == "import_statement":
@@ -600,8 +612,13 @@ def _extract_ts(file_path: Path):
         # can be derived later without a second AST pass.
         if node.type == "call_expression" and scope_item is not None:
             callee = _js_callee_name(node)
-            if callee and callee not in scope_item.setdefault("calls", []):
-                scope_item["calls"].append(callee)
+            if callee:
+                if callee not in scope_item.setdefault("calls", []):
+                    scope_item["calls"].append(callee)
+                ln = _line_1(node)
+                lines = scope_item.setdefault("call_sites", {}).setdefault(callee, [])
+                if ln not in lines:
+                    lines.append(ln)
 
         # --- ES import statements ---
         if node.type == "import_statement":
@@ -807,8 +824,13 @@ def _extract_tsx(file_path: Path):
         # can be derived later without a second AST pass.
         if node.type == "call_expression" and scope_item is not None:
             callee = _js_callee_name(node)
-            if callee and callee not in scope_item.setdefault("calls", []):
-                scope_item["calls"].append(callee)
+            if callee:
+                if callee not in scope_item.setdefault("calls", []):
+                    scope_item["calls"].append(callee)
+                ln = _line_1(node)
+                lines = scope_item.setdefault("call_sites", {}).setdefault(callee, [])
+                if ln not in lines:
+                    lines.append(ln)
 
         # --- ES import statements ---
         if node.type == "import_statement":
@@ -1012,6 +1034,10 @@ def extract_structures(file_path: Path) -> list[dict]:
           e.g. 'query_hybrid', 'self.write', or 'MemoryStore.write' for a
           `with`-block instance alias rewritten to its inferred class;
           definitions only)
+        - call_sites: dict[str, list[int]] (1-indexed call-site lines per
+          callee name in calls, same rewritten names; a repeated callee
+          lists every distinct line, e.g. {'helper': [12, 27]}; callers
+          built before this field existed simply omit it)
 
     For unsupported extensions returns [] and logs
     an explicit skip message so unsupported and "found nothing" are

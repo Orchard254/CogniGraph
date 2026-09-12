@@ -621,6 +621,106 @@ class TestCodeGraph:
     def test_who_calls_unknown_symbol(self, graph_store):
         assert graph_store.who_calls('nonexistent_symbol_xyz')['found'] is False
 
+    def test_extract_captures_call_site_lines(self, tmp_path):
+        (tmp_path / 'multi.py').write_text(
+            "def helper():\n"
+            "    return 1\n"
+            "\n"
+            "\n"
+            "def main(flag):\n"
+            "    helper()\n"
+            "    if flag:\n"
+            "        helper()\n")
+        from structural_extract import extract_structures
+        nodes = extract_structures(tmp_path / 'multi.py')
+        main = next(n for n in nodes if n['name'] == 'main')
+        # Deduped name list is unchanged...
+        assert main.get('calls', []) == ['helper']
+        # ...while every distinct site is recorded.
+        assert main.get('call_sites', {}).get('helper') == [6, 8]
+
+    def test_extract_real_repo_multi_site(self):
+        """Real multi-site example from the design investigation:
+        scan_file_tree calls extract_structures at two distinct lines."""
+        repo_root = Path(__file__).resolve().parent
+        from structural_extract import extract_structures
+        nodes = extract_structures(repo_root / 'bootstrap.py')
+        scan = next(n for n in nodes if n['name'] == 'scan_file_tree')
+        sites = (scan.get('call_sites') or {}).get('extract_structures', [])
+        assert len(set(sites)) >= 2, \
+            f"scan_file_tree must call extract_structures at 2+ lines: {sites}"
+
+    def test_call_sites_pruned_on_resync(self, temp_store, tmp_path):
+        from structural_extract import extract_structures
+        f = tmp_path / 'ev.py'
+        f.write_text(
+            "def helper():\n"
+            "    return 1\n"
+            "\n"
+            "\n"
+            "def main():\n"
+            "    helper()\n"
+            "    helper()\n")
+        temp_store.sync_structural_nodes(
+            'ev.py', extract_structures(f), project_root=str(tmp_path))
+        rows = temp_store.conn.execute(
+            "SELECT line FROM call_sites ORDER BY line").fetchall()
+        assert [r['line'] for r in rows] == [6, 7]
+        # Drop the second site; resync must prune the stale row.
+        f.write_text(
+            "def helper():\n"
+            "    return 1\n"
+            "\n"
+            "\n"
+            "def main():\n"
+            "    helper()\n")
+        temp_store.sync_structural_nodes(
+            'ev.py', extract_structures(f), project_root=str(tmp_path))
+        rows = temp_store.conn.execute(
+            "SELECT line FROM call_sites ORDER BY line").fetchall()
+        assert [r['line'] for r in rows] == [6]
+
+    def test_who_calls_includes_call_lines(self, temp_store, tmp_path):
+        from structural_extract import extract_structures
+        (tmp_path / 'ev.py').write_text(
+            "def helper():\n"
+            "    return 1\n"
+            "\n"
+            "\n"
+            "def main():\n"
+            "    helper()\n"
+            "    helper()\n")
+        temp_store.sync_structural_nodes(
+            'ev.py', extract_structures(tmp_path / 'ev.py'),
+            project_root=str(tmp_path))
+        r = temp_store.who_calls('helper')
+        assert r['found'] is True
+        main_caller = next(c for c in r['callers'] if c['name'] == 'main')
+        assert main_caller['call_lines'] == [6, 7]
+        # Existing fields untouched.
+        assert main_caller['file_path'] == 'ev.py'
+
+    def test_who_calls_no_sites_returns_empty_list(self, temp_store, tmp_path):
+        """Pre-migration shape: an edge with no call_sites rows (old-shape
+        node dicts without the 'call_sites' key) reads back as []."""
+        (tmp_path / 'old.py').write_text(
+            "def helper():\n"
+            "    return 1\n"
+            "\n"
+            "\n"
+            "def main():\n"
+            "    helper()\n")
+        temp_store.sync_structural_nodes('old.py', [
+            {'type': 'function', 'name': 'helper', 'file_path': 'old.py',
+             'line_start': 1, 'line_end': 2},
+            {'type': 'function', 'name': 'main', 'file_path': 'old.py',
+             'line_start': 5, 'line_end': 6, 'calls': ['helper']},
+        ], project_root=str(tmp_path))
+        r = temp_store.who_calls('helper')
+        assert r['found'] is True
+        main_caller = next(c for c in r['callers'] if c['name'] == 'main')
+        assert main_caller['call_lines'] == []
+
     def test_same_file_composed_class_resolution(self, temp_store, tmp_path):
         """Single-file same-name shadowing must not beat composition scoping:
         CompA(CallerAlpha, SiblingA) + CompB(CallerBeta, SiblingB) in one
@@ -1057,9 +1157,11 @@ class TestBlastRadius:
         for f in r['files']:
             for s in f['symbols']:
                 assert {'name', 'class_name', 'node_type',
-                        'line_start', 'line_end', 'depth'} <= set(s)
+                        'line_start', 'line_end', 'call_lines', 'depth'} <= set(s)
                 assert isinstance(s['line_start'], int)
-        assert any('definition-level' in lim for lim in r['known_limitations'])
+                assert isinstance(s['call_lines'], list)
+        assert not any('not yet tracked' in lim for lim in r['known_limitations']), \
+            "call-site lines now ship; the not-yet-tracked limitation must be gone"
         assert any('not complete' in lim for lim in r['known_limitations'])
         assert any('watcher sync' in lim for lim in r['known_limitations'])
         assert r['definitions'] == [
@@ -1100,6 +1202,39 @@ class TestBlastRadius:
         clean = temp_store.blast_radius('lone', project_root=str(tmp_path))
         assert clean['unresolved_estimate'] == 0
         assert clean['unresolved_skipped_files'] == []
+
+    def test_unresolved_estimate_pairs_semantics(self, temp_store, tmp_path):
+        """A twice-called resolved callee must not inflate the gap: raw and
+        resolved sides both count unique callees (pairs), so main() calling
+        helper() twice plus one ghost yields exactly 1."""
+        _sync_files(temp_store, tmp_path, {
+            'pair.py': "def helper():\n"
+                       "    pass\n"
+                       "\n"
+                       "\n"
+                       "def main():\n"
+                       "    helper()\n"
+                       "    helper()\n"
+                       "    ghost_xyz()\n",
+        })
+        r = temp_store.blast_radius('helper', project_root=str(tmp_path))
+        assert r['unresolved_estimate'] == 1
+
+    def test_blast_radius_call_lines(self, temp_store, tmp_path):
+        _sync_files(temp_store, tmp_path, {
+            'sites.py': "def helper():\n"
+                        "    pass\n"
+                        "\n"
+                        "\n"
+                        "def main():\n"
+                        "    helper()\n"
+                        "    helper()\n",
+        })
+        r = temp_store.blast_radius('helper', project_root=str(tmp_path))
+        assert r['found'] is True
+        main_sym = next(s for f in r['files'] for s in f['symbols']
+                        if s['name'] == 'main')
+        assert main_sym['call_lines'] == [6, 7]
 
     def test_disambiguation_union_and_scoping(self, temp_store, tmp_path):
         _sync_files(temp_store, tmp_path, {

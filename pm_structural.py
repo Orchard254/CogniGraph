@@ -255,6 +255,22 @@ class StructuralMixin:
             (clean_path,),
         )
 
+        # call_sites exists on migrated databases; hand-rolled test fixtures
+        # may predate it, in which case sites are skipped silently (same
+        # convention as the base_classes column check in sync_structural_nodes).
+        try:
+            _cs_cols = [c["name"] for c in
+                        self.conn.execute("PRAGMA table_info(call_sites)").fetchall()]
+            has_sites_table = bool(_cs_cols)
+        except Exception:
+            has_sites_table = False
+        if has_sites_table:
+            self.conn.execute(
+                "DELETE FROM call_sites WHERE caller_id IN "
+                "(SELECT id FROM structural_nodes WHERE file_path = ?)",
+                (clean_path,),
+            )
+
         file_nodes = self.conn.execute(
             "SELECT id, node_type, name, class_name FROM structural_nodes WHERE file_path = ?",
             (clean_path,),
@@ -454,6 +470,21 @@ class StructuralMixin:
                         (caller_id, target_id, scan_ts),
                     )
                     calls_made += cur.rowcount
+                    if has_sites_table:
+                        # Resolved pairs only: unresolved names have no
+                        # callee_id and get no rows, by design. Old-shape
+                        # node dicts (no 'call_sites' key) simply store none.
+                        raw_sites = (node.get("call_sites") or {}).get(callee_text) or []
+                        for site_line in raw_sites:
+                            try:
+                                site_line = int(site_line)
+                            except (TypeError, ValueError):
+                                continue
+                            self.conn.execute(
+                                "INSERT OR IGNORE INTO call_sites (caller_id, callee_id, line, created_at) "
+                                "VALUES (?, ?, ?, ?)",
+                                (caller_id, target_id, site_line, scan_ts),
+                            )
 
         imports_made = 0
         for node_id, stmt in import_node_rows:
@@ -478,7 +509,9 @@ class StructuralMixin:
         """ONE-HOP CODE GRAPH QUERY: who calls this symbol, and who imports its file.
 
         Accepts a bare name ('query_hybrid') or Class.method ('MemoryStore.write').
-        Returns definitions, callers (name/class/file/lines), and importing files.
+        Returns definitions, callers (name/class/file/lines, plus call_lines:
+        sorted 1-indexed lines where the caller invokes this symbol, [] when
+        unknown), and importing files.
         """
         symbol = (symbol or "").strip()
         if not symbol:
@@ -502,13 +535,32 @@ class StructuralMixin:
 
         target_ids = [t["id"] for t in targets]
         ph = ",".join("?" * len(target_ids))
-        callers = self.conn.execute(
-            f"SELECT DISTINCT n.node_type, n.name, n.class_name, n.file_path, n.line_start, n.line_end "
+        caller_rows = self.conn.execute(
+            f"SELECT DISTINCT n.id AS caller_id, n.node_type, n.name, n.class_name, n.file_path, n.line_start, n.line_end "
             f"FROM structural_edges e JOIN structural_nodes n ON e.caller_id = n.id "
             f"WHERE e.callee_id IN ({ph}) AND e.edge_type = 'calls' "
             f"ORDER BY n.file_path, n.line_start",
             target_ids,
         ).fetchall()
+
+        # Per-caller call-site lines into these targets; callers with no
+        # stored sites (pre-migration rows) get [], never null.
+        lines_by_caller: Dict[int, List[int]] = {}
+        try:
+            cph = ",".join("?" * len(target_ids))
+            for r in self.conn.execute(
+                f"SELECT caller_id, line FROM call_sites WHERE callee_id IN ({cph})",
+                target_ids,
+            ).fetchall():
+                lines_by_caller.setdefault(r["caller_id"], []).append(r["line"])
+        except sqlite3.OperationalError:
+            pass
+        callers = []
+        for r in caller_rows:
+            d = dict(r)
+            cid = d.pop("caller_id")
+            d["call_lines"] = sorted(set(lines_by_caller.get(cid, [])))
+            callers.append(d)
 
         files = sorted({t["file_path"] for t in targets})
         importers: List[str] = []
@@ -560,8 +612,6 @@ class StructuralMixin:
         file_detail=<file> for that file's full uncapped symbol/line detail.
         """
         known_limitations = [
-            "call-site line numbers are not yet tracked "
-            "— line ranges are definition-level",
             "recall is not complete for indirect/dynamic calls, decorators, "
             "JS arrow functions, and non-mixin inheritance",
             "edges reflect the last watcher sync — counts and "
@@ -698,10 +748,30 @@ class StructuralMixin:
         max_reached = max(depths.values()) if depths else 0
 
         by_file: Dict[str, List[Dict[str, Any]]] = {}
+        # Call-site lines per affected node: lines where it calls any node
+        # also in the affected+seed set (option ii — the traversed-edge
+        # direction is not tracked, so this is the within-radius call set,
+        # not specifically the hop toward the seed). Missing table or no
+        # stored sites -> [].
+        lines_by_node: Dict[int, List[int]] = {}
+        if nodes:
+            try:
+                scope_ids = list(set(depths) | seed_set)
+                nph = ",".join("?" * len(nodes))
+                sph = ",".join("?" * len(scope_ids))
+                for r in self.conn.execute(
+                    "SELECT caller_id, line FROM call_sites "
+                    f"WHERE caller_id IN ({nph}) AND callee_id IN ({sph})",
+                    (*nodes, *scope_ids),
+                ).fetchall():
+                    lines_by_node.setdefault(r["caller_id"], []).append(r["line"])
+            except sqlite3.OperationalError:
+                pass
         for nid, node in nodes.items():
             entry = {"name": node["name"], "class_name": node["class_name"],
                      "node_type": node["node_type"],
                      "line_start": node["line_start"], "line_end": node["line_end"],
+                     "call_lines": sorted(set(lines_by_node.get(nid, []))),
                      "depth": depths[nid]}
             by_file.setdefault(node["file_path"], []).append(entry)
         for entries in by_file.values():
@@ -805,6 +875,12 @@ class StructuralMixin:
             except Exception:
                 skipped.append(fp)
                 continue
+            # Pairs-semantics (locked): both sides count unique callees, not
+            # call sites — len(calls) is the deduped name list and the
+            # resolved side counts one row per (caller, callee) edge. The
+            # call_sites line lists are display data and must NOT feed this
+            # gap, or multi-site pairs would inflate it. .get() defaults keep
+            # old-shape node dicts (no 'call_sites' key) working.
             raw = {(n.get("type"), n.get("name", ""), n.get("class_name", "") or ""):
                    len(n.get("calls") or []) for n in fresh}
             for row in rows:

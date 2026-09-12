@@ -447,6 +447,27 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         except Exception as e:
             logger.warning("structural_nodes base_classes migration failed: %r", e)
 
+        # Call-site line numbers: one row per resolved (caller, callee, line)
+        # triple (structural_extract 'call_sites'). CREATE TABLE IF NOT EXISTS
+        # following the same convention as above; existing databases simply
+        # gain an empty table that fills in as files are re-synced, and rows
+        # with no stored sites read back as "no known lines".
+        try:
+            self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS call_sites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                caller_id INTEGER NOT NULL REFERENCES structural_nodes(id) ON DELETE CASCADE,
+                callee_id INTEGER NOT NULL REFERENCES structural_nodes(id) ON DELETE CASCADE,
+                line INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(caller_id, callee_id, line)
+            );
+            """)
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_call_sites_caller ON call_sites(caller_id)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_call_sites_callee ON call_sites(callee_id)")
+        except Exception as e:
+            logger.warning("call_sites migration failed: %r", e)
+
     def close(self):
         self.conn.close()
 

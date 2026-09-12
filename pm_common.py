@@ -240,6 +240,18 @@ CREATE TABLE IF NOT EXISTS structural_edges (
 CREATE INDEX IF NOT EXISTS idx_structural_edges_caller ON structural_edges(caller_id);
 CREATE INDEX IF NOT EXISTS idx_structural_edges_callee ON structural_edges(callee_id);
 
+CREATE TABLE IF NOT EXISTS call_sites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    caller_id INTEGER NOT NULL REFERENCES structural_nodes(id) ON DELETE CASCADE,
+    callee_id INTEGER NOT NULL REFERENCES structural_nodes(id) ON DELETE CASCADE,
+    line INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(caller_id, callee_id, line)
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_sites_caller ON call_sites(caller_id);
+CREATE INDEX IF NOT EXISTS idx_call_sites_callee ON call_sites(callee_id);
+
 CREATE TABLE IF NOT EXISTS fact_flags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fact_id INTEGER NOT NULL REFERENCES memory(id) ON DELETE CASCADE,

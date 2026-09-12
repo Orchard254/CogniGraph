@@ -351,7 +351,11 @@ def test_blast_radius_real_db(real_db):
     assert out["total_callers"] == 1
     assert out["total_files"] == 1
     assert out["depth_counts"] == {1: 1} or out["depth_counts"] == {"1": 1}
-    assert any("definition-level" in lim for lim in out["known_limitations"])
+    assert not any("not yet tracked" in lim for lim in out["known_limitations"])
+    # Hand-inserted edge with no call_sites rows: symbols still carry the
+    # (empty) call_lines field rather than omitting it.
+    assert all("call_lines" in s for f in out["files"] for s in f["symbols"])
+    assert all(s["call_lines"] == [] for f in out["files"] for s in f["symbols"])
 
     missing = server.memory_blast_radius("no_such_symbol_qj17")
     assert missing["found"] is False
