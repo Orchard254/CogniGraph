@@ -246,6 +246,7 @@ def _python_factories(root) -> dict:
         ret = fn.child_by_field_name("return_type")
         if ret is not None:
             idents = re.findall(r"[A-Za-z_]\w*", _node_text(ret))
+            # Known limitation: list[Widget]-style tails can't fire on runnable code; left as-is.
             tail = idents[-1] if idents else ""
             if tail and tail not in _NON_CLASS_ANNOTATIONS:
                 out[fname] = tail

@@ -621,6 +621,60 @@ class TestCodeGraph:
     def test_who_calls_unknown_symbol(self, graph_store):
         assert graph_store.who_calls('nonexistent_symbol_xyz')['found'] is False
 
+    def test_same_file_composed_class_resolution(self, temp_store, tmp_path):
+        """Single-file same-name shadowing must not beat composition scoping:
+        CompA(CallerAlpha, SiblingA) + CompB(CallerBeta, SiblingB) in one
+        file with SiblingB.helper textually first must still resolve
+        CallerAlpha.run -> SiblingA.helper and CallerBeta.run ->
+        SiblingB.helper (regression: the class-blind same-file fallback
+        used to shadow the composition-aware lookup with an arbitrary
+        winner)."""
+        (tmp_path / 'comp.py').write_text(
+            "class SiblingB:\n"
+            "    def helper(self):\n"
+            "        return 'B'\n"
+            "\n\n"
+            "class CallerBeta:\n"
+            "    def run(self):\n"
+            "        self.helper()\n"
+            "\n\n"
+            "class SiblingA:\n"
+            "    def helper(self):\n"
+            "        return 'A'\n"
+            "\n\n"
+            "class CallerAlpha:\n"
+            "    def run(self):\n"
+            "        self.helper()\n"
+            "\n\n"
+            "class CompA(CallerAlpha, SiblingA):\n"
+            "    pass\n"
+            "\n\n"
+            "class CompB(CallerBeta, SiblingB):\n"
+            "    pass\n")
+        from structural_extract import extract_structures
+        temp_store.sync_structural_nodes(
+            'comp.py', extract_structures(tmp_path / 'comp.py'),
+            project_root=str(tmp_path))
+
+        def callees(caller, cls):
+            cid = temp_store.conn.execute(
+                "SELECT id FROM structural_nodes WHERE name = ? "
+                "AND class_name = ? AND node_type = 'method'",
+                (caller, cls)).fetchall()
+            assert len(cid) == 1, f"{cls}.{caller} must be unique"
+            return [(r['name'], r['class_name']) for r in temp_store.conn.execute(
+                "SELECT n2.name, n2.class_name FROM structural_edges e "
+                "JOIN structural_nodes n2 ON e.callee_id = n2.id "
+                "WHERE e.caller_id = ? AND e.edge_type = 'calls'",
+                (cid[0]['id'],)).fetchall()]
+
+        alpha = callees('run', 'CallerAlpha')
+        beta = callees('run', 'CallerBeta')
+        assert alpha == [('helper', 'SiblingA')], \
+            f"CallerAlpha.run misresolved: {alpha}"
+        assert beta == [('helper', 'SiblingB')], \
+            f"CallerBeta.run misresolved: {beta}"
+
     def test_project_shape_renders(self, graph_store):
         shape = graph_store.project_shape()
         assert 'Project Shape' in shape

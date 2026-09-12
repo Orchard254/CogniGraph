@@ -367,15 +367,21 @@ class StructuralMixin:
                         nid = defs.get(("method", suffix, cls))
                         if nid:
                             return nid
-                    rows = find_in_file(clean_path, suffix)
-                    if rows:
-                        return rows[0]["id"]
-                    # Composed-class family: self.X may live on a base of the
+                    # Composed-class family BEFORE the class-blind same-file
+                    # fallback: find_in_file(clean_path, suffix) has no
+                    # class_name filter, so whenever >=2 same-named methods
+                    # share the caller's file it shadows composition scoping
+                    # with an arbitrary (plan-dependent) winner. Own-class
+                    # resolution above is untouched; this only reorders the
+                    # two fallbacks. Covers self.X living on a base of the
                     # caller's class or on a sibling mixin under a common
                     # composed class (MemoryStore -> pm_* mixins).
                     nid = resolve_in_composition(cls, suffix)
                     if nid:
                         return nid
+                    rows = find_in_file(clean_path, suffix)
+                    if rows:
+                        return rows[0]["id"]
                     # Mixin composition: self.X may live in another file/class.
                     rows = self.conn.execute(
                         "SELECT id FROM structural_nodes WHERE name = ? AND node_type IN ('method','function')",
