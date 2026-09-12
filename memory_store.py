@@ -384,11 +384,16 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                         line_end INTEGER NOT NULL,
                         language TEXT,
                         code_hash TEXT,
+                        base_classes TEXT,
                         created_at TEXT NOT NULL,
                         last_seen_at TEXT NOT NULL,
                         UNIQUE(file_path, node_type, name, class_name)
                     );
-                    INSERT INTO structural_nodes SELECT * FROM structural_nodes_old;
+                    INSERT INTO structural_nodes
+                        (id, node_type, name, class_name, file_path, line_start, line_end,
+                         language, code_hash, created_at, last_seen_at)
+                        SELECT id, node_type, name, class_name, file_path, line_start, line_end,
+                         language, code_hash, created_at, last_seen_at FROM structural_nodes_old;
                     DROP TABLE structural_nodes_old;
                     CREATE INDEX IF NOT EXISTS idx_structural_nodes_file ON structural_nodes(file_path);
                     CREATE INDEX IF NOT EXISTS idx_structural_nodes_name ON structural_nodes(name);
@@ -430,6 +435,17 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                 self.conn.execute("PRAGMA foreign_keys=ON")
             except Exception as e2:
                 logger.warning("foreign_keys re-enable after failed rebuild failed: %r", e2)
+
+        # Composed-class resolution: class rows carry their ordered base-class
+        # tails as JSON (structural_extract 'bases'). Simple nullable ADD COLUMN
+        # following the memory-table convention above; existing rows stay NULL
+        # (treated as "no known bases") until their file is re-synced.
+        try:
+            sn_cols = [c["name"] for c in self.conn.execute("PRAGMA table_info(structural_nodes)").fetchall()]
+            if sn_cols and "base_classes" not in sn_cols:
+                self.conn.execute("ALTER TABLE structural_nodes ADD COLUMN base_classes TEXT")
+        except Exception as e:
+            logger.warning("structural_nodes base_classes migration failed: %r", e)
 
     def close(self):
         self.conn.close()

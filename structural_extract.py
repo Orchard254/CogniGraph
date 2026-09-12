@@ -137,6 +137,70 @@ def _js_callee_name(call_node):
     return None
 
 
+# Keywords that can appear as identifier leaves inside a heritage subtree
+# (plain-JS `implements` parses as an ERROR-node identifier) — never bases.
+_HERITAGE_KEYWORDS = frozenset({"extends", "implements"})
+
+
+def _heritage_bases(node) -> list:
+    """Collect base-class name tails from a class-heritage subtree.
+
+    Returns bare identifier tails in declaration order (dotted bases collapse
+    to their last segment, the same convention as _callee_name): 'pkg.Mod'
+    contributes 'Mod'. Keyword leaves (extends/implements) and
+    keyword-argument subtrees (e.g. metaclass=...) are skipped; subscripts
+    (e.g. Generic[T]) contribute only their value tail.
+    """
+    bases = []
+
+    def add(text: str):
+        if text and text not in _HERITAGE_KEYWORDS and text not in bases:
+            bases.append(text)
+
+    def visit(n):
+        if n.type == "attribute":
+            attr = n.child_by_field_name("attribute")
+            if attr is not None:
+                add(_node_text(attr))
+            return
+        if n.type == "member_expression":
+            prop = n.child_by_field_name("property")
+            if prop is not None:
+                add(_node_text(prop))
+            return
+        if n.type == "subscript":
+            val = n.child_by_field_name("value")
+            if val is not None:
+                visit(val)
+            return
+        if n.type in ("keyword_argument",):
+            return
+        if n.type in ("identifier", "type_identifier", "property_identifier"):
+            add(_node_text(n))
+            return
+        for ch in n.children:
+            visit(ch)
+
+    visit(node)
+    return bases
+
+
+def _python_bases(class_node) -> list:
+    """Bases of a Python class_definition (superclasses field), or []."""
+    sup = class_node.child_by_field_name("superclasses")
+    if sup is None:
+        return []
+    return _heritage_bases(sup)
+
+
+def _js_heritage_bases(class_node) -> list:
+    """Bases of a JS/TS/TSX class_declaration (class_heritage child), or []."""
+    for ch in class_node.children:
+        if ch.type == "class_heritage":
+            return _heritage_bases(ch)
+    return []
+
+
 # ------------------------------------------------------------------
 # Python recursive extraction (full tree walk, not just root children)
 # ------------------------------------------------------------------
@@ -197,6 +261,7 @@ def _extract_python(file_path: Path):
                 "file_path": str(file_path),
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
+                "bases": _python_bases(node),
             })
             # Walk children with this class in scope; nested functions become methods
             for ch in node.children:
@@ -324,6 +389,7 @@ def _extract_js(file_path: Path):
                 "file_path": str(file_path),
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
+                "bases": _js_heritage_bases(node),
             })
             for ch in node.children:
                 walk(ch, current_class=class_name, scope_item=scope_item)
@@ -498,6 +564,7 @@ def _extract_ts(file_path: Path):
                 "file_path": str(file_path),
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
+                "bases": _js_heritage_bases(node),
             })
             for ch in node.children:
                 walk(ch, current_class=class_name, scope_item=scope_item)
@@ -698,6 +765,7 @@ def _extract_tsx(file_path: Path):
                 "file_path": str(file_path),
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
+                "bases": _js_heritage_bases(node),
             })
             for ch in node.children:
                 walk(ch, current_class=class_name, scope_item=scope_item)
@@ -794,6 +862,8 @@ def extract_structures(file_path: Path) -> list[dict]:
         - line_start: int (1-indexed)
         - line_end: int (1-indexed)
         - class_name: str (only for methods, the parent class name)
+        - bases: list[str] (only for classes, ordered base-class name tails;
+          dotted bases collapse to the last segment; [] when no heritage)
         - calls: list[str] (callee texts seen inside the definition body,
           e.g. 'query_hybrid' or 'self.write'; definitions only)
 

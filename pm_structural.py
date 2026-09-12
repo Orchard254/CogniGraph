@@ -1,10 +1,14 @@
 """Structural layer: tree-sitter node sync and fact-to-node linking."""
+import json
 import sqlite3
+import logging
 import re
 import datetime
 import hashlib
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -81,6 +85,15 @@ class StructuralMixin:
         }
         language = lang_map.get(suffix, "unknown")
 
+        # base_classes column exists on migrated databases; hand-rolled test
+        # fixtures may predate it, in which case bases are skipped silently.
+        try:
+            _sn_cols = [c["name"] for c in
+                        self.conn.execute("PRAGMA table_info(structural_nodes)").fetchall()]
+            has_bases_col = "base_classes" in _sn_cols
+        except Exception:
+            has_bases_col = False
+
         # Upsert + prune + edge rebuild must be atomic: two concurrent syncs
         # for the same file (watcher thread + bootstrap scan) use different
         # scan_ts values, and a prune from one must not delete the other's
@@ -103,22 +116,49 @@ class StructuralMixin:
                 snippet = "".join(file_lines[l_start:l_end])
                 code_hash = hashlib.sha256(snippet.encode("utf-8")).hexdigest()
 
+                # Ordered base-class tails as JSON (class rows only); None for
+                # anything else and when the column predates the migration.
+                base_classes = None
+                if has_bases_col and node_type == "class":
+                    try:
+                        base_classes = json.dumps(list(node.get("bases") or []))
+                    except (TypeError, ValueError):
+                        base_classes = "[]"
+
                 # UPSERT by natural key
-                self.conn.execute(
-                    """
-                    INSERT INTO structural_nodes (node_type, name, class_name, file_path, line_start, line_end,
-                                                  language, code_hash, created_at, last_seen_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(file_path, node_type, name, class_name) DO UPDATE SET
-                        line_start = excluded.line_start,
-                        line_end = excluded.line_end,
-                        code_hash = excluded.code_hash,
-                        last_seen_at = excluded.last_seen_at,
-                        language = excluded.language
-                    """,
-                    (node_type, name, class_name, clean_path, line_start, line_end,
-                     language, code_hash, scan_ts, scan_ts),
-                )
+                if has_bases_col:
+                    self.conn.execute(
+                        """
+                        INSERT INTO structural_nodes (node_type, name, class_name, file_path, line_start, line_end,
+                                                      language, code_hash, base_classes, created_at, last_seen_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(file_path, node_type, name, class_name) DO UPDATE SET
+                            line_start = excluded.line_start,
+                            line_end = excluded.line_end,
+                            code_hash = excluded.code_hash,
+                            base_classes = excluded.base_classes,
+                            last_seen_at = excluded.last_seen_at,
+                            language = excluded.language
+                        """,
+                        (node_type, name, class_name, clean_path, line_start, line_end,
+                         language, code_hash, base_classes, scan_ts, scan_ts),
+                    )
+                else:
+                    self.conn.execute(
+                        """
+                        INSERT INTO structural_nodes (node_type, name, class_name, file_path, line_start, line_end,
+                                                      language, code_hash, created_at, last_seen_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(file_path, node_type, name, class_name) DO UPDATE SET
+                            line_start = excluded.line_start,
+                            line_end = excluded.line_end,
+                            code_hash = excluded.code_hash,
+                            last_seen_at = excluded.last_seen_at,
+                            language = excluded.language
+                        """,
+                        (node_type, name, class_name, clean_path, line_start, line_end,
+                         language, code_hash, scan_ts, scan_ts),
+                    )
 
                 # Resolve node_id via SELECT — cur.lastrowid is unreliable for ON CONFLICT DO UPDATE
                 # (returns last inserted rowid, not the updated row's id)
@@ -249,6 +289,75 @@ class StructuralMixin:
                 (fp, name, *types),
             ).fetchall()
 
+        # Composed-class map: class name -> ordered base-class tails, for
+        # mixin-aware self.X resolution (e.g. MemoryStore -> its 4 mixins).
+        # File-local rows are authoritative; cross-file entries fill in bases
+        # declared elsewhere. Missing column (pre-migration DB) -> empty map.
+        class_bases: Dict[str, List[str]] = {}
+        try:
+            base_rows = self.conn.execute(
+                "SELECT name, file_path, base_classes FROM structural_nodes "
+                "WHERE node_type = 'class'"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            base_rows = []
+        for br in base_rows:
+            try:
+                parsed = json.loads(br["base_classes"]) if br["base_classes"] else []
+            except (TypeError, ValueError):
+                parsed = []
+            if not isinstance(parsed, list):
+                continue
+            parsed = [b for b in parsed if isinstance(b, str) and b]
+            if br["file_path"] == clean_path or br["name"] not in class_bases:
+                class_bases[br["name"]] = parsed
+
+        def resolve_in_composition(cls_name: str, method: str) -> Optional[int]:
+            """Method X scoped to cls_name's composition family, in order.
+
+            Two directions (both bounded, no type inference):
+            (b2a) bases of the caller's own class — covers callers defined
+                  ON a composed class (and JS/TS extends chains);
+            (b2b) sibling mixins — the callers here live IN the mixins, not
+                  in MemoryStore, so find composed classes C listing the
+                  caller's class among their bases (MemoryStore lists all
+                  four mixins) and search C itself, then C's bases in
+                  declaration order.
+
+            First scope entry listed wins; when X is defined in more than
+            one scope class the ambiguity is logged (stderr via logging) so
+            the choice is discoverable rather than silent.
+            """
+            if not cls_name:
+                return None
+            scope: List[str] = []
+            scope.extend(class_bases.get(cls_name) or [])
+            for comp in sorted(c for c, bs in class_bases.items() if cls_name in bs):
+                scope.append(comp)
+                scope.extend(class_bases.get(comp) or [])
+            seen = set()
+            ordered = [c for c in scope if c != cls_name and not (c in seen or seen.add(c))]
+            if not ordered:
+                return None
+            hits: List[Tuple[str, int]] = []
+            for cand in ordered:
+                for r in self.conn.execute(
+                    "SELECT id FROM structural_nodes WHERE name = ? AND class_name = ? "
+                    "AND node_type IN ('method','function')",
+                    (method, cand),
+                ).fetchall():
+                    hits.append((cand, r["id"]))
+            if not hits:
+                return None
+            hit_classes = sorted({c for c, _ in hits})
+            if len(hit_classes) > 1:
+                logger.warning(
+                    "ambiguous self.%s for class %s: defined in %s; "
+                    "first scope entry (%s) wins",
+                    method, cls_name, hit_classes, hits[0][0],
+                )
+            return hits[0][1]
+
         def resolve_callee(callee_text: str, caller_node: dict) -> Optional[int]:
             if "." in callee_text:
                 prefix, suffix = callee_text.split(".", 1)
@@ -261,6 +370,12 @@ class StructuralMixin:
                     rows = find_in_file(clean_path, suffix)
                     if rows:
                         return rows[0]["id"]
+                    # Composed-class family: self.X may live on a base of the
+                    # caller's class or on a sibling mixin under a common
+                    # composed class (MemoryStore -> pm_* mixins).
+                    nid = resolve_in_composition(cls, suffix)
+                    if nid:
+                        return nid
                     # Mixin composition: self.X may live in another file/class.
                     rows = self.conn.execute(
                         "SELECT id FROM structural_nodes WHERE name = ? AND node_type IN ('method','function')",
