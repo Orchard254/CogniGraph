@@ -320,6 +320,43 @@ def test_who_calls_real_db(real_db):
     assert missing["definitions"] == []
 
 
+def test_blast_radius_real_db(real_db):
+    now = "2026-09-11T00:00:00"
+    seed = MemoryStore(real_db)
+    try:
+        seed.conn.execute(
+            "INSERT INTO structural_nodes (node_type, name, class_name, file_path, "
+            "line_start, line_end, language, created_at, last_seen_at) "
+            "VALUES ('function', 'leaf_fn_qj17', '', 'src/leaf.py', 1, 5, 'python', ?, ?)",
+            (now, now),
+        )
+        seed.conn.execute(
+            "INSERT INTO structural_nodes (node_type, name, class_name, file_path, "
+            "line_start, line_end, language, created_at, last_seen_at) "
+            "VALUES ('function', 'mid_fn_qj17', '', 'src/mid.py', 1, 8, 'python', ?, ?)",
+            (now, now),
+        )
+        leaf = seed.conn.execute(
+            "SELECT id FROM structural_nodes WHERE name = 'leaf_fn_qj17'").fetchone()["id"]
+        mid = seed.conn.execute(
+            "SELECT id FROM structural_nodes WHERE name = 'mid_fn_qj17'").fetchone()["id"]
+        seed.conn.execute(
+            "INSERT INTO structural_edges (caller_id, callee_id, edge_type, created_at) "
+            "VALUES (?, ?, 'calls', ?)", (mid, leaf, now))
+    finally:
+        seed.close()
+
+    out = server.memory_blast_radius("leaf_fn_qj17")
+    assert out["found"] is True
+    assert out["total_callers"] == 1
+    assert out["total_files"] == 1
+    assert out["depth_counts"] == {1: 1} or out["depth_counts"] == {"1": 1}
+    assert any("definition-level" in lim for lim in out["known_limitations"])
+
+    missing = server.memory_blast_radius("no_such_symbol_qj17")
+    assert missing["found"] is False
+
+
 def test_project_shape_real_db(real_db):
     out = server.memory_project_shape()
     assert "Project Shape" in out["markdown"]

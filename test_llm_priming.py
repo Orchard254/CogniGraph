@@ -987,3 +987,226 @@ class TestGitCommitAnchoring:
             "SELECT git_commit_sha FROM memory WHERE id = ?", (fid,)).fetchone()
         assert row['git_commit_sha'] is None
 
+
+# ============================================================
+# Blast Radius Tests (transitive callers over structural_edges)
+# ============================================================
+
+def _sync_files(store, tmp_path, files, root=None):
+    """Write {rel: source} into tmp_path and sync each into the store."""
+    from structural_extract import extract_structures
+    root = root or str(tmp_path)
+    for rel, src in files.items():
+        (tmp_path / rel).write_text(src)
+    for rel in files:
+        store.sync_structural_nodes(
+            rel, extract_structures(tmp_path / rel), project_root=root)
+    return store
+
+
+# Same CompA/CompB fixture as
+# TestCodeGraph::test_same_file_composed_class_resolution: SiblingB.helper
+# textually first so a class-blind same-file fallback misresolves CallerBeta.
+_COMP_SRC = (
+    "class SiblingB:\n"
+    "    def helper(self):\n"
+    "        return 'B'\n"
+    "\n\n"
+    "class CallerBeta:\n"
+    "    def run(self):\n"
+    "        self.helper()\n"
+    "\n\n"
+    "class SiblingA:\n"
+    "    def helper(self):\n"
+    "        return 'A'\n"
+    "\n\n"
+    "class CallerAlpha:\n"
+    "    def run(self):\n"
+    "        self.helper()\n"
+    "\n\n"
+    "class CompA(CallerAlpha, SiblingA):\n"
+    "    pass\n"
+    "\n\n"
+    "class CompB(CallerBeta, SiblingB):\n"
+    "    pass\n"
+)
+
+
+class TestBlastRadius:
+    @pytest.fixture
+    def chain_store(self, temp_store, tmp_path):
+        return _sync_files(temp_store, tmp_path, {
+            'leaf.py': "def leaf():\n    return 1\n",
+            'mid.py': "from leaf import leaf\n\n\ndef mid():\n    leaf()\n",
+            'top.py': "from mid import mid\n\n\ndef top():\n    mid()\n\n\ndef top2():\n    mid()\n",
+        })
+
+    def test_transitive_two_hop(self, chain_store, tmp_path):
+        r = chain_store.blast_radius('leaf', project_root=str(tmp_path))
+        assert r['found'] is True
+        assert r['direction'] == 'callers'
+        assert r['total_callers'] == 3
+        assert r['total_files'] == 2
+        assert r['depth_counts'] == {1: 1, 2: 2}
+        assert r['max_depth_reached'] == 2
+        got = {(s['name'], s['depth']) for f in r['files'] for s in f['symbols']}
+        assert got == {('mid', 1), ('top', 2), ('top2', 2)}
+
+    def test_shape_definition_level_and_limitations(self, chain_store, tmp_path):
+        r = chain_store.blast_radius('leaf', project_root=str(tmp_path))
+        for f in r['files']:
+            for s in f['symbols']:
+                assert {'name', 'class_name', 'node_type',
+                        'line_start', 'line_end', 'depth'} <= set(s)
+                assert isinstance(s['line_start'], int)
+        assert any('definition-level' in lim for lim in r['known_limitations'])
+        assert any('not complete' in lim for lim in r['known_limitations'])
+        assert any('watcher sync' in lim for lim in r['known_limitations'])
+        assert r['definitions'] == [
+            d for d in r['definitions'] if d['name'] == 'leaf']
+
+    def test_unknown_symbol(self, chain_store, tmp_path):
+        r = chain_store.blast_radius('no_such_symbol_xyz', project_root=str(tmp_path))
+        assert r['found'] is False
+        assert 'known_limitations' in r
+
+    def test_depth_cap(self, chain_store, tmp_path):
+        r1 = chain_store.blast_radius('leaf', max_depth=1, project_root=str(tmp_path))
+        assert r1['total_callers'] == 1
+        assert r1['max_depth_reached'] == 1
+        r2 = chain_store.blast_radius('leaf', max_depth=2, project_root=str(tmp_path))
+        assert r2['total_callers'] == 3
+        assert r2['max_depth_reached'] == 2
+
+    def test_cycle_safe(self, temp_store, tmp_path):
+        _sync_files(temp_store, tmp_path, {
+            'cyc.py': "def a():\n    b()\n\n\ndef b():\n    a()\n\n\ndef solo():\n    solo()\n",
+        })
+        r = temp_store.blast_radius('a', project_root=str(tmp_path))
+        got = [(s['name'], s['depth']) for f in r['files'] for s in f['symbols']]
+        assert got == [('b', 1)], f"mutual recursion must terminate at the peer: {got}"
+        solo = temp_store.blast_radius('solo', project_root=str(tmp_path))
+        assert solo['found'] is True
+        assert solo['total_callers'] == 0, "self-recursion alone expands no radius"
+
+    def test_unresolved_estimate(self, temp_store, tmp_path):
+        _sync_files(temp_store, tmp_path, {
+            'gap.py': "def needs():\n    defined()\n    ghost_xyz()\n\n\ndef defined():\n    pass\n",
+            'clean.py': "def lone():\n    pass\n",
+        })
+        gap = temp_store.blast_radius('defined', project_root=str(tmp_path))
+        assert gap['unresolved_estimate'] >= 1, \
+            "ghost_xyz() resolves to nothing and must show up in the estimate"
+        clean = temp_store.blast_radius('lone', project_root=str(tmp_path))
+        assert clean['unresolved_estimate'] == 0
+        assert clean['unresolved_skipped_files'] == []
+
+    def test_disambiguation_union_and_scoping(self, temp_store, tmp_path):
+        _sync_files(temp_store, tmp_path, {
+            'one.py': "def dup():\n    pass\n\n\ndef uses_one():\n    dup()\n",
+            'two.py': "def dup():\n    pass\n\n\ndef uses_two():\n    dup()\n",
+        })
+        both = temp_store.blast_radius('dup', project_root=str(tmp_path))
+        assert both['ambiguous'] is True
+        got = {s['name'] for f in both['files'] for s in f['symbols']}
+        assert {'uses_one', 'uses_two'} <= got, "unscoped traversal covers the union"
+        scoped = temp_store.blast_radius('dup', file_path='one.py',
+                                         project_root=str(tmp_path))
+        assert scoped['ambiguous'] is False
+        assert [d['file_path'] for d in scoped['definitions']] == ['one.py']
+        got_scoped = {s['name'] for f in scoped['files'] for s in f['symbols']}
+        assert got_scoped == {'uses_one'}
+
+    def test_drill_down_and_truncation(self, chain_store, tmp_path):
+        capped = chain_store.blast_radius('leaf', max_symbols_per_file=1,
+                                          project_root=str(tmp_path))
+        top = next(f for f in capped['files'] if f['file_path'] == 'top.py')
+        assert top['count'] == 2 and top['truncated'] is True
+        assert len(top['symbols']) == 1
+        full = chain_store.blast_radius('leaf', file_detail='top.py',
+                                        max_symbols_per_file=1,
+                                        project_root=str(tmp_path))
+        assert full['file_detail_found'] is True
+        assert full['files'] == [
+            f for f in full['files'] if f['file_path'] == 'top.py']
+        assert full['files'][0]['truncated'] is False
+        assert len(full['files'][0]['symbols']) == 2
+        missing = chain_store.blast_radius('leaf', file_detail='leaf.py',
+                                           project_root=str(tmp_path))
+        assert missing['file_detail_found'] is False
+        assert missing['files'][0]['count'] == 0
+        assert 'note' in missing
+
+    def test_direction_callees(self, chain_store, tmp_path):
+        r = chain_store.blast_radius('top', direction='callees',
+                                     project_root=str(tmp_path))
+        got = {(s['name'], s['depth']) for f in r['files'] for s in f['symbols']}
+        assert got == {('mid', 1), ('leaf', 2)}
+
+    def test_composition_scoping_reused_fixture(self, temp_store, tmp_path):
+        """CompA/CompB one-hop: the blast of SiblingA.helper must reach
+        CallerAlpha.run (composition-resolved edge) but not CallerBeta.run."""
+        _sync_files(temp_store, tmp_path, {'comp.py': _COMP_SRC})
+        r = temp_store.blast_radius('helper', class_name='SiblingA',
+                                    project_root=str(tmp_path))
+        assert r['found'] is True
+        got = [(s['name'], s['class_name']) for f in r['files'] for s in f['symbols']]
+        assert ('run', 'CallerAlpha') in got
+        assert ('run', 'CallerBeta') not in got
+
+    def test_transitive_through_composition(self, temp_store, tmp_path):
+        """Two-hop THROUGH a composition-resolved edge: entry -> Caller.run
+        -> Sibling.helper, so entry lands at depth 2 of helper's radius."""
+        _sync_files(temp_store, tmp_path, {
+            'fam.py': (
+                "class Sibling:\n"
+                "    def helper(self):\n"
+                "        return 'S'\n"
+                "\n\n"
+                "class Caller:\n"
+                "    def run(self):\n"
+                "        self.helper()\n"
+                "\n\n"
+                "class Comp(Caller, Sibling):\n"
+                "    pass\n"
+            ),
+            'top.py': "from fam import Caller\n\n\ndef entry():\n    Caller().run()\n",
+        })
+        r = temp_store.blast_radius('helper', class_name='Sibling',
+                                    project_root=str(tmp_path))
+        got = {(s['name'], s['class_name'], s['depth'])
+               for f in r['files'] for s in f['symbols']}
+        assert ('run', 'Caller', 1) in got
+        assert ('entry', '', 2) in got
+
+    def test_real_repo_write_multihop_and_checkpoint(self, temp_store):
+        """Real-repo structural graph: write's radius is multi-hop (through
+        the with-block alias + composition edges of the recent resolver
+        fixes); checkpoint_task's is non-zero."""
+        repo_root = Path(__file__).resolve().parent
+        from structural_extract import extract_structures
+        # Dependency order matters: edges are rebuilt per caller-file at sync
+        # time, so callees (mixins, MemoryStore) must exist before callers
+        # (bootstrap, server) that reference them are synced.
+        ordered = ["pm_common.py", "pm_search.py", "pm_context.py",
+                   "pm_structural.py", "pm_lifecycle.py", "pm_backup.py",
+                   "memory_store.py", "bootstrap.py", "watcher.py", "server.py"]
+        for rel in ordered:
+            temp_store.sync_structural_nodes(
+                rel, extract_structures(repo_root / rel), project_root=str(repo_root))
+        write = temp_store.blast_radius('write', project_root=str(repo_root))
+        assert write['found'] is True
+        assert write['total_callers'] > 0
+        assert write['max_depth_reached'] >= 2, \
+            f"write radius must be multi-hop: {write['depth_counts']}"
+        names = {(s['name'], s['class_name']) for f in write['files']
+                 for s in f['symbols']}
+        assert ('memory_write', '') in names
+        checkpoint = temp_store.blast_radius(
+            'checkpoint_task', project_root=str(repo_root))
+        assert checkpoint['found'] is True
+        assert checkpoint['total_callers'] > 0, \
+            "checkpoint_task must have callers after the resolver fixes"
+        cp_names = {s['name'] for f in checkpoint['files'] for s in f['symbols']}
+        assert 'memory_checkpoint_task' in cp_names
+

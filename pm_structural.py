@@ -532,6 +532,291 @@ class StructuralMixin:
             "importers": importers,
         }
 
+    def blast_radius(self, symbol: str, class_name: str = "", file_path: str = "",
+                       max_depth: int = 5, direction: str = "callers",
+                       file_detail: str = "", max_symbols_per_file: int = 20,
+                       project_root: Optional[str] = None) -> Dict[str, Any]:
+        """TRANSITIVE BLAST RADIUS: who depends on this symbol, transitively.
+
+        Default direction is callers-only: blast radius = "what breaks if I
+        change this", i.e. who depends on it. Pass direction="callees" for
+        the downstream cone ("what does this pull in") or "both" for the
+        union of the two.
+
+        Symbol resolution mirrors who_calls: a bare name ("write") matches
+        every definition; "Class.method" scopes to that class. The optional
+        class_name / file_path params narrow an ambiguous bare name without
+        duplicating ambiguity-handling logic. When several definitions still
+        match, the traversal covers their union and ambiguous=True is set.
+
+        Traversal is a bounded-depth recursive CTE over structural_edges
+        (edge_type='calls') with a visited-path guard, so mutual and
+        self-recursion terminate. Seed definitions are excluded from the
+        affected set: the radius counts who ELSE breaks.
+
+        Summary-first output: counts and per-hop frontiers stay compact even
+        for a large radius; per-file symbol lists are capped at
+        max_symbols_per_file entries (truncated=True flags the cap). Pass
+        file_detail=<file> for that file's full uncapped symbol/line detail.
+        """
+        known_limitations = [
+            "call-site line numbers are not yet tracked "
+            "— line ranges are definition-level",
+            "recall is not complete for indirect/dynamic calls, decorators, "
+            "JS arrow functions, and non-mixin inheritance",
+            "edges reflect the last watcher sync — counts and "
+            "unresolved_estimate may be temporarily incomplete immediately "
+            "after bulk edits until the watcher converges",
+        ]
+
+        symbol = (symbol or "").strip()
+        try:
+            max_depth = int(max_depth)
+        except (TypeError, ValueError):
+            max_depth = 5
+        max_depth = max(1, min(10, max_depth))
+        if direction not in ("callers", "callees", "both"):
+            direction = "callers"
+        try:
+            max_symbols_per_file = int(max_symbols_per_file)
+        except (TypeError, ValueError):
+            max_symbols_per_file = 20
+        max_symbols_per_file = max(1, min(200, max_symbols_per_file))
+        scope_cls = (class_name or "").strip()
+        scope_file = (file_path or "").strip().replace("\\", "/")
+        file_detail = (file_detail or "").strip().replace("\\", "/")
+
+        if not symbol:
+            return {"symbol": symbol, "found": False,
+                    "known_limitations": known_limitations}
+
+        if "." in symbol and not scope_cls:
+            cls, name = symbol.split(".", 1)
+            targets = self.conn.execute(
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end "
+                "FROM structural_nodes WHERE name = ? AND class_name = ?",
+                (name, cls),
+            ).fetchall()
+        else:
+            name = symbol.rsplit(".", 1)[-1] if "." in symbol else symbol
+            if scope_cls:
+                targets = self.conn.execute(
+                    "SELECT id, node_type, name, class_name, file_path, line_start, line_end "
+                    "FROM structural_nodes WHERE name = ? AND class_name = ?",
+                    (name, scope_cls),
+                ).fetchall()
+            else:
+                targets = self.conn.execute(
+                    "SELECT id, node_type, name, class_name, file_path, line_start, line_end "
+                    "FROM structural_nodes WHERE name = ?",
+                    (name,),
+                ).fetchall()
+        targets = [t for t in targets if t["node_type"] != "module_ref"]
+        if scope_file:
+            targets = [t for t in targets if t["file_path"] == scope_file]
+        if not targets:
+            return {"symbol": symbol, "found": False,
+                    "known_limitations": known_limitations}
+
+        seed_ids = [t["id"] for t in targets]
+        seed_set = set(seed_ids)
+        ph = ",".join("?" * len(seed_ids))
+
+        def _walk_callers() -> Dict[int, int]:
+            rows = self.conn.execute(
+                "WITH RECURSIVE br(id, depth, path) AS ("
+                " SELECT e.caller_id, 1, ',' || e.caller_id || ','"
+                f" FROM structural_edges e WHERE e.callee_id IN ({ph})"
+                " AND e.edge_type = 'calls'"
+                " UNION ALL"
+                " SELECT e.caller_id, br.depth + 1, br.path || e.caller_id || ','"
+                " FROM structural_edges e JOIN br ON e.callee_id = br.id"
+                " WHERE br.depth < ? AND e.edge_type = 'calls'"
+                " AND instr(br.path, ',' || e.caller_id || ',') = 0"
+                ") SELECT id, MIN(depth) AS depth FROM br GROUP BY id",
+                (*seed_ids, max_depth),
+            ).fetchall()
+            return {r["id"]: r["depth"] for r in rows}
+
+        def _walk_callees() -> Dict[int, int]:
+            rows = self.conn.execute(
+                "WITH RECURSIVE br(id, depth, path) AS ("
+                " SELECT e.callee_id, 1, ',' || e.callee_id || ','"
+                f" FROM structural_edges e WHERE e.caller_id IN ({ph})"
+                " AND e.edge_type = 'calls'"
+                " UNION ALL"
+                " SELECT e.callee_id, br.depth + 1, br.path || e.callee_id || ','"
+                " FROM structural_edges e JOIN br ON e.caller_id = br.id"
+                " WHERE br.depth < ? AND e.edge_type = 'calls'"
+                " AND instr(br.path, ',' || e.callee_id || ',') = 0"
+                ") SELECT id, MIN(depth) AS depth FROM br GROUP BY id",
+                (*seed_ids, max_depth),
+            ).fetchall()
+            return {r["id"]: r["depth"] for r in rows}
+
+        if direction == "callers":
+            depths = _walk_callers()
+        elif direction == "callees":
+            depths = _walk_callees()
+        else:
+            depths = _walk_callers()
+            for nid, d in _walk_callees().items():
+                if nid not in depths or d < depths[nid]:
+                    depths[nid] = d
+        for sid in seed_set:
+            depths.pop(sid, None)
+
+        affected_ids = sorted(depths)
+        node_rows: List[Any] = []
+        if affected_ids:
+            aph = ",".join("?" * len(affected_ids))
+            node_rows = self.conn.execute(
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end "
+                f"FROM structural_nodes WHERE id IN ({aph})",
+                affected_ids,
+            ).fetchall()
+        node_rows = [r for r in node_rows if r["node_type"] != "module_ref"]
+        nodes = {r["id"]: dict(r) for r in node_rows}
+        for nid in list(depths):
+            if nid not in nodes:
+                depths.pop(nid, None)
+
+        total_edges = 0
+        if depths:
+            vph = ",".join("?" * len(depths))
+            sph = ",".join("?" * len(seed_set))
+            total_edges = self.conn.execute(
+                "SELECT COUNT(*) AS c FROM structural_edges "
+                f"WHERE edge_type = 'calls' AND caller_id IN ({vph}) "
+                f"AND callee_id IN ({vph}, {sph})",
+                (*depths, *depths, *seed_set),
+            ).fetchone()["c"]
+
+        depth_counts: Dict[int, int] = {}
+        for d in depths.values():
+            depth_counts[d] = depth_counts.get(d, 0) + 1
+        max_reached = max(depths.values()) if depths else 0
+
+        by_file: Dict[str, List[Dict[str, Any]]] = {}
+        for nid, node in nodes.items():
+            entry = {"name": node["name"], "class_name": node["class_name"],
+                     "node_type": node["node_type"],
+                     "line_start": node["line_start"], "line_end": node["line_end"],
+                     "depth": depths[nid]}
+            by_file.setdefault(node["file_path"], []).append(entry)
+        for entries in by_file.values():
+            entries.sort(key=lambda e: (e["depth"], e["line_start"]))
+
+        files: List[Dict[str, Any]] = []
+        if file_detail:
+            entries = by_file.get(file_detail, [])
+            files = [{"file_path": file_detail, "count": len(entries),
+                      "symbols": entries, "truncated": False}]
+        else:
+            for fp in sorted(by_file):
+                entries = by_file[fp]
+                capped = entries[:max_symbols_per_file]
+                files.append({"file_path": fp, "count": len(entries),
+                              "symbols": capped,
+                              "truncated": len(entries) > len(capped)})
+
+        unresolved, skipped = self._blast_unresolved(
+            [dict(t) for t in targets], nodes, project_root)
+
+        result: Dict[str, Any] = {
+            "symbol": symbol,
+            "found": True,
+            "ambiguous": len(targets) > 1,
+            "definitions": [dict(t) for t in targets],
+            "direction": direction,
+            "max_depth_requested": max_depth,
+            "max_depth_reached": max_reached,
+            "total_files": len(by_file),
+            "total_callers": len(depths),
+            "total_edges": total_edges,
+            "depth_counts": depth_counts,
+            "files": files,
+            "unresolved_estimate": unresolved,
+            "unresolved_note": (
+                "Sum over traversed function/method nodes of "
+                "(re-extracted calls[] length minus resolved 'calls' edges); "
+                "an honesty signal for known recall gaps, not a completeness proof."
+            ),
+            "unresolved_skipped_files": skipped,
+            "known_limitations": known_limitations,
+        }
+        if file_detail:
+            result["file_detail"] = file_detail
+            result["file_detail_found"] = file_detail in by_file
+            if file_detail not in by_file:
+                result["note"] = (
+                    f"{file_detail} has no affected symbols in this blast radius.")
+        return result
+
+    def _blast_unresolved(self, seeds: List[Dict[str, Any]],
+                          nodes: Dict[int, Dict[str, Any]],
+                          project_root: Optional[str]) -> Tuple[int, List[str]]:
+        """Honesty signal: raw calls[] vs resolved edges, summed over traversal.
+
+        structural_nodes persists definitions, not the raw calls[] lists the
+        extractor saw, so the gap is recomputed by re-extracting the touched
+        files from disk (same extract_structures() the sync path uses) and
+        diffing each traversed function/method's calls[] length against its
+        resolved outgoing 'calls' edge count. Files that cannot be read are
+        skipped and reported, never silently counted as zero.
+        """
+        if project_root is None:
+            try:
+                root = Path(getattr(self, "db_path", "") or "").resolve().parent.parent
+                project_root = str(root) if root.is_dir() else None
+            except Exception:
+                project_root = None
+        if not project_root:
+            return 0, ["project root unavailable — estimate skipped"]
+
+        by_file: Dict[str, List[Dict[str, Any]]] = {}
+        for row in list(seeds) + list(nodes.values()):
+            if row.get("node_type") not in ("function", "method"):
+                continue
+            by_file.setdefault(row["file_path"], []).append(row)
+
+        all_ids = [r["id"] for rows in by_file.values() for r in rows if r.get("id")]
+        resolved: Dict[int, int] = {}
+        if all_ids:
+            cph = ",".join("?" * len(all_ids))
+            for r in self.conn.execute(
+                "SELECT caller_id, COUNT(*) AS c FROM structural_edges "
+                f"WHERE edge_type = 'calls' AND caller_id IN ({cph}) GROUP BY caller_id",
+                all_ids,
+            ).fetchall():
+                resolved[r["caller_id"]] = r["c"]
+
+        try:
+            from structural_extract import extract_structures
+        except Exception:
+            return 0, ["structural extractor unavailable — estimate skipped"]
+
+        estimate = 0
+        skipped: List[str] = []
+        for fp, rows in by_file.items():
+            disk = Path(project_root) / fp
+            try:
+                fresh = extract_structures(disk)
+            except Exception:
+                skipped.append(fp)
+                continue
+            raw = {(n.get("type"), n.get("name", ""), n.get("class_name", "") or ""):
+                   len(n.get("calls") or []) for n in fresh}
+            for row in rows:
+                key = (row.get("node_type"), row.get("name", ""),
+                       row.get("class_name", "") or "")
+                if key not in raw:
+                    continue
+                gap = raw[key] - resolved.get(row.get("id", -1), 0)
+                if gap > 0:
+                    estimate += gap
+        return estimate, skipped
+
     def project_shape(self) -> str:
         """Compact orientation briefing: indexed file inventory and code-graph size."""
         try:

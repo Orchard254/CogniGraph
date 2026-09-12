@@ -437,6 +437,19 @@ def memory_who_calls(symbol: str) -> dict:
 
 
 @mcp.tool()
+def memory_blast_radius(symbol: str, class_name: str = "", file_path: str = "",
+                        max_depth: int = 5, direction: str = "callers",
+                        file_detail: str = "", max_symbols_per_file: int = 20) -> dict:
+    """Transitive blast radius: who depends on this symbol, transitively. Call before renaming or changing a signature."""
+    with _store() as _s:
+        return _s.blast_radius(symbol, class_name=class_name or "",
+                               file_path=file_path or "",
+                               max_depth=max_depth, direction=direction or "callers",
+                               file_detail=file_detail or "",
+                               max_symbols_per_file=max_symbols_per_file)
+
+
+@mcp.tool()
 def memory_project_shape() -> dict:
     """Lay of the land: indexed files, top modules by definition density, call/import edge totals."""
     with _store() as _s:
