@@ -668,7 +668,7 @@ class StructuralMixin:
         """
         known_limitations = [
             "recall is not complete for indirect/dynamic calls, decorators, "
-            "JS arrow functions, and non-mixin inheritance",
+            "and JS arrow functions",
             "edges reflect the last watcher sync — counts and "
             "unresolved_estimate may be temporarily incomplete immediately "
             "after bulk edits until the watcher converges",
