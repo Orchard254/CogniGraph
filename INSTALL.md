@@ -92,7 +92,7 @@ You should see database statistics indicating the system is working.
 
 ## Wire report + safety notes (current code)
 
-- wire pins MEMORY_DB_PATH to <project>/.cognigraph/memory.db (wire.py:142-149) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md/next_steps (wire.py:207-222) - on WIRED_WITH_ERRORS, fix config_errors first.
+- wire pins MEMORY_DB_PATH to <project>/.cognigraph/memory.db (wire.py:142-149) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md (created/up_to_date/updated_clean/skipped_customized_update_available/...)/next_steps (wire.py:207-222) - on WIRED_WITH_ERRORS, fix config_errors first.
 - Corrupt existing configs are preserved as .corrupt-<timestamp>.bak, never overwritten (wire.py:64-90).
 - Without --db, --root commands bind to <root>/.cognigraph/memory.db (memory_cli.py:163-174); limit/ttl/importance inputs are clamped (server.py:42-71).
 
