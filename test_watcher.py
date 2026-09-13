@@ -50,10 +50,15 @@ class FakeStore:
         self.synced_nodes = []
         self.re_embedded = []
         self.linked = []
+        self.deleted = []
         self.closed = False
 
     def sync_structural_nodes(self, rel, nodes, project_root=None):
         self.synced_nodes.append((rel, nodes))
+
+    def delete_structural_file(self, rel):
+        self.deleted.append(rel)
+        return {"deleted": 1, "file_path": rel}
 
     def _store_embedding(self, fid, content):
         self.re_embedded.append((fid, content))
@@ -73,6 +78,13 @@ class FakeStore:
 class FakeEvent:
     def __init__(self, src_path, is_directory=False):
         self.src_path = src_path
+        self.is_directory = is_directory
+
+
+class FakeMoveEvent:
+    def __init__(self, src_path, dest_path, is_directory=False):
+        self.src_path = src_path
+        self.dest_path = dest_path
         self.is_directory = is_directory
 
 
@@ -264,6 +276,65 @@ def test_trailing_sync_foreign_path_returns(root, pyfile, monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# deletion handling (on_deleted / on_moved / missing-file sync)
+# --------------------------------------------------------------------------
+
+def test_handler_on_deleted_prunes_rows(root, pyfile, no_thread_swap):
+    store = FakeStore()
+    h = _Handler(root, store)
+    h.on_deleted(FakeEvent(str(root / "gone.py")))  # already gone: still prunes
+    assert store.deleted == ["gone.py"]
+    # Out of scope: directories, unwatched extensions, ignored dirs,
+    # and paths outside the root prune nothing.
+    h.on_deleted(FakeEvent(str(pyfile), is_directory=True))
+    txt = root / "n.txt"
+    txt.write_text("x")
+    h.on_deleted(FakeEvent(str(txt)))
+    h.on_deleted(FakeEvent(str(root / "node_modules" / "x.py")))
+    h.on_deleted(FakeEvent(str(root.parent / "sibling.py")))
+    assert store.deleted == ["gone.py"]
+
+
+def test_handler_on_moved_prunes_old_and_syncs_new(root, timers, monkeypatch, no_thread_swap):
+    """A rename is ONE moved event: watchdog emits no separate created
+    event for the destination, so on_moved must do both sides itself."""
+    synced = []
+    monkeypatch.setattr(watcher, "_sync_file",
+                        lambda p, r, s: synced.append(str(p)))
+    store = FakeStore()
+    h = _Handler(root, store)
+    new = root / "new.py"
+    new.write_bytes(b"def f():\n    pass\n")
+    h.on_moved(FakeMoveEvent(str(root / "old.py"), str(new)))
+    assert store.deleted == ["old.py"], "old path rows must be pruned"
+    assert synced == [str(new)], "destination must be synced as if created"
+
+
+def test_handler_on_moved_dest_outside_root_still_prunes(root, timers, monkeypatch, no_thread_swap):
+    synced = []
+    monkeypatch.setattr(watcher, "_sync_file",
+                        lambda p, r, s: synced.append(str(p)))
+    store = FakeStore()
+    h = _Handler(root, store)
+    h.on_moved(FakeMoveEvent(str(root / "old.py"), str(root.parent / "away.py")))
+    assert store.deleted == ["old.py"]
+    assert synced == [], "escaped destination must not sync"
+
+
+def test_handler_on_moved_unwatched_dest_still_prunes(root, timers, monkeypatch, no_thread_swap):
+    synced = []
+    monkeypatch.setattr(watcher, "_sync_file",
+                        lambda p, r, s: synced.append(str(p)))
+    store = FakeStore()
+    h = _Handler(root, store)
+    txt = root / "renamed.txt"
+    txt.write_text("x")
+    h.on_moved(FakeMoveEvent(str(root / "old.py"), str(txt)))
+    assert store.deleted == ["old.py"]
+    assert synced == [], "unwatched destination must not sync"
+
+
+# --------------------------------------------------------------------------
 # _sync_file upsert paths
 # --------------------------------------------------------------------------
 
@@ -356,7 +427,10 @@ def test_sync_no_extractor_module(root, pyfile, no_thread_swap, monkeypatch):
 
 
 def test_sync_missing_file_never_raises(root, no_thread_swap, fake_nodes):
-    _sync_file(root / "gone.py", root, FakeStore())  # deleted between event and handler
+    store = FakeStore()
+    _sync_file(root / "gone.py", root, store)  # deleted between event and handler
+    assert store.deleted == ["gone.py"], "a missing file must prune its rows"
+    assert store.writes == [] and store.synced_nodes == []
 
 
 # --------------------------------------------------------------------------
@@ -391,6 +465,30 @@ def test_poll_first_scan_silent_second_syncs(root, pyfile, monkeypatch):
     assert not t.is_alive()
     assert sleeps == [30, 30]
     assert len(store.writes) == 1 and store.writes[0]["file_path"] == "svc.py"
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_poll_deletion_prunes_structural_rows(root, pyfile, monkeypatch):
+    """Polling fallback: a file vanishing between scans prunes its rows."""
+    monkeypatch.setattr(watcher, "_WATCHDOG_AVAILABLE", False)  # force polling path
+    sleeps = []
+
+    def fake_sleep(s):
+        sleeps.append(s)
+        if len(sleeps) == 1:
+            pyfile.unlink()  # deleted after the first scan recorded it
+            return
+        raise SystemExit  # silently ends the daemon thread
+    monkeypatch.setattr(time, "sleep", fake_sleep)
+    store = FakeStore()
+    monkeypatch.setattr(watcher, "_thread_store", lambda db: store)
+    monkeypatch.setattr(watcher, "extract_structures", lambda p: [])
+    t = start_watcher(project_root=root, store=store)
+    assert t is not None and t.daemon is True
+    t.join(timeout=10)
+    assert not t.is_alive()
+    assert sleeps == [30, 30]
+    assert store.deleted == ["svc.py"]
 
 
 def test_stop_watcher_with_handle_and_without(monkeypatch):

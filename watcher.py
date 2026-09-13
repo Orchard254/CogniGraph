@@ -95,12 +95,35 @@ def close_thread_stores(db_path: Optional[str] = None) -> None:
             except Exception:
                 pass
 
+def _prune_deleted_file(rel: str, store: MemoryStore) -> None:
+    """Remove structural rows for a deleted file. Never raises.
+
+    The deletion complement to _sync_file: sync only revisits files that
+    still exist, so without this, deleted files leave permanent orphan
+    rows. Child tables (structural_edges, call_sites, fact_node_links)
+    clean up automatically via ON DELETE CASCADE.
+    """
+    try:
+        if MemoryStore is not None and store is not None:
+            store = _thread_store(store.db_path)
+        store.delete_structural_file(rel)
+    except Exception as e:
+        logger.warning("watcher delete prune failed %s: %r", rel, e)
+        bump_background_failure("structural_sync")
+
+
 def _sync_file(file_path: Path, root: Path, store: MemoryStore):
     """Incrementally sync a single file: structural nodes + file fact."""
     if MemoryStore is not None and store is not None:
         store = _thread_store(store.db_path)
     try:
         rel = file_path.relative_to(root).as_posix()
+        if not file_path.is_file():
+            # Deleted between event delivery and handler (or moved away):
+            # prune structural rows; there is no fact left to upsert for
+            # a path with nothing on disk.
+            _prune_deleted_file(rel, store)
+            return
         # 1. Structural nodes
         if extract_structures:
             try:
@@ -166,6 +189,17 @@ def _sync_file(file_path: Path, root: Path, store: MemoryStore):
         # to prevent.
         logger.warning("watcher _sync_file failed %s: %r", file_path, e)
 
+class _EventShim:
+    """Minimal watchdog-event stand-in for internal re-dispatch.
+
+    on_moved re-syncs the destination through on_modified, which only
+    reads src_path / is_directory — no watchdog import needed.
+    """
+    def __init__(self, src_path, is_directory=False):
+        self.src_path = src_path
+        self.is_directory = is_directory
+
+
 class _Handler(FileSystemEventHandler):
     def __init__(self, root: Path, store: MemoryStore):
         self.root = root
@@ -217,6 +251,49 @@ class _Handler(FileSystemEventHandler):
     def on_created(self, event):
         self.on_modified(event)
 
+    def _prune_event_path(self, src_path):
+        """Normalize a deleted/moved-away path; None when out of scope.
+
+        No _should_watch gate: the file is gone, so stat() fails and only
+        the extension + ignore-dir parts can apply.
+        """
+        p = Path(src_path)
+        try:
+            rel = p.relative_to(self.root).as_posix()
+        except ValueError:
+            return None
+        if p.suffix.lower() not in WATCHED_EXTS:
+            return None
+        if any(part in IGNORE_DIRS or part.endswith(".egg-info")
+               for part in Path(rel).parts):
+            return None
+        return rel
+
+    def on_deleted(self, event):
+        if event.is_directory:
+            return
+        rel = self._prune_event_path(event.src_path)
+        if rel is None:
+            return
+        logger.info("watcher detected deletion: %s", rel)
+        _prune_deleted_file(rel, self.store)
+
+    def on_moved(self, event):
+        if event.is_directory:
+            return
+        # Old path: prune rows exactly like a deletion.
+        rel = self._prune_event_path(event.src_path)
+        if rel is not None:
+            logger.info("watcher detected move-away: %s", rel)
+            _prune_deleted_file(rel, self.store)
+        # New path: sync as if newly created. Watchdog delivers a rename
+        # as a single moved event (no separate created event follows), so
+        # without this the destination would never be indexed. Re-dispatched
+        # through on_modified so the full watch gate and debounce apply.
+        dest = getattr(event, "dest_path", "") or ""
+        if dest:
+            self.on_modified(_EventShim(dest))
+
 def start_watcher(project_root: Optional[Path] = None, store: Optional[MemoryStore] = None) -> Optional[object]:
     """Start daemon watcher thread. Returns Observer or polling thread, or None if failed."""
     try:
@@ -264,11 +341,18 @@ def start_watcher(project_root: Optional[Path] = None, store: Optional[MemorySto
                                     if not first_scan:
                                         _sync_file(p, root, store)
                                     seen[key] = mtime
-                        # Evict deleted paths so `seen` stays bounded.
+                        # Evict deleted paths so `seen` stays bounded, and prune
+                        # their structural rows (same as on_deleted: sync never
+                        # revisits a path with nothing on disk).
                         for key in list(seen.keys()):
                             try:
                                 if not Path(key).exists():
                                     seen.pop(key, None)
+                                    try:
+                                        rel = Path(key).relative_to(root).as_posix()
+                                    except ValueError:
+                                        continue
+                                    _prune_deleted_file(rel, store)
                             except OSError:
                                 seen.pop(key, None)
                         first_scan = False

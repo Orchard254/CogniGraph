@@ -29,6 +29,10 @@ class StructuralMixin:
 
         """
         Upsert structural nodes for a single file, then prune stale rows for that file.
+
+        If the file no longer exists on disk, all indexed rows for it are
+        deleted instead (see delete_structural_file) — a sync must never
+        be a no-op for a deleted file, or orphans accumulate permanently.
         
         Args:
             file_path: The file path (relative to project_root, or absolute)
@@ -66,13 +70,26 @@ class StructuralMixin:
         else:
             full_path = Path(clean_path)
         if not full_path.exists() or not full_path.is_file():
-            # File doesn't exist or is not a file — skip this sync (defensive)
-            return {"upserted": 0, "pruned": 0, "nodes": [], "scan_timestamp": scan_ts,
+            # File deleted (or never existed): prune any indexed rows so a
+            # deletion doesn't leave permanent orphans. Child tables
+            # (structural_edges, call_sites, fact_node_links) cascade via
+            # ON DELETE CASCADE. Reported as pruned to keep the return
+            # contract (rows removed for this file).
+            result = self.delete_structural_file(clean_path)
+            return {"upserted": 0, "pruned": result["deleted"], "nodes": [],
+                    "scan_timestamp": scan_ts,
                     "edges_calls": 0, "edges_imports": 0}
         try:
             file_lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
         except (OSError, FileNotFoundError):
             # Replaced or deleted between the exists check and the read.
+            # Only a confirmed-gone file gets pruned; a transient read
+            # error must not wipe the index.
+            if not full_path.exists():
+                result = self.delete_structural_file(clean_path)
+                return {"upserted": 0, "pruned": result["deleted"], "nodes": [],
+                        "scan_timestamp": scan_ts,
+                        "edges_calls": 0, "edges_imports": 0}
             return {"upserted": 0, "pruned": 0, "nodes": [], "scan_timestamp": scan_ts,
                     "edges_calls": 0, "edges_imports": 0}
         
@@ -201,6 +218,42 @@ class StructuralMixin:
             "edges_calls": edges_calls,
             "edges_imports": edges_imports,
         }
+
+    def delete_structural_file(self, file_path: str) -> dict:
+        """Delete ALL structural_nodes rows for one file path.
+
+        The file-deletion complement to sync_structural_nodes: the per-file
+        prune inside sync only runs when the file still exists, so without
+        this, deleted files leave permanent orphan rows (plus dangling
+        edges/links). Child tables (structural_edges, call_sites,
+        fact_node_links) clean up automatically via ON DELETE CASCADE —
+        no explicit multi-table deletion. module_ref rows keyed to this
+        path are deleted too: their import target no longer exists, and the
+        next sync of any surviving importer will not recreate them
+        (_resolve_module_file returns None for a missing target).
+
+        Runs in its own BEGIN IMMEDIATE transaction, matching the sync
+        atomicity convention. Never raises for a path with no rows.
+
+        Returns:
+            dict with keys: deleted (rows removed), file_path (normalized)
+        """
+        clean_path = file_path.strip().replace("\\", "/")
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = self.conn.execute(
+                "DELETE FROM structural_nodes WHERE file_path = ?",
+                (clean_path,),
+            )
+            deleted = cur.rowcount
+            self.conn.execute("COMMIT")
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        return {"deleted": deleted, "file_path": clean_path}
 
     # ------------------------------------------------------------------
     # Code graph: structural_edges (calls / imports) built from the

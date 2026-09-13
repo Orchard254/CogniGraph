@@ -896,6 +896,120 @@ class TestCodeGraph:
         assert 'calls' in briefing
 
 
+class TestStructuralFileDeletion:
+    """delete_structural_file + missing-file sync branch (real DB).
+
+    These run against a real MemoryStore (PRAGMA foreign_keys=ON via
+    __init__), so cascade assertions are genuine — a raw sqlite3
+    connection would default to FK OFF and give a false pass.
+    """
+
+    @pytest.fixture
+    def doomed_store(self, temp_store, tmp_path):
+        """Two-file mini repo like graph_store, plus a curated fact on a.py."""
+        (tmp_path / 'a.py').write_text(
+            "def helper():\n    return 1\n")
+        (tmp_path / 'b.py').write_text(
+            "from a import helper\n\n\ndef main():\n    helper()\n")
+        from structural_extract import extract_structures
+        for rel in ('a.py', 'b.py'):
+            nodes = extract_structures(tmp_path / rel)
+            temp_store.sync_structural_nodes(rel, nodes, project_root=str(tmp_path))
+        fid = temp_store.write(category='component',
+                               content='helper returns the magic constant',
+                               file_path='a.py', line_start=1, line_end=2,
+                               embed=False, force=True)
+        temp_store.link_facts_to_structural_nodes('a.py')
+        assert temp_store.conn.execute(
+            "SELECT COUNT(*) c FROM fact_node_links WHERE fact_id = ?",
+            (fid,)).fetchone()['c'] >= 1
+        return temp_store
+
+    def test_fk_pragma_on(self, doomed_store):
+        assert doomed_store.conn.execute(
+            "PRAGMA foreign_keys").fetchone()[0] == 1
+
+    def test_delete_prunes_only_that_file(self, doomed_store):
+        before_b = doomed_store.conn.execute(
+            "SELECT COUNT(*) c FROM structural_nodes WHERE file_path = ?",
+            ('b.py',)).fetchone()['c']
+        assert before_b > 0
+        res = doomed_store.delete_structural_file('a.py')
+        assert res['deleted'] > 0 and res['file_path'] == 'a.py'
+        assert doomed_store.conn.execute(
+            "SELECT COUNT(*) c FROM structural_nodes WHERE file_path = ?",
+            ('a.py',)).fetchone()['c'] == 0
+        assert doomed_store.conn.execute(
+            "SELECT COUNT(*) c FROM structural_nodes WHERE file_path = ?",
+            ('b.py',)).fetchone()['c'] == before_b
+        assert doomed_store.who_calls('helper')['found'] is False
+
+    def test_delete_cascades_edges_sites_and_links(self, doomed_store):
+        a_ids = [r['id'] for r in doomed_store.conn.execute(
+            "SELECT id FROM structural_nodes WHERE file_path = ?",
+            ('a.py',)).fetchall()]
+        assert a_ids, "fixture must index a.py"
+        aph = ",".join("?" * len(a_ids))
+        edge_before = doomed_store.conn.execute(
+            f"SELECT COUNT(*) c FROM structural_edges WHERE caller_id IN ({aph})"
+            f" OR callee_id IN ({aph})", (*a_ids, *a_ids)).fetchone()['c']
+        assert edge_before > 0, "fixture must hold edges touching a.py"
+        link_before = doomed_store.conn.execute(
+            f"SELECT COUNT(*) c FROM fact_node_links WHERE node_id IN ({aph})",
+            a_ids).fetchone()['c']
+        assert link_before > 0, "fixture must hold links into a.py"
+        doomed_store.delete_structural_file('a.py')
+        assert doomed_store.conn.execute(
+            f"SELECT COUNT(*) c FROM structural_edges WHERE caller_id IN ({aph})"
+            f" OR callee_id IN ({aph})", (*a_ids, *a_ids)).fetchone()['c'] == 0
+        try:
+            sites = doomed_store.conn.execute(
+                f"SELECT COUNT(*) c FROM call_sites WHERE caller_id IN ({aph})"
+                f" OR callee_id IN ({aph})", (*a_ids, *a_ids)).fetchone()['c']
+            assert sites == 0
+        except Exception:
+            pass  # pre-migration shape without call_sites: nothing to assert
+        assert doomed_store.conn.execute(
+            f"SELECT COUNT(*) c FROM fact_node_links WHERE node_id IN ({aph})",
+            a_ids).fetchone()['c'] == 0
+        # The curated fact itself survives — only its node links are gone.
+        assert doomed_store.conn.execute(
+            "SELECT COUNT(*) c FROM memory WHERE file_path = ?"
+            " AND deprecated_at IS NULL", ('a.py',)).fetchone()['c'] == 1
+
+    def test_delete_cleans_module_ref(self, doomed_store):
+        refs = doomed_store.conn.execute(
+            "SELECT COUNT(*) c FROM structural_nodes WHERE node_type = 'module_ref'"
+            " AND file_path = ?", ('a.py',)).fetchall()
+        assert refs[0]['c'] >= 1, "b.py's import must leave a module_ref for a.py"
+        doomed_store.delete_structural_file('a.py')
+        assert doomed_store.conn.execute(
+            "SELECT COUNT(*) c FROM structural_nodes WHERE node_type = 'module_ref'"
+            " AND file_path = ?", ('a.py',)).fetchone()['c'] == 0
+
+    def test_delete_unknown_path_is_noop(self, temp_store):
+        res = temp_store.delete_structural_file('never/existed.py')
+        assert res == {"deleted": 0, "file_path": 'never/existed.py'}
+
+    def test_sync_missing_file_prunes_rows(self, temp_store, tmp_path):
+        (tmp_path / 'doomed.py').write_text("def gone():\n    pass\n")
+        from structural_extract import extract_structures
+        first = temp_store.sync_structural_nodes(
+            'doomed.py', extract_structures(tmp_path / 'doomed.py'),
+            project_root=str(tmp_path))
+        assert first['upserted'] > 0
+        (tmp_path / 'doomed.py').unlink()
+        res = temp_store.sync_structural_nodes(
+            'doomed.py', [{'type': 'function', 'name': 'gone',
+                           'line_start': 1, 'line_end': 2}],
+            project_root=str(tmp_path))
+        assert res['upserted'] == 0 and res['pruned'] == first['upserted']
+        assert res['nodes'] == []
+        assert temp_store.conn.execute(
+            "SELECT COUNT(*) c FROM structural_nodes WHERE file_path = ?",
+            ('doomed.py',)).fetchone()['c'] == 0
+
+
 # ============================================================
 # Trust Layer Tests (unmapped flag, correction flags, negative knowledge)
 # ============================================================
