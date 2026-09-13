@@ -437,6 +437,13 @@ def memory_who_calls(symbol: str) -> dict:
 
 
 @mcp.tool()
+def memory_who_inherits(symbol: str, max_depth: int = 5) -> dict:
+    """Which classes inherit from this base class (exact), transitively. No LIKE false positives."""
+    with _store() as _s:
+        return _s.who_inherits(symbol, max_depth=max_depth)
+
+
+@mcp.tool()
 def memory_blast_radius(symbol: str, class_name: str = "", file_path: str = "",
                         max_depth: int = 5, direction: str = "callers",
                         file_detail: str = "", max_symbols_per_file: int = 20) -> dict:

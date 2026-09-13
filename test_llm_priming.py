@@ -1226,6 +1226,107 @@ class TestJsArrowCapture:
         assert any(c.get('call_lines') == [1] for c in r['callers'] if c['name'] == 'doubled')
 
 
+class TestInheritanceSurfacing:
+    def test_exact_match_no_false_positives(self, tmp_path, temp_store):
+        from structural_extract import extract_structures
+        (tmp_path / 'a.py').write_text(
+            "class Parent:\n    pass\n"
+            "class GrandParent:\n    pass\n"
+            "class ParentMixin:\n    pass\n"
+            "class Child(Parent):\n    pass\n"
+            "class False1(GrandParent):\n    pass\n"
+            "class False2(ParentMixin):\n    pass\n"
+        )
+        nodes = extract_structures(tmp_path / 'a.py')
+        temp_store.sync_structural_nodes('a.py', nodes, project_root=str(tmp_path))
+        r = temp_store.who_inherits('Parent')
+        assert r['found'] is True
+        names = {h['name'] for h in r['inheritors']}
+        assert 'Child' in names, "Child(Parent) must be found"
+        assert 'False1' not in names, "GrandParent child must not match Parent (LIKE pitfall)"
+        assert 'False2' not in names, "ParentMixin child must not match Parent"
+        assert 'GrandParent' not in names and 'ParentMixin' not in names
+
+    def test_transitive_inherits(self, tmp_path, temp_store):
+        from structural_extract import extract_structures
+        (tmp_path / 'a.py').write_text(
+            "class GrandParent:\n    pass\n"
+            "class Parent(GrandParent):\n    pass\n"
+            "class Child(Parent):\n    pass\n"
+            "class GrandChild(Child):\n    pass\n"
+        )
+        nodes = extract_structures(tmp_path / 'a.py')
+        temp_store.sync_structural_nodes('a.py', nodes, project_root=str(tmp_path))
+        r = temp_store.who_inherits('GrandParent')
+        assert r['found']
+        by_name = {h['name']: h['depth'] for h in r['inheritors']}
+        assert by_name.get('Parent') == 1
+        assert by_name.get('Child') == 2
+        assert by_name.get('GrandChild') == 3
+        assert r['depth_counts'][1] == 1 and r['depth_counts'][2] == 1 and r['depth_counts'][3] == 1
+
+    def test_who_inherits_js_exact(self, tmp_path, temp_store):
+        pytest.importorskip('tree_sitter_javascript')
+        from structural_extract import extract_structures
+        (tmp_path / 'a.js').write_text(
+            "class Parent {}\n"
+            "class Child extends Parent {}\n"
+            "class GrandChild extends Child {}\n"
+            "class ParentMixin {}\n"
+            "class False extends ParentMixin {}\n"
+        )
+        nodes = extract_structures(tmp_path / 'a.js')
+        temp_store.sync_structural_nodes('a.js', nodes, project_root=str(tmp_path))
+        r = temp_store.who_inherits('Parent')
+        names = {h['name'] for h in r['inheritors']}
+        assert 'Child' in names and 'GrandChild' in names
+        assert 'False' not in names and 'ParentMixin' not in names
+
+    def test_blast_radius_inherits_direction(self, tmp_path, temp_store):
+        from structural_extract import extract_structures
+        (tmp_path / 'a.py').write_text(
+            "class A:\n    pass\n"
+            "class B(A):\n    pass\n"
+            "class C(B):\n    pass\n"
+        )
+        nodes = extract_structures(tmp_path / 'a.py')
+        temp_store.sync_structural_nodes('a.py', nodes, project_root=str(tmp_path))
+        r = temp_store.blast_radius('A', direction='inherits')
+        assert r['found'] is True
+        assert r['direction'] == 'inherits'
+        by_name = {s['name']: s['depth'] for fl in r['files'] for s in fl['symbols']}
+        assert by_name.get('B') == 1
+        assert by_name.get('C') == 2
+
+    def test_who_calls_includes_base_classes(self, tmp_path, temp_store):
+        from structural_extract import extract_structures
+        (tmp_path / 'a.py').write_text(
+            "class Parent:\n    pass\n"
+            "class Child(Parent):\n    pass\n"
+        )
+        nodes = extract_structures(tmp_path / 'a.py')
+        temp_store.sync_structural_nodes('a.py', nodes, project_root=str(tmp_path))
+        r = temp_store.who_calls('Child')
+        defs = [d for d in r['definitions'] if d['name'] == 'Child']
+        assert defs and defs[0].get('base_classes') == ['Parent']
+        r2 = temp_store.who_calls('Parent')
+        defs2 = [d for d in r2['definitions'] if d['name'] == 'Parent']
+        assert defs2 and defs2[0].get('base_classes') == []
+
+    def test_project_shape_includes_hierarchy(self, tmp_path, temp_store):
+        from structural_extract import extract_structures
+        (tmp_path / 'a.py').write_text(
+            "class A:\n    pass\n"
+            "class B(A):\n    pass\n"
+        )
+        nodes = extract_structures(tmp_path / 'a.py')
+        temp_store.sync_structural_nodes('a.py', nodes, project_root=str(tmp_path))
+        shape = temp_store.project_shape()
+        assert '### Project Shape' in shape
+        # hierarchy section lists B(A)
+        assert 'B(A)' in shape or 'B(' in shape
+
+
 # ============================================================
 # Sync Exclusion Tests (provenance artifacts never indexed)
 # ============================================================

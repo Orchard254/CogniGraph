@@ -574,13 +574,13 @@ class StructuralMixin:
         if "." in symbol:
             cls, name = symbol.split(".", 1)
             targets = self.conn.execute(
-                "SELECT id, node_type, name, class_name, file_path, line_start, line_end "
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
                 "FROM structural_nodes WHERE name = ? AND class_name = ?",
                 (name, cls),
             ).fetchall()
         else:
             targets = self.conn.execute(
-                "SELECT id, node_type, name, class_name, file_path, line_start, line_end "
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
                 "FROM structural_nodes WHERE name = ?",
                 (symbol,),
             ).fetchall()
@@ -631,12 +631,141 @@ class StructuralMixin:
             ).fetchall()
             importers = [r["file_path"] for r in rows]
 
+        # Parse base_classes for class definitions
+        defs_out: List[Dict[str, Any]] = []
+        for t in targets:
+            d = dict(t)
+            raw = d.get("base_classes")
+            if isinstance(raw, str):
+                try:
+                    d["base_classes"] = json.loads(raw)
+                except Exception:
+                    d["base_classes"] = []
+            elif raw is None and d.get("node_type") == "class":
+                d["base_classes"] = []
+            defs_out.append(d)
         return {
             "symbol": symbol,
             "found": True,
-            "definitions": [dict(t) for t in targets],
+            "definitions": defs_out,
             "callers": [dict(r) for r in callers],
             "importers": importers,
+        }
+
+    def who_inherits(self, symbol: str, max_depth: int = 5) -> Dict[str, Any]:
+        """INHERITANCE QUERY: which classes inherit from SYMBOL (exact match).
+
+        Finds all class nodes where base_classes JSON array contains exactly
+        `symbol` (value equality via json_each), not substring — 'Parent'
+        never matches 'ParentMixin' or 'GrandParent'. Transitive cone via
+        recursive CTE (depth 1=direct, 2+=indirect). No schema migration.
+
+        Returns found, definitions (base class nodes), inheritors (list of
+        {name, file_path, line_start, line_end, base_classes, depth}),
+        depth_counts, total. Single-hop callers could filter depth==1.
+        """
+        symbol = (symbol or "").strip()
+        if not symbol:
+            return {"symbol": symbol, "found": False, "definitions": [], "inheritors": []}
+        # Definitions: class nodes named symbol
+        try:
+            targets = self.conn.execute(
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
+                "FROM structural_nodes WHERE name = ? AND node_type = 'class'",
+                (symbol,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {"symbol": symbol, "found": False, "definitions": [], "inheritors": []}
+        # Parse definitions base_classes
+        defs_parsed: List[Dict[str, Any]] = []
+        for t in targets:
+            d = dict(t)
+            raw = d.get("base_classes")
+            if isinstance(raw, str):
+                try:
+                    d["base_classes"] = json.loads(raw)
+                except Exception:
+                    d["base_classes"] = []
+            elif raw is None:
+                d["base_classes"] = []
+            defs_parsed.append(d)
+        if not targets:
+            return {"symbol": symbol, "found": False, "definitions": [], "inheritors": []}
+        try:
+            max_depth = int(max_depth)
+        except (TypeError, ValueError):
+            max_depth = 5
+        max_depth = max(1, min(10, max_depth))
+        # Transitive via recursive CTE with exact json_each match
+        combined: Dict[int, Dict[str, Any]] = {}
+        try:
+            rows = self.conn.execute(
+                "WITH RECURSIVE inheritors(id, name, file_path, line_start, line_end, base_classes, depth) AS ("
+                " SELECT id, name, file_path, line_start, line_end, base_classes, 1 FROM structural_nodes "
+                " WHERE node_type='class' AND EXISTS (SELECT 1 FROM json_each(base_classes) WHERE value=?)"
+                " UNION ALL"
+                " SELECT c.id, c.name, c.file_path, c.line_start, c.line_end, c.base_classes, i.depth+1 FROM structural_nodes c "
+                " JOIN inheritors i ON EXISTS (SELECT 1 FROM json_each(c.base_classes) WHERE value=i.name)"
+                " WHERE i.depth < ?"
+                ") SELECT id, name, file_path, line_start, line_end, base_classes, MIN(depth) AS depth FROM inheritors GROUP BY id ORDER BY depth, name",
+                (symbol, max_depth),
+            ).fetchall()
+            for r in rows:
+                nid = r["id"]
+                # Exclude self-definitions
+                if any(t["id"] == nid for t in targets):
+                    continue
+                d = dict(r)
+                raw = d.get("base_classes")
+                if isinstance(raw, str):
+                    try:
+                        d["base_classes"] = json.loads(raw)
+                    except Exception:
+                        d["base_classes"] = []
+                elif raw is None:
+                    d["base_classes"] = []
+                combined[nid] = d
+        except sqlite3.OperationalError:
+            # JSON1 unavailable — Python fallback exact
+            frontier = {symbol}
+            visited_names = {symbol}
+            depth = 1
+            while frontier and depth <= max_depth:
+                cand = self.conn.execute(
+                    "SELECT id, name, file_path, line_start, line_end, base_classes FROM structural_nodes WHERE node_type='class'",
+                ).fetchall()
+                next_frontier: set = set()
+                for row in cand:
+                    nid = row["id"]
+                    if nid in combined or any(t["id"] == nid for t in targets):
+                        continue
+                    try:
+                        bases = json.loads(row["base_classes"]) if row["base_classes"] else []
+                    except Exception:
+                        bases = []
+                    if not isinstance(bases, list):
+                        continue
+                    if any(b in frontier for b in bases):
+                        d = dict(row)
+                        d["base_classes"] = bases
+                        d["depth"] = depth
+                        combined[nid] = d
+                        if row["name"] not in visited_names:
+                            next_frontier.add(row["name"])
+                visited_names.update(next_frontier)
+                frontier = next_frontier
+                depth += 1
+        inheritors = sorted(combined.values(), key=lambda x: (x["depth"], x["name"]))
+        depth_counts: Dict[int, int] = {}
+        for it in inheritors:
+            depth_counts[it["depth"]] = depth_counts.get(it["depth"], 0) + 1
+        return {
+            "symbol": symbol,
+            "found": True,
+            "definitions": defs_parsed,
+            "inheritors": inheritors,
+            "depth_counts": depth_counts,
+            "total": len(inheritors),
         }
 
     def blast_radius(self, symbol: str, class_name: str = "", file_path: str = "",
@@ -679,7 +808,7 @@ class StructuralMixin:
         except (TypeError, ValueError):
             max_depth = 5
         max_depth = max(1, min(10, max_depth))
-        if direction not in ("callers", "callees", "both"):
+        if direction not in ("callers", "callees", "both", "inherits"):
             direction = "callers"
         try:
             max_symbols_per_file = int(max_symbols_per_file)
@@ -697,7 +826,7 @@ class StructuralMixin:
         if "." in symbol and not scope_cls:
             cls, name = symbol.split(".", 1)
             targets = self.conn.execute(
-                "SELECT id, node_type, name, class_name, file_path, line_start, line_end "
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
                 "FROM structural_nodes WHERE name = ? AND class_name = ?",
                 (name, cls),
             ).fetchall()
@@ -705,13 +834,13 @@ class StructuralMixin:
             name = symbol.rsplit(".", 1)[-1] if "." in symbol else symbol
             if scope_cls:
                 targets = self.conn.execute(
-                    "SELECT id, node_type, name, class_name, file_path, line_start, line_end "
+                    "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
                     "FROM structural_nodes WHERE name = ? AND class_name = ?",
                     (name, scope_cls),
                 ).fetchall()
             else:
                 targets = self.conn.execute(
-                    "SELECT id, node_type, name, class_name, file_path, line_start, line_end "
+                    "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
                     "FROM structural_nodes WHERE name = ?",
                     (name,),
                 ).fetchall()
@@ -758,10 +887,77 @@ class StructuralMixin:
             ).fetchall()
             return {r["id"]: r["depth"] for r in rows}
 
+        def _walk_inherits() -> Dict[int, int]:
+            """Transitive subclass cone via exact base_classes json_each match.
+
+            No migration: base_classes is JSON array persisted by sync_structural_nodes.
+            Exact match uses json_each(value=?) so 'Parent' never matches
+            'ParentMixin' or 'GrandParent' (LIKE pitfall). Falls back to
+            Python json.loads exact check if JSON1 unavailable.
+            Depth is subclass distance (1=direct child).
+            """
+            seed_names = sorted({t["name"] for t in targets if t["node_type"] == "class"})
+            if not seed_names:
+                return {}
+            combined: Dict[int, int] = {}
+            for sname in seed_names:
+                try:
+                    rows = self.conn.execute(
+                        "WITH RECURSIVE inheritors(id, name, depth) AS ("
+                        " SELECT id, name, 1 FROM structural_nodes "
+                        " WHERE node_type='class' AND EXISTS (SELECT 1 FROM json_each(base_classes) WHERE value=?)"
+                        " UNION ALL"
+                        " SELECT c.id, c.name, i.depth+1 FROM structural_nodes c "
+                        " JOIN inheritors i ON EXISTS (SELECT 1 FROM json_each(c.base_classes) WHERE value=i.name)"
+                        " WHERE i.depth < ?"
+                        ") SELECT id, MIN(depth) AS depth FROM inheritors GROUP BY id",
+                        (sname, max_depth),
+                    ).fetchall()
+                    for r in rows:
+                        nid = r["id"]
+                        d = r["depth"]
+                        if nid in seed_ids:
+                            continue
+                        if nid not in combined or d < combined[nid]:
+                            combined[nid] = d
+                except sqlite3.OperationalError:
+                    # JSON1 unavailable — Python fallback with exact set membership
+                    frontier = {sname}
+                    visited_names = {sname}
+                    depth = 1
+                    while frontier and depth <= max_depth:
+                        # fetch all class candidates and filter in Python
+                        cand = self.conn.execute(
+                            "SELECT id, name, base_classes FROM structural_nodes WHERE node_type='class'",
+                        ).fetchall()
+                        next_frontier: set = set()
+                        for row in cand:
+                            nid = row["id"]
+                            if nid in seed_ids or nid in combined:
+                                continue
+                            try:
+                                bases = json.loads(row["base_classes"]) if row["base_classes"] else []
+                            except Exception:
+                                bases = []
+                            if not isinstance(bases, list):
+                                continue
+                            if any(b in frontier for b in bases):
+                                if nid not in combined or depth < combined[nid]:
+                                    combined[nid] = depth
+                                if row["name"] not in visited_names:
+                                    next_frontier.add(row["name"])
+                        visited_names.update(next_frontier)
+                        frontier = next_frontier
+                        depth += 1
+                    break  # single fallback pass covers all seeds already
+            return combined
+
         if direction == "callers":
             depths = _walk_callers()
         elif direction == "callees":
             depths = _walk_callees()
+        elif direction == "inherits":
+            depths = _walk_inherits()
         else:
             depths = _walk_callers()
             for nid, d in _walk_callees().items():
@@ -775,7 +971,7 @@ class StructuralMixin:
         if affected_ids:
             aph = ",".join("?" * len(affected_ids))
             node_rows = self.conn.execute(
-                "SELECT id, node_type, name, class_name, file_path, line_start, line_end "
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
                 f"FROM structural_nodes WHERE id IN ({aph})",
                 affected_ids,
             ).fetchall()
@@ -786,7 +982,7 @@ class StructuralMixin:
                 depths.pop(nid, None)
 
         total_edges = 0
-        if depths:
+        if depths and direction != "inherits":
             vph = ",".join("?" * len(depths))
             sph = ",".join("?" * len(seed_set))
             total_edges = self.conn.execute(
@@ -825,8 +1021,16 @@ class StructuralMixin:
             entry = {"name": node["name"], "class_name": node["class_name"],
                      "node_type": node["node_type"],
                      "line_start": node["line_start"], "line_end": node["line_end"],
-                     "call_lines": sorted(set(lines_by_node.get(nid, []))),
+                     "call_lines": sorted(set(lines_by_node.get(nid, []))) if direction != "inherits" else [],
                      "depth": depths[nid]}
+            # Surface base_classes for class nodes so callers can see hierarchy without extra lookup
+            if node.get("base_classes") is not None:
+                try:
+                    entry["base_classes"] = json.loads(node["base_classes"]) if isinstance(node["base_classes"], str) else list(node["base_classes"] or [])
+                except Exception:
+                    entry["base_classes"] = []
+            elif node["node_type"] == "class":
+                entry["base_classes"] = []
             by_file.setdefault(node["file_path"], []).append(entry)
         for entries in by_file.values():
             entries.sort(key=lambda e: (e["depth"], e["line_start"]))
@@ -844,14 +1048,30 @@ class StructuralMixin:
                               "symbols": capped,
                               "truncated": len(entries) > len(capped)})
 
-        unresolved, skipped = self._blast_unresolved(
-            [dict(t) for t in targets], nodes, project_root)
+        if direction == "inherits":
+            unresolved, skipped = 0, []
+        else:
+            unresolved, skipped = self._blast_unresolved(
+                [dict(t) for t in targets], nodes, project_root)
 
+        # Parse base_classes JSON for definitions for ergonomic output
+        defs_out: List[Dict[str, Any]] = []
+        for t in targets:
+            d = dict(t)
+            raw = d.get("base_classes")
+            if isinstance(raw, str):
+                try:
+                    d["base_classes"] = json.loads(raw)
+                except Exception:
+                    d["base_classes"] = []
+            elif raw is None and d.get("node_type") == "class":
+                d["base_classes"] = []
+            defs_out.append(d)
         result: Dict[str, Any] = {
             "symbol": symbol,
             "found": True,
             "ambiguous": len(targets) > 1,
-            "definitions": [dict(t) for t in targets],
+            "definitions": defs_out,
             "direction": direction,
             "max_depth_requested": max_depth,
             "max_depth_reached": max_reached,
@@ -1264,8 +1484,32 @@ class StructuralMixin:
                 lines.append(f"- `{r['file_path']}` ({r['defs']} defs)")
         else:
             lines.append("*No structural index yet — run bootstrap or sync_structural_nodes.*")
+        # Class hierarchy per file (exact bases)
+        try:
+            class_rows = self.conn.execute(
+                "SELECT file_path, name, base_classes FROM structural_nodes WHERE node_type='class' ORDER BY file_path, name"
+            ).fetchall()
+            by_file_bases: dict = {}
+            for cr in class_rows:
+                raw = cr["base_classes"]
+                try:
+                    bases = json.loads(raw) if raw else []
+                except Exception:
+                    bases = []
+                if bases:
+                    by_file_bases.setdefault(cr["file_path"], []).append(f"{cr['name']}({', '.join(bases)})")
+            if by_file_bases:
+                lines.append("")
+                lines.append("#### Class hierarchy (bases):")
+                for fp in sorted(by_file_bases):
+                    entries = ", ".join(by_file_bases[fp][:8])
+                    suffix = "…" if len(by_file_bases[fp]) > 8 else ""
+                    lines.append(f"- `{fp}`: {entries}{suffix}")
+        except Exception:
+            pass
         lines.append("")
         lines.append("*For one-hop questions ('who calls X?', 'who imports Y?') use memory_who_calls instead of re-reading files.*")
+        lines.append("*For inheritance: who_inherits('Parent') or blast_radius('Parent', direction='inherits').*")
         return "\n".join(lines)
 
     def link_facts_to_structural_nodes(self, file_path: Optional[str] = None) -> dict:
