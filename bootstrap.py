@@ -370,6 +370,30 @@ def drop_agents_md(root: Path) -> str:
                           Path(__file__).resolve().parent)["status"]
 
 
+def _stub_already_present(store: MemoryStore, file_path: str, content: str) -> bool:
+    """Exact-match pre-check for whole-file template stubs (#530).
+
+    Returns True when the byte-identical active stub already exists, so the
+    --full write loop can skip the write (counted as a dup) instead of
+    relying solely on write()'s similarity guard. Scoped to the
+    'Source file:' template only, matching the ux_stub_once index.
+    Fails open (False) when the store has no SQL connection (test fakes)
+    or the lookup itself errors — the write path and the UNIQUE index
+    remain the backstops, so bootstrap never breaks on a lookup hiccup.
+    """
+    conn = getattr(store, "conn", None)
+    if conn is None:
+        return False
+    try:
+        rows = conn.execute(
+            "SELECT id FROM memory WHERE file_path=? AND content=? AND deprecated_at IS NULL",
+            (file_path, content)).fetchall()
+        return bool(rows)
+    except Exception as e:
+        logger.debug("stub pre-check lookup failed, failing open: %r", e)
+        return False
+
+
 def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True,
                       full: bool = False, max_facts: int = 150,
                       install_hook: bool = True, drop_protocol: bool = True) -> Dict[str, Any]:
@@ -446,6 +470,14 @@ def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True
         # embeddings are backfilled in a single batched pass afterwards.
         for f in planned:
             try:
+                # Exact-match pre-check for stub-template facts (#530): skip
+                # the write when the identical row already exists instead of
+                # relying solely on write()'s similarity guard.
+                f_content = f.get("content", "") or ""
+                if (f_content.startswith("Source file:") and f.get("file_path")
+                        and _stub_already_present(store, f["file_path"], f_content)):
+                    dups += 1
+                    continue
                 fid = store.write(**f, embed=False)
                 if fid < 0:
                     dups += 1

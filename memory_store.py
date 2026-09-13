@@ -468,6 +468,34 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         except Exception as e:
             logger.warning("call_sites migration failed: %r", e)
 
+        # Stub-fact singleton (#530): one active whole-file template stub per
+        # (file_path, content). Check-then-write in watcher/bootstrap cannot
+        # close cross-process races (two watchers syncing the same new file),
+        # so the database enforces it; write() maps violations back to the
+        # standard near-duplicate sentinel. Scoped to the 'Source file:'
+        # template only — curated facts are never constrained by this index.
+        # Databases that still hold pre-fix duplicates create no index until
+        # the backfill lands; every open retries, so it self-heals afterwards.
+        try:
+            dupes = self.conn.execute("""
+                SELECT COUNT(*) c FROM (
+                    SELECT 1 FROM memory
+                    WHERE deprecated_at IS NULL AND content LIKE 'Source file:%'
+                    GROUP BY file_path, content HAVING COUNT(*) > 1)
+            """).fetchone()["c"]
+            if dupes:
+                logger.warning(
+                    "ux_stub_once deferred: %s duplicate stub cohorts present; "
+                    "run the #530 backfill, then reopen", dupes)
+            else:
+                self.conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_stub_once
+                ON memory(file_path, content)
+                WHERE content LIKE 'Source file:%' AND deprecated_at IS NULL
+                """)
+        except Exception as e:
+            logger.warning("ux_stub_once migration failed: %r", e)
+
     def close(self):
         self.conn.close()
 
@@ -599,14 +627,34 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         # time, so future agents can ask "what changed since this fact".
         if git_commit_sha is None and norm_file_path and line_start is not None:
             git_commit_sha = self._current_git_commit()
-        cur = self.conn.execute(
-            "INSERT INTO memory (category, content, rationale, confidence, created_at, session_id, "
-            "file_path, tags, importance, line_start, line_end, code_hash, git_commit_sha) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (category, content.strip() if content else "", rationale, confidence, now, session_id,
-             norm_file_path, tags,
-             max(1, min(5, int(importance))), line_start, line_end, code_hash, git_commit_sha),
-        )
+        try:
+            cur = self.conn.execute(
+                "INSERT INTO memory (category, content, rationale, confidence, created_at, session_id, "
+                "file_path, tags, importance, line_start, line_end, code_hash, git_commit_sha) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (category, content.strip() if content else "", rationale, confidence, now, session_id,
+                 norm_file_path, tags,
+                 max(1, min(5, int(importance))), line_start, line_end, code_hash, git_commit_sha),
+            )
+        except sqlite3.IntegrityError:
+            # ux_stub_once (#530): a concurrent stub ingest won the race and
+            # committed the identical template first. Converge on the existing
+            # row via the standard negative sentinel instead of raising, so
+            # racers (watcher threads/processes, --full bootstrap) agree on
+            # one row. Proven structurally, not by error-message sniffing
+            # (SQLite names columns, not the index): only when the exact
+            # active row exists do we return its sentinel; otherwise the
+            # original error propagates unchanged, so no other IntegrityError
+            # case changes behavior.
+            stripped = content.strip() if content else ""
+            if norm_file_path and stripped.startswith("Source file:"):
+                row = self.conn.execute(
+                    "SELECT id FROM memory WHERE file_path=? AND content=? "
+                    "AND deprecated_at IS NULL",
+                    (norm_file_path, stripped)).fetchone()
+                if row is not None:
+                    return -(row["id"])
+            raise
         new_id = cur.lastrowid
         # Persist semantic embedding asynchronously (best-effort) — never silently swallow
         if embed:

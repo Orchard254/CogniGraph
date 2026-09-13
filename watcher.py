@@ -172,9 +172,19 @@ def _sync_file(file_path: Path, root: Path, store: MemoryStore):
                             logger.warning("watcher re-embed failed for fact %s: %r", fid, e)
                             bump_background_failure("re_embed")
             else:
-                # New file — "other" like bootstrap's template facts, so stubs
-                # never ride intent boosts meant for curated knowledge.
-                store.write(category="other", content=content, file_path=rel, tags="bootstrap, file, auto-watched", importance=2, line_start=1, line_end=lines, code_hash=h, force=True, embed=True)
+                # Exact-match pre-check (#530): a concurrent sync (another
+                # thread, or another watcher process) may have inserted the
+                # identical stub between the SELECT above and this write.
+                # Skip the write entirely on an exact hit; ux_stub_once in
+                # write() remains the cross-process backstop. fetchall (not
+                # fetchone) keeps this compatible with the test fakes.
+                already = store.conn.execute(
+                    "SELECT id FROM memory WHERE file_path=? AND content=? AND deprecated_at IS NULL",
+                    (rel, content)).fetchall()
+                if not already:
+                    # New file — "other" like bootstrap's template facts, so stubs
+                    # never ride intent boosts meant for curated knowledge.
+                    store.write(category="other", content=content, file_path=rel, tags="bootstrap, file, auto-watched", importance=2, line_start=1, line_end=lines, code_hash=h, force=True, embed=True)
             # Link to structural nodes
             try:
                 store.link_facts_to_structural_nodes(rel)
