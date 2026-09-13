@@ -121,7 +121,7 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 16 tools.
+The server registers 17 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -137,6 +137,7 @@ The server registers 16 tools.
 | `memory_prepare_task` | `intent`, `file_paths?`, `limit?` | REQUIRED before writing or modifying any code in this repository. Returns the task briefing: relevant decisions, constraints, component facts, file-level impacts, cross-file dependency risks, and the current verified test baseline. |
 | `memory_checkpoint_task` | `summary`, `components?`, `decisions?`, `test_baseline?`, `failures?` | Call immediately after a task is verified complete (tests green). Records new components, decisions, the test baseline, and failed approaches as durable memory for future sessions. |
 | `memory_who_calls` | `symbol` | Where a symbol is defined, every call site, and importing files. Ask mid-reasoning while planning an approach — and before renaming or changing a signature. |
+| `memory_who_inherits` | `symbol`, `max_depth?` | Which classes inherit from this base class (exact), transitively. No LIKE false positives. |
 | `memory_blast_radius` | `symbol`, `class_name?`, `file_path?`, `max_depth?`, `direction?`, `file_detail?`, `max_symbols_per_file?` | Transitive blast radius: who depends on this symbol, transitively. Call while planning an approach or estimating effort, before making changes — not just as a pre-edit gate. |
 | `memory_read_code` | `items`, `max_lines_per_item?`, `max_total_chars?`, `context?` | Read scoped source lines by symbol or explicit file range, batched in one call. Request order is preserved in results; batch budget cutoffs return per-item errors (not partial content) so re-request those items in a smaller batch. |
 | `memory_project_shape` | — | Lay of the land: indexed files, top modules by definition density, call/import edge totals. |
