@@ -894,6 +894,10 @@ def test_install_git_hook_states(tmp_path):
     target = hooks_dir / "post-commit"
     src = Path(bootstrap.__file__).resolve().parent / "hooks" / "git_hook.py"
     assert target.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
+    if sys.platform != "win32":
+        # Git only fires hooks with the executable bit set (POSIX); Windows
+        # has no exec bit, so this assertion is POSIX-only by design.
+        assert target.stat().st_mode & 0o111, "installed hook must be executable"
     assert bootstrap.install_git_hook(tmp_path) == "skipped_hook_exists"
 
 

@@ -354,6 +354,13 @@ def install_git_hook(root: Path) -> str:
     if not src.exists():
         return "skipped_hook_source_missing"
     target.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    try:
+        # Git only fires hooks with the executable bit set. On Windows this
+        # is a harmless no-op-ish call; on POSIX without it the installed
+        # hook would silently never run. Best-effort: never block install.
+        os.chmod(target, 0o755)
+    except Exception:
+        pass
     return "installed"
 
 
