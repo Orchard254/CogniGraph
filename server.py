@@ -450,6 +450,17 @@ def memory_blast_radius(symbol: str, class_name: str = "", file_path: str = "",
 
 
 @mcp.tool()
+def memory_read_code(items: List[Dict[str, Any]], max_lines_per_item: int = 200,
+                     max_total_chars: int = 24000, context: int = 0) -> dict:
+    """Read scoped source lines by symbol or explicit file range, batched in one call. Request order is preserved in results; batch budget cutoffs return per-item errors (not partial content) so re-request those items in a smaller batch."""
+    with _store() as _s:
+        return _s.read_code(items=items if isinstance(items, list) else [],
+                            max_lines_per_item=max_lines_per_item,
+                            max_total_chars=max_total_chars,
+                            context=context)
+
+
+@mcp.tool()
 def memory_project_shape() -> dict:
     """Lay of the land: indexed files, top modules by definition density, call/import edge totals."""
     with _store() as _s:

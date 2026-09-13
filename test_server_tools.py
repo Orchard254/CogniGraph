@@ -17,6 +17,7 @@ Hermeticity:
 
 import os
 import sys
+import hashlib
 
 import pytest
 
@@ -500,3 +501,235 @@ def test_import_is_side_effect_safe():
         if isinstance(value, MemoryStore)
     ]
     assert holders == []
+
+
+# ---------------------------------------------------------------------------
+# memory_read_code (scoped-line code reader)
+#
+# Tmp-DB layout note: real_db lives at tmp_path/"rt"/memory.db, so
+# read_code's project-root derivation (db grandparent, same as
+# _blast_unresolved) resolves to tmp_path itself — seed files land there.
+# ---------------------------------------------------------------------------
+
+
+def _rc_write(tmp_path, rel, text):
+    p = tmp_path / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def _rc_hash(text, ls, le):
+    lines = text.splitlines(keepends=True)
+    return hashlib.sha256("".join(lines[ls - 1:le]).encode("utf-8")).hexdigest()
+
+
+def _rc_seed(db, name, file_path, ls, le, node_type="function",
+             class_name="", code_hash=None,
+             last_seen="2026-09-11T00:00:00+00:00"):
+    seed = MemoryStore(db)
+    try:
+        seed.conn.execute(
+            "INSERT INTO structural_nodes (node_type, name, class_name, file_path, "
+            "line_start, line_end, language, code_hash, created_at, last_seen_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'python', ?, ?, ?)",
+            (node_type, name, class_name, file_path, ls, le,
+             code_hash, "2026-09-11T00:00:00+00:00", last_seen),
+        )
+        seed.conn.commit()
+    finally:
+        seed.close()
+
+
+def test_read_code_symbol_hit(real_db, tmp_path):
+    text = "import os\n\n\ndef probe_rc1():\n    a = 1\n    return a\n\n\nprint('t')\n"
+    _rc_write(tmp_path, "src/rc1.py", text)
+    _rc_seed(real_db, "probe_rc1", "src/rc1.py", 4, 6,
+             code_hash=_rc_hash(text, 4, 6))
+
+    out = server.memory_read_code([{"symbol": "probe_rc1"}])
+    assert len(out["results"]) == 1
+    r = out["results"][0]
+    assert r["ok"] is True
+    assert r["kind"] == "symbol"
+    assert r["file_path"] == "src/rc1.py"
+    assert r["requested_lines"] == [4, 6]
+    assert r["returned_lines"] == [4, 6]
+    assert r["truncated"] is False
+    assert r["stale"] is False
+    assert r["stale_reason"] is None
+    assert r["text"] == "def probe_rc1():\n    a = 1\n    return a\n"
+
+
+def test_read_code_ambiguous_union(real_db, tmp_path):
+    for rel in ("src/a_rc.py", "src/b_rc.py"):
+        text = "def dup_rc():\n    pass\n"
+        _rc_write(tmp_path, rel, text)
+        _rc_seed(real_db, "dup_rc", rel, 1, 2,
+                 last_seen="2999-01-01T00:00:00+00:00")
+
+    out = server.memory_read_code([{"symbol": "dup_rc"}])
+    assert len(out["results"]) == 2
+    assert sorted(r["file_path"] for r in out["results"]) == ["src/a_rc.py", "src/b_rc.py"]
+    assert all(r["ok"] and r["ambiguous"] is True for r in out["results"])
+    assert all(r["text"] == "def dup_rc():\n    pass\n" for r in out["results"])
+
+
+def test_read_code_explicit_range(real_db, tmp_path):
+    _rc_write(tmp_path, "src/range_rc.py", "".join(f"line{i}\n" for i in range(1, 11)))
+
+    out = server.memory_read_code(
+        [{"file_path": "src/range_rc.py", "line_start": 4, "line_end": 6}])
+    r = out["results"][0]
+    assert r["ok"] is True
+    assert r["kind"] == "range"
+    assert r["requested_lines"] == [4, 6]
+    assert r["returned_lines"] == [4, 6]
+    assert r["text"] == "line4\nline5\nline6\n"
+    # File has no indexed nodes: nothing to be stale against.
+    assert r["stale"] is False
+    assert r["stale_reason"] == "file_not_indexed"
+
+
+def test_read_code_truncation(real_db, tmp_path):
+    text = "".join(f"line{i}\n" for i in range(1, 11))
+    _rc_write(tmp_path, "src/big_rc.py", text)
+    _rc_seed(real_db, "big_rc", "src/big_rc.py", 1, 10,
+             code_hash=_rc_hash(text, 1, 10))
+
+    out = server.memory_read_code([{"symbol": "big_rc"}], max_lines_per_item=4)
+    r = out["results"][0]
+    assert r["ok"] is True
+    assert r["truncated"] is True
+    assert r["actual_lines"] == [1, 10]
+    assert r["returned_lines"] == [1, 4]
+    assert r["text"] == "line1\nline2\nline3\nline4\n"
+    # Hash is over the full span, so capping never fakes staleness.
+    assert r["stale"] is False
+
+
+def test_read_code_context_margin(real_db, tmp_path):
+    _rc_write(tmp_path, "src/ctx_rc.py", "".join(f"line{i}\n" for i in range(1, 11)))
+
+    out = server.memory_read_code(
+        [{"file_path": "src/ctx_rc.py", "line_start": 5, "line_end": 5, "context": 2}])
+    r = out["results"][0]
+    assert r["ok"] is True
+    assert r["requested_lines"] == [5, 5]
+    assert r["returned_lines"] == [3, 7]
+    assert r["text"] == "line3\nline4\nline5\nline6\nline7\n"
+
+
+def test_read_code_stale_hash_mismatch(real_db, tmp_path):
+    text = "def stale_rc():\n    return 1\n"
+    _rc_write(tmp_path, "src/stale_rc.py", text)
+    _rc_seed(real_db, "stale_rc", "src/stale_rc.py", 1, 2, code_hash="0" * 64)
+
+    out = server.memory_read_code([{"symbol": "stale_rc"}])
+    r = out["results"][0]
+    assert r["ok"] is True
+    assert r["text"] == text
+    assert r["stale"] is True
+    assert r["stale_reason"] == "snippet_hash_mismatch"
+
+
+def test_read_code_stale_mtime_fallback(real_db, tmp_path):
+    _rc_write(tmp_path, "src/old_rc.py", "a = 1\nb = 2\n")
+    _rc_seed(real_db, "old_fn_rc", "src/old_rc.py", 1, 2,
+             last_seen="2000-01-01T00:00:00+00:00")
+    _rc_write(tmp_path, "src/new_rc.py", "a = 1\nb = 2\n")
+    _rc_seed(real_db, "new_fn_rc", "src/new_rc.py", 1, 2,
+             last_seen="2999-01-01T00:00:00+00:00")
+
+    out = server.memory_read_code([
+        {"file_path": "src/old_rc.py", "line_start": 1, "line_end": 2},
+        {"file_path": "src/new_rc.py", "line_start": 1, "line_end": 2},
+    ])
+    old, new = out["results"]
+    assert old["ok"] and old["stale"] is True
+    assert old["stale_reason"] == "file_modified_since_sync"
+    assert new["ok"] and new["stale"] is False
+    assert new["stale_reason"] is None
+
+
+def test_read_code_batch_error_isolation(real_db, tmp_path):
+    text = "x = 1\ny = 2\n"
+    _rc_write(tmp_path, "src/iso_rc.py", text)
+    _rc_seed(real_db, "iso_rc", "src/iso_rc.py", 1, 2,
+             code_hash=_rc_hash(text, 1, 2))
+
+    out = server.memory_read_code([
+        {"symbol": "iso_rc"},
+        {"symbol": "no_such_rc_xyz"},
+        {"file_path": "src/iso_rc.py", "line_start": 2, "line_end": 2},
+    ])
+    assert [r["ok"] for r in out["results"]] == [True, False, True]
+    assert out["results"][1]["error"] == "symbol_not_found"
+    assert out["results"][2]["text"] == "y = 2\n"
+
+
+def test_read_code_total_budget(real_db, tmp_path):
+    _rc_write(tmp_path, "src/budget_rc.py", "".join("x" * 100 + "\n" for _ in range(10)))
+
+    out = server.memory_read_code([
+        {"file_path": "src/budget_rc.py", "line_start": 1, "line_end": 5},
+        {"file_path": "src/budget_rc.py", "line_start": 6, "line_end": 10},
+    ], max_total_chars=1000)
+    first, second = out["results"]
+    assert first["ok"] is True
+    assert len(first["text"]) == 505
+    assert second["ok"] is False
+    assert second["error"] == "total_budget_exceeded"
+    assert "text" not in second
+    assert out["total_chars"] == 505
+
+
+def test_read_code_invalid_spec(real_db):
+    out = server.memory_read_code([
+        {"symbol": "x", "file_path": "f.py", "line_start": 1, "line_end": 2},
+        {},
+    ])
+    assert [r["ok"] for r in out["results"]] == [False, False]
+    assert [r["error"] for r in out["results"]] == ["invalid_spec", "invalid_spec"]
+
+
+def test_read_code_invalid_range(real_db, tmp_path):
+    _rc_write(tmp_path, "src/range_rc.py", "a = 1\n")
+    out = server.memory_read_code(
+        [{"file_path": "src/range_rc.py", "line_start": "top", "line_end": 2}])
+    r = out["results"][0]
+    assert r["ok"] is False
+    assert r["error"] == "invalid_range"
+
+
+def test_read_code_path_escape_dotdot_and_absolute(real_db, tmp_path):
+    outside = os.path.abspath(os.path.join(str(tmp_path), "..", "..", "rc_escape_outside.py"))
+    out = server.memory_read_code([
+        {"file_path": "src/../../rc_escape.py", "line_start": 1, "line_end": 5},
+        {"file_path": outside, "line_start": 1, "line_end": 5},
+    ])
+    assert [r["ok"] for r in out["results"]] == [False, False]
+    assert [r["error"] for r in out["results"]] == ["path_escape", "path_escape"]
+
+
+def test_read_code_path_escape_symlink(real_db, tmp_path):
+    import tempfile
+    fd, target = tempfile.mkstemp(suffix="_rc_outside.py")
+    os.close(fd)
+    try:
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write("secret = 1\n")
+        link = str(tmp_path / "link_rc.py")
+        try:
+            os.symlink(target, link)
+        except OSError:
+            pytest.skip("symlinks unavailable on this platform")
+        out = server.memory_read_code(
+            [{"file_path": "link_rc.py", "line_start": 1, "line_end": 5}])
+        assert out["results"][0]["ok"] is False
+        assert out["results"][0]["error"] == "path_escape"
+    finally:
+        try:
+            os.unlink(target)
+        except OSError:
+            pass

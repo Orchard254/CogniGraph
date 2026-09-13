@@ -893,6 +893,289 @@ class StructuralMixin:
                     estimate += gap
         return estimate, skipped
 
+    # ------------------------------------------------------------------
+    # Scoped-line code reader: symbol-or-range batch reads of live disk text.
+    # ------------------------------------------------------------------
+
+    _READ_KNOWN_LIMITATIONS = [
+        "text is read live from disk but line numbers come from the last "
+        "watcher sync — a stale:true flag means the indexed range may have "
+        "shifted since it was recorded",
+        "symbol ranges are definition spans from the structural index; "
+        "decorators or comments above the def line are not included",
+    ]
+
+    def _read_project_root(self, project_root: Optional[str]) -> Optional[str]:
+        """Derive the containment root the same way _blast_unresolved does."""
+        if project_root:
+            return project_root
+        try:
+            root = Path(getattr(self, "db_path", "") or "").resolve().parent.parent
+            return str(root) if root.is_dir() else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _read_contained_path(file_path: str, project_root: str) -> Optional[Path]:
+        """Resolve file_path under project_root; None when it escapes.
+
+        Containment is checked AFTER resolve(), so ".." segments,
+        absolute-path injection, and symlinks pointing outside the root are
+        all rejected before any read happens.
+        """
+        try:
+            clean = (file_path or "").strip().replace("\\", "/")
+            if not clean:
+                return None
+            root = Path(project_root).resolve()
+            candidate = (root / clean).resolve()
+            candidate.relative_to(root)
+            return candidate
+        except Exception:
+            return None
+
+    @staticmethod
+    def _read_last_seen_ts(value: Any) -> Optional[float]:
+        try:
+            dt = datetime.datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+        try:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    def read_code(self, items: Optional[List[Dict[str, Any]]] = None,
+                  max_lines_per_item: int = 200,
+                  max_total_chars: int = 24000,
+                  context: int = 0,
+                  project_root: Optional[str] = None) -> Dict[str, Any]:
+        """BATCHED SCOPED-LINE READER: definition bodies or explicit ranges.
+
+        Each item addresses text exactly one way: {"symbol": ...} with
+        optional class_name/file_path scoping (same disambiguation as
+        who_calls/blast_radius — an ambiguous bare name returns one entry
+        per matched definition with ambiguous=True), or
+        {"file_path":..., "line_start":..., "line_end":...} for an arbitrary
+        1-indexed inclusive range. The context margin (default 0, clamp
+        0..10) expands explicit ranges only and is ignored for symbols.
+
+        Request order is preserved in results. Over-long symbols are cut at
+        max_lines_per_item (default 200, clamp 1..500) with truncated=True
+        and the full span in actual_lines. Items that would exceed the
+        running max_total_chars budget (default 24000, clamp 1k..64k)
+        return a per-item total_budget_exceeded error — never partial or
+        shortened text — so the caller re-requests them in a smaller batch.
+        Every failure (bad spec, unknown symbol, path escape, missing file)
+        is an in-band per-item error; one bad item never fails the batch.
+        """
+        try:
+            max_lines = int(max_lines_per_item)
+        except (TypeError, ValueError):
+            max_lines = 200
+        max_lines = max(1, min(500, max_lines))
+        try:
+            budget = int(max_total_chars)
+        except (TypeError, ValueError):
+            budget = 24000
+        budget = max(1000, min(64000, budget))
+        try:
+            default_ctx = int(context)
+        except (TypeError, ValueError):
+            default_ctx = 0
+        default_ctx = max(0, min(10, default_ctx))
+
+        root = self._read_project_root(project_root)
+        seq = items if isinstance(items, list) else []
+        results: List[Dict[str, Any]] = []
+        total_chars = 0
+
+        def _stale_by_mtime(disk: Path, clean: str) -> Tuple[bool, Optional[str]]:
+            try:
+                mtime = disk.stat().st_mtime
+            except OSError:
+                return False, "staleness_unknown"
+            try:
+                row = self.conn.execute(
+                    "SELECT last_seen_at FROM structural_nodes "
+                    "WHERE file_path = ? ORDER BY last_seen_at DESC LIMIT 1",
+                    (clean,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                return False, "staleness_unknown"
+            if row is None:
+                return False, "file_not_indexed"
+            ts = self._read_last_seen_ts(row["last_seen_at"])
+            if ts is None:
+                return False, "staleness_unknown"
+            if mtime > ts:
+                return True, "file_modified_since_sync"
+            return False, None
+
+        def _emit(kind: str, clean: str, want_lo: int, want_hi: int,
+                  actual: List[int], requested: List[int],
+                  symbol: Optional[str] = None,
+                  ambiguous: bool = False,
+                  stored_hash: Optional[str] = None) -> None:
+            nonlocal total_chars
+            base: Dict[str, Any] = {"kind": kind, "file_path": clean}
+            if symbol is not None:
+                base["symbol"] = symbol
+                base["ambiguous"] = ambiguous
+            if root is None:
+                results.append({**base, "ok": False,
+                                "error": "project_root_unavailable",
+                                "message": "project root unavailable — cannot "
+                                           "resolve file paths safely"})
+                return
+            disk = self._read_contained_path(clean, root)
+            if disk is None:
+                results.append({**base, "ok": False, "error": "path_escape",
+                                "message": f"{clean} escapes the project root "
+                                           "and was not read"})
+                return
+            if not disk.is_file():
+                results.append({**base, "ok": False, "error": "file_not_found",
+                                "message": f"{clean} does not exist on disk"})
+                return
+            try:
+                disk_lines = disk.read_text(encoding="utf-8",
+                                            errors="replace").splitlines(keepends=True)
+            except OSError:
+                results.append({**base, "ok": False, "error": "unreadable",
+                                "message": f"{clean} could not be read"})
+                return
+            n = len(disk_lines)
+            lo = max(1, min(want_lo, want_hi))
+            hi = min(n, max(want_lo, want_hi))
+            if stored_hash:
+                full = "".join(disk_lines[max(0, actual[0] - 1):min(n, actual[1])])
+                digest = hashlib.sha256(full.encode("utf-8")).hexdigest()
+                stale = digest != stored_hash
+                reason = None if not stale else "snippet_hash_mismatch"
+            else:
+                stale, reason = _stale_by_mtime(disk, clean)
+            span = max(0, hi - lo + 1) if n else 0
+            truncated = span > max_lines
+            if truncated:
+                hi = lo + max_lines - 1
+            text = "".join(disk_lines[lo - 1:hi]) if n and hi >= lo else ""
+            if len(text) + total_chars > budget and text:
+                results.append({**base, "ok": False,
+                                "error": "total_budget_exceeded",
+                                "requested_lines": requested,
+                                "message": "batch character budget exceeded — "
+                                           "re-request this item in a smaller batch"})
+                return
+            total_chars += len(text)
+            results.append({**base, "ok": True, "requested_lines": requested,
+                            "returned_lines": [lo, hi] if text or n else [],
+                            "actual_lines": actual, "truncated": truncated,
+                            "stale": stale, "stale_reason": reason,
+                            "text": text})
+
+        for raw in seq:
+            if not isinstance(raw, dict):
+                results.append({"ok": False, "kind": "unknown",
+                                "error": "invalid_spec",
+                                "message": "each item must be an object with "
+                                           "either symbol or file_path+line range"})
+                continue
+            sym_raw = raw.get("symbol")
+            symbol_given = isinstance(sym_raw, str) and sym_raw.strip() != ""
+            if ("symbol" in raw and sym_raw is not None
+                    and not isinstance(sym_raw, str)):
+                results.append({"ok": False, "kind": "unknown",
+                                "error": "invalid_spec",
+                                "message": "symbol must be a non-empty string"})
+                continue
+            has_line_keys = "line_start" in raw or "line_end" in raw
+            if symbol_given and has_line_keys:
+                results.append({"ok": False, "kind": "symbol",
+                                "symbol": sym_raw.strip(),
+                                "error": "invalid_spec",
+                                "message": "specify either symbol OR "
+                                           "file_path+line_start+line_end, not both"})
+                continue
+            if symbol_given:
+                symbol = sym_raw.strip()
+                scope_cls = str(raw.get("class_name") or "").strip()
+                scope_file = str(raw.get("file_path") or "").strip().replace("\\", "/")
+                if "." in symbol and not scope_cls:
+                    cls, name = symbol.split(".", 1)
+                    targets = self.conn.execute(
+                        "SELECT id, node_type, name, class_name, file_path, "
+                        "line_start, line_end, code_hash, last_seen_at "
+                        "FROM structural_nodes WHERE name = ? AND class_name = ?",
+                        (name, cls),
+                    ).fetchall()
+                else:
+                    name = symbol.rsplit(".", 1)[-1] if "." in symbol else symbol
+                    if scope_cls:
+                        targets = self.conn.execute(
+                            "SELECT id, node_type, name, class_name, file_path, "
+                            "line_start, line_end, code_hash, last_seen_at "
+                            "FROM structural_nodes WHERE name = ? AND class_name = ?",
+                            (name, scope_cls),
+                        ).fetchall()
+                    else:
+                        targets = self.conn.execute(
+                            "SELECT id, node_type, name, class_name, file_path, "
+                            "line_start, line_end, code_hash, last_seen_at "
+                            "FROM structural_nodes WHERE name = ?",
+                            (name,),
+                        ).fetchall()
+                targets = [t for t in targets if t["node_type"] != "module_ref"]
+                if scope_file:
+                    targets = [t for t in targets if t["file_path"] == scope_file]
+                if not targets:
+                    results.append({"ok": False, "kind": "symbol", "symbol": symbol,
+                                    "error": "symbol_not_found",
+                                    "message": f"no indexed definition for {symbol!r}"})
+                    continue
+                ambiguous = len(targets) > 1
+                for t in targets:
+                    ls, le = t["line_start"], t["line_end"]
+                    _emit("symbol", t["file_path"], ls, le, [ls, le], [ls, le],
+                          symbol=symbol, ambiguous=ambiguous,
+                          stored_hash=t["code_hash"])
+                continue
+            fp_raw = raw.get("file_path")
+            if "line_start" not in raw or "line_end" not in raw:
+                results.append({"ok": False, "kind": "unknown",
+                                "error": "invalid_spec",
+                                "message": "specify either symbol OR "
+                                           "file_path+line_start+line_end"})
+                continue
+            if not isinstance(fp_raw, str) or not fp_raw.strip():
+                results.append({"ok": False, "kind": "range",
+                                "error": "invalid_spec",
+                                "message": "explicit range needs file_path as a "
+                                           "non-empty string"})
+                continue
+            try:
+                rs, re_ = int(raw["line_start"]), int(raw["line_end"])
+            except (TypeError, ValueError):
+                results.append({"ok": False, "kind": "range",
+                                "file_path": fp_raw.strip().replace("\\", "/"),
+                                "error": "invalid_range",
+                                "message": "line_start/line_end must be integers"})
+                continue
+            try:
+                ctx = int(raw.get("context", default_ctx))
+            except (TypeError, ValueError):
+                ctx = default_ctx
+            ctx = max(0, min(10, ctx))
+            clean = fp_raw.strip().replace("\\", "/")
+            elo, ehi = min(rs, re_) - ctx, max(rs, re_) + ctx
+            _emit("range", clean, elo, ehi, [max(1, elo), ehi], [rs, re_])
+
+        return {"results": results, "total_chars": total_chars,
+                "max_total_chars": budget, "max_lines_per_item": max_lines,
+                "known_limitations": list(self._READ_KNOWN_LIMITATIONS)}
+
     def project_shape(self) -> str:
         """Compact orientation briefing: indexed file inventory and code-graph size."""
         try:
