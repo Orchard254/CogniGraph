@@ -83,6 +83,17 @@ jobs:
           fi
         shell: bash
 
+      # Watchdog is a separate optional extra (pyproject [watchdog]), NOT in
+      # [dev], so without this the test_watcher.py module-level importorskip
+      # skips the ENTIRE watcher module on Linux CI. Scoped to exactly one
+      # Ubuntu leg (3.12/Node 20) so the real inotify observer backend gets
+      # exercised on Linux; all other legs intentionally stay watchdog-free
+      # (polling-fallback coverage).
+      - name: Install watchdog extra (Ubuntu Py3.12/Node20 leg only)
+        if: runner.os == 'Linux' && matrix.python-version == '3.12' && matrix.node-version == '20'
+        run: venv/bin/pip install -e ".[watchdog]"
+        shell: bash
+
       - name: Lint with Ruff
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
