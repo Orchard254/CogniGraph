@@ -85,8 +85,8 @@ question is the mistake this section exists to prevent.
 
 | split   | pairs | recall@5 | recall@10 | MRR    |
 |---------|-------|----------|-----------|--------|
-| tuning  | 36    | 0.8333   | 0.9444    | 0.5672 |
-| holdout | 16    | 0.7500   | 1.0000    | 0.5298 |
+| tuning  | 36    | 0.9167   | 0.9444    | 0.5796 |
+| holdout | 16    | 0.75     | 1.0       | 0.561  |
 
 These measure the frozen artifact (precomputed query vectors) rather than
 the live model's query encoding, so they differ from the live-DB numbers
