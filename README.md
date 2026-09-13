@@ -121,7 +121,7 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 14 tools.
+The server registers 15 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -129,14 +129,15 @@ The server registers 14 tools.
 | `memory_write_batch` | `facts` | Atomic batch form of memory_write for several related facts. |
 | `memory_query` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?` | Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have. |
 | `memory_get_context` | `query`, `agent_type?`, `max_tokens?`, `limit?`, `intent?` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. |
-| `memory_get_file_context` | `file_path` | Call BEFORE editing a file: its symbols, anchored facts, callers, and call-graph edges. |
+| `memory_get_file_context` | `file_path` | Call while planning an approach to a file — and before editing it: its symbols, anchored facts, callers, and call-graph edges. |
 | `memory_check_safety` | `file_paths` | Call before a multi-file refactor: dependency risk matrix across the files you're about to change. |
 | `memory_supersede` | `old_id`, `new_content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `expected_version?` | Replace an outdated fact with corrected content. Use when you discover memory that is wrong. |
 | `memory_deprecate` | `id`, `reason?` | Mark a fact obsolete without replacement. |
 | `memory_stats` | — | Memory health: active/deprecated counts, category breakdown, edges. Call at session start per AGENTS.md. |
 | `memory_prepare_task` | `intent`, `file_paths?`, `limit?` | REQUIRED before writing or modifying any code in this repository. Returns the task briefing: relevant decisions, constraints, component facts, file-level impacts, cross-file dependency risks, and the current verified test baseline. |
 | `memory_checkpoint_task` | `summary`, `components?`, `decisions?`, `test_baseline?`, `failures?` | Call immediately after a task is verified complete (tests green). Records new components, decisions, the test baseline, and failed approaches as durable memory for future sessions. |
-| `memory_who_calls` | `symbol` | Where a symbol is defined, every call site, and importing files. Call before renaming or changing a signature. |
+| `memory_who_calls` | `symbol` | Where a symbol is defined, every call site, and importing files. Ask mid-reasoning while planning an approach — and before renaming or changing a signature. |
+| `memory_blast_radius` | `symbol`, `class_name?`, `file_path?`, `max_depth?`, `direction?`, `file_detail?`, `max_symbols_per_file?` | Transitive blast radius: who depends on this symbol, transitively. Call while planning an approach or estimating effort, before making changes — not just as a pre-edit gate. |
 | `memory_project_shape` | — | Lay of the land: indexed files, top modules by definition density, call/import edge totals. |
 | `memory_flag_fact` | `fact_id`, `note?`, `flag_type?` | Flag a fact as misleading or unverified so future briefings carry a warning. Use when memory looks wrong but you lack the correction. |
 <!-- tool-table:end -->
