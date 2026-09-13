@@ -667,8 +667,7 @@ class StructuralMixin:
         file_detail=<file> for that file's full uncapped symbol/line detail.
         """
         known_limitations = [
-            "recall is not complete for indirect/dynamic calls, decorators, "
-            "and JS arrow functions",
+            "recall is not complete for indirect/dynamic calls and decorators",
             "edges reflect the last watcher sync — counts and "
             "unresolved_estimate may be temporarily incomplete immediately "
             "after bulk edits until the watcher converges",

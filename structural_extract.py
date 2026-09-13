@@ -504,6 +504,28 @@ def _extract_js(file_path: Path):
                 walk(ch, current_class=None, scope_item=item)
             return
 
+        # --- Arrow function assigned to variable (const foo = () => ...) ---
+        elif node.type == "variable_declarator":
+            for c in node.children:
+                if c.type == "arrow_function":
+                    name_node = None
+                    for ch in node.children:
+                        if ch.type == "identifier":
+                            name_node = ch
+                            break
+                    name = _node_text(name_node) if name_node else "unknown>"
+                    item = {
+                        "type": "function",
+                        "name": name,
+                        "file_path": str(file_path),
+                        "line_start": _line_1(node),
+                        "line_end": _line_end_1(node),
+                    }
+                    items.append(item)
+                    for ch in c.children:
+                        walk(ch, current_class=None, scope_item=item)
+                    return
+
         # --- Method definitions inside class ---
         elif node.type == "method_definition":
             name_node = None

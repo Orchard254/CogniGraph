@@ -1172,6 +1172,60 @@ class TestJsTsCallCapture:
         assert 'wire agent config writer' in briefing
 
 
+class TestJsArrowCapture:
+    def test_js_arrow_function_extracted(self, tmp_path):
+        pytest.importorskip('tree_sitter_javascript')
+        from structural_extract import extract_structures
+        f = tmp_path / 'svc.js'
+        f.write_text(
+            "function helper(x) { return x; }\n"
+            "const doubled = (x) => helper(x);\n"
+            "let plain = (a, b) => a + b;\n"
+            "var block = () => { helper(1); helper(2); }\n"
+        )
+        items = extract_structures(f)
+        by_name = {i['name']: i for i in items if i['type'] == 'function'}
+        assert 'doubled' in by_name, "JS const arrow must be extracted as function"
+        assert 'plain' in by_name, "JS let arrow must be extracted"
+        assert 'block' in by_name, "JS var arrow must be extracted"
+        assert 'helper' in by_name['doubled'].get('calls', []), \
+            "arrow function body calls must be captured"
+        assert by_name['block'].get('call_sites', {}).get('helper') == [4], \
+            "call_sites dedup within same definition body at one line; multi call same line dedups"
+
+    def test_js_arrow_require_not_misclassified(self, tmp_path, temp_store):
+        pytest.importorskip('tree_sitter_javascript')
+        from structural_extract import extract_structures
+        f = tmp_path / 'svc.js'
+        f.write_text("const foo = () => require('x');\n")
+        items = extract_structures(f)
+        # foo is a function, not an import; require inside arrow body is not a top-level import
+        names = [(i['type'], i['name']) for i in items]
+        assert ('function', 'foo') in names, "arrow with require body must be a function"
+        assert not any(t == 'import' and 'x' in n for t, n in names), \
+            "require inside arrow body must not be misclassified as import"
+        # Also verify non-arrow require still becomes import
+        f2 = tmp_path / 'svc2.js'
+        f2.write_text("const m = require('y');\n")
+        items2 = extract_structures(f2)
+        assert any(i['type'] == 'import' for i in items2), "bare require still imports"
+
+    def test_js_arrow_who_calls_resolves(self, tmp_path, temp_store):
+        pytest.importorskip('tree_sitter_javascript')
+        from structural_extract import extract_structures
+        (tmp_path / 'a.js').write_text(
+            "const doubled = (x) => helper(x);\n"
+            "function helper(x) { return x; }\n"
+        )
+        for name in ('a.js',):
+            nodes = extract_structures(tmp_path / name)
+            temp_store.sync_structural_nodes(name, nodes, project_root=str(tmp_path))
+        r = temp_store.who_calls('helper')
+        assert r['found'] and any(c['name'] == 'doubled' for c in r['callers']), \
+            "who_calls must resolve callers that are JS arrow functions"
+        assert any(c.get('call_lines') == [1] for c in r['callers'] if c['name'] == 'doubled')
+
+
 # ============================================================
 # Sync Exclusion Tests (provenance artifacts never indexed)
 # ============================================================
