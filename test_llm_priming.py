@@ -281,6 +281,64 @@ class TestStructuralStubExclusion:
 
 
 # ============================================================
+# Write-Time Stub-Link Exclusion Tests
+# ============================================================
+
+class TestStubLinkWriteExclusion:
+    def test_link_creation_skips_stub_but_links_curated_fact(self, temp_store):
+        """link_facts_to_structural_nodes must create zero links for a
+        whole-file stub while still linking a curated fact in the same file
+        (write-time companion to the query-time _structural_scores filter)."""
+        stub_id = temp_store.write(category="other",
+            content="Source file: svc.py (python, 50 lines, hash abc12345)",
+            file_path="svc.py", line_start=1, line_end=50,
+            tags="bootstrap, file", importance=2, embed=False, force=True)
+        curated_id = temp_store.write(category="component",
+            content="Helper retries the queue with backoff",
+            file_path="svc.py", line_start=5, line_end=12,
+            tags="svc", importance=3, embed=False, force=True)
+        now = "2026-09-13T00:00:00+00:00"
+        temp_store.conn.execute(
+            "INSERT INTO structural_nodes (node_type, name, class_name, file_path,"
+            " line_start, line_end, created_at, last_seen_at)"
+            " VALUES ('function','helper','','svc.py',5,12,?,?)", (now, now))
+        result = temp_store.link_facts_to_structural_nodes("svc.py")
+        stub_links = temp_store.conn.execute(
+            "SELECT COUNT(*) c FROM fact_node_links WHERE fact_id=?",
+            (stub_id,)).fetchone()["c"]
+        curated_links = temp_store.conn.execute(
+            "SELECT COUNT(*) c FROM fact_node_links WHERE fact_id=?",
+            (curated_id,)).fetchone()["c"]
+        assert stub_links == 0
+        assert curated_links == 1
+        assert result["linked"] == 1
+
+    def test_link_creation_skips_all_stub_prefixes(self, temp_store):
+        """Every corpus_hygiene.STUB_PREFIXES variant is skipped at link
+        creation (full-relink path, no scope filter)."""
+        from corpus_hygiene import STUB_PREFIXES
+        now = "2026-09-13T00:00:00+00:00"
+        temp_store.conn.execute(
+            "INSERT INTO structural_nodes (node_type, name, class_name, file_path,"
+            " line_start, line_end, created_at, last_seen_at)"
+            " VALUES ('function','helper','','svc.py',5,12,?,?)", (now, now))
+        stub_ids = []
+        for i, prefix in enumerate(STUB_PREFIXES):
+            fid = temp_store.write(category="other", content=f"{prefix} stub-{i}",
+                file_path="svc.py", line_start=1, line_end=50,
+                embed=False, force=True)
+            assert fid > 0
+            stub_ids.append(fid)
+        result = temp_store.link_facts_to_structural_nodes()
+        placeholders = ",".join("?" * len(stub_ids))
+        n = temp_store.conn.execute(
+            f"SELECT COUNT(*) c FROM fact_node_links WHERE fact_id IN ({placeholders})",
+            stub_ids).fetchone()["c"]
+        assert n == 0
+        assert result["linked"] == 0
+
+
+# ============================================================
 # Structural Briefing Tests
 # ============================================================
 

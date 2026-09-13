@@ -8,6 +8,8 @@ import hashlib
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
+from corpus_hygiene import STUB_PREFIXES
+
 logger = logging.getLogger(__name__)
 
 
@@ -1233,6 +1235,9 @@ class StructuralMixin:
         
         A single fact CAN link to multiple nodes (e.g. a fact about a method may also
         overlap its enclosing class) — this is intentional.
+
+        Whole-file template stubs (corpus_hygiene.STUB_PREFIXES) are excluded
+        from link creation: they carry no node-level signal.
         
         Returns:
             dict with keys: linked (new links created), skipped (already existed), scope_file
@@ -1243,12 +1248,24 @@ class StructuralMixin:
             scope_file = file_path.strip().replace("\\", "/")
         
         # Build WHERE clause for scoping
-        where_clauses = ["m.deprecated_at IS NULL", "m.file_path IS NOT NULL", 
-                         "m.line_start IS NOT NULL", "m.line_end IS NOT NULL"]
+        where_clauses = ["m.deprecated_at IS NULL", "m.file_path IS NOT NULL",
+                          "m.line_start IS NOT NULL", "m.line_end IS NOT NULL"]
         params = []
         if scope_file:
             where_clauses.append("m.file_path = ?")
             params.append(scope_file)
+        # Stub exclusion: whole-file template stubs ("Source file:", "Key file:",
+        # "Directory '") carry no node-level signal but their line ranges overlap
+        # every node in their file. Skip them at link-creation time so the rows
+        # are never written (query-time filtering in _structural_scores remains
+        # as defense-in-depth for legacy rows). Prefixes are the single source
+        # of truth (tags are unreliable: stubs with tags=None and junk-tagged
+        # non-stubs both exist; link_reason can't filter since legitimate
+        # facts also link with reason 'overlap').
+        where_clauses.append(
+            " AND ".join("m.content NOT LIKE ?" for _ in STUB_PREFIXES)
+        )
+        params.extend(f"{p}%" for p in STUB_PREFIXES)
         
         fact_where = " AND ".join(where_clauses)
         
