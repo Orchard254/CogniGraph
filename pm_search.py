@@ -5,6 +5,7 @@ import re
 import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
+from corpus_hygiene import STUB_PREFIXES
 from pm_common import (
     logger, tokenize_text, MAX_LIMIT,
     _encode, _blob_to_vec, _cosine_sim, _vec_to_blob,
@@ -379,7 +380,10 @@ class SearchMixin:
         - For methods, also match against "class_name.name" composite (e.g., "MemoryStore.query_hybrid")
         
         Only includes facts that are currently active (deprecated_at IS NULL), verified
-        at query time via fact_node_links join.
+        at query time via fact_node_links join. Whole-file template stubs
+        ("Source file:", "Key file:", "Directory '") are excluded via
+        corpus_hygiene.STUB_PREFIXES: their line_start=1 ranges overlap every
+        node in their file, so without this filter they drown the lane.
         """
         query_tokens = tokenize_text(text)
         if not query_tokens:
@@ -398,6 +402,14 @@ class SearchMixin:
         if session_id:
             fact_filters.append("m.session_id = ?")
             fact_params.append(session_id)
+        # Stub exclusion: template file-inventory facts carry no node-level
+        # signal but link to every node in their file. Prefixes are the single
+        # source of truth (tags are unreliable: stubs with tags=None and
+        # junk-tagged non-stubs both exist).
+        fact_filters.append(
+            " AND ".join("m.content NOT LIKE ?" for _ in STUB_PREFIXES)
+        )
+        fact_params.extend(f"{p}%" for p in STUB_PREFIXES)
         fact_where = " AND ".join(fact_filters)
 
         # Fetch all structural nodes (full scan). A bounded scan here would be
@@ -697,10 +709,12 @@ class SearchMixin:
         lane_w = AGENT_LANE_WEIGHTS.get(agent_type, AGENT_LANE_WEIGHTS["default"])
 
         # --- Lane 4: Structural (memory-only) ---
-        # The default struct weight is 0: the lane's output is ~97% whole-file
-        # stub facts, so it contributes nothing to fusion. A zero weight skips
+        # The default struct weight is 0: the lane contributes nothing to
+        # fusion (stub-excluded sweep: w=0.1 bit-identical to baseline,
+        # w>=0.2 loses recall@5). A zero weight skips
         # the full-table scan entirely rather than computing scores only to
-        # multiply them by zero. Non-zero agent weights (e.g. cursor) still scan.
+        # multiply them by zero. Non-zero agent weights (e.g. cursor) still
+        # scan; their lane output is stub-excluded (see _structural_scores).
         struct_top = (
             self._structural_scores(text, category=category, tag=tag, session_id=session_id)
             if lane_w["struct"] != 0 else []

@@ -230,6 +230,57 @@ class TestIntentAwareRanking:
 
 
 # ============================================================
+# Structural Lane Stub-Exclusion Tests
+# ============================================================
+
+class TestStructuralStubExclusion:
+    def _seed_node(self, store):
+        now = "2026-09-13T00:00:00+00:00"
+        store.conn.execute(
+            "INSERT INTO structural_nodes (node_type, name, class_name, file_path,"
+            " line_start, line_end, created_at, last_seen_at)"
+            " VALUES ('function','helper','','svc.py',5,12,?,?)", (now, now))
+        return store.conn.execute(
+            "SELECT id FROM structural_nodes WHERE file_path='svc.py'").fetchone()["id"]
+
+    def test_structural_scores_excludes_whole_file_stub(self, temp_store):
+        """A whole-file 'Source file:' stub linked to a matching node must not
+        surface from the structural lane; a curated fact on the same node must."""
+        stub_id = temp_store.write(category="other",
+            content="Source file: svc.py (python, 50 lines, hash abc12345)",
+            file_path="svc.py", line_start=1, line_end=50,
+            tags="bootstrap, file", importance=2, embed=False, force=True)
+        curated_id = temp_store.write(category="component",
+            content="Helper retries the queue with backoff",
+            file_path="svc.py", line_start=5, line_end=12,
+            tags="svc", importance=3, embed=False, force=True)
+        self._seed_node(temp_store)
+        temp_store.link_facts_to_structural_nodes("svc.py")
+        scored = dict(temp_store._structural_scores("helper"))
+        assert curated_id in scored
+        assert stub_id not in scored
+
+    def test_structural_scores_excludes_all_stub_prefixes(self, temp_store):
+        """Every corpus_hygiene.STUB_PREFIXES variant is filtered, not just
+        'Source file:' (links inserted directly to isolate the join filter)."""
+        from corpus_hygiene import STUB_PREFIXES
+        node_id = self._seed_node(temp_store)
+        now = "2026-09-13T00:00:00+00:00"
+        stub_ids = []
+        for i, prefix in enumerate(STUB_PREFIXES):
+            fid = temp_store.write(category="other", content=f"{prefix} stub-{i}",
+                embed=False, force=True)
+            assert fid > 0
+            stub_ids.append(fid)
+            temp_store.conn.execute(
+                "INSERT INTO fact_node_links (fact_id, node_id, link_reason, created_at)"
+                " VALUES (?,?,?,?)", (fid, node_id, "overlap", now))
+        scored = dict(temp_store._structural_scores("helper"))
+        for fid in stub_ids:
+            assert fid not in scored
+
+
+# ============================================================
 # Structural Briefing Tests
 # ============================================================
 
