@@ -54,6 +54,33 @@ A PR that changes retrieval without refreshing the fixture cannot merge —
 either the change is a regression, or the author is silently moving the
 baseline. Both are exactly what the gate exists to catch.
 
+## Fixture vs. live drift (policy)
+
+The fixture is a fixed regression yardstick, not a live mirror. It is NOT
+expected to track live corpus growth: as new facts are curated, they
+legitimately outrank older golden facts on live topics, so live-DB numbers
+drift away from the frozen baseline over time. That gap is normal and is
+not itself a bug — it is the fixture holding history still while the
+corpus moves on.
+
+Re-freezing happens only when retrieval CODE changes (the process above) —
+never just because live data grew, and on no routine schedule. Do not run
+`scripts/freeze_eval_fixture.py` to "catch up" with the live corpus: a
+fresh freeze bakes current live rankings into the new baseline and can
+quietly weaken the merge-blocking gate (e.g. a holdout recall@5 drop
+frozen in as the new normal). Corpus growth alone must never fail a PR,
+and must never trigger a re-freeze.
+
+If instead you want to know current live retrieval quality — a diagnostic
+question, not a regression test — that is a separate exercise from
+`scripts/eval_gate.py`. Run a one-off, uncommitted live eval, e.g.
+`python eval/eval_golden.py --golden eval/golden_tuning.json --runs 1`
+(no `--db` means the live DB, snapshotted read-only to a temp copy; the
+live DB is never written and nothing is committed). Compare informally
+against the baseline below, but never re-freeze on the basis of what you
+see — reaching for `freeze_eval_fixture.py` to answer a live-quality
+question is the mistake this section exists to prevent.
+
 ## Current committed baseline (k=5, pinned 2026-09-11)
 
 | split   | pairs | recall@5 | recall@10 | MRR    |
