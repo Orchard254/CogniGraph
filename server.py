@@ -348,6 +348,15 @@ def memory_check_safety(file_paths: List[str]) -> dict:
 
 
 @mcp.tool()
+def memory_check_hygiene(project_root: str = "") -> dict:
+    """Commit/push-discipline status for the working tree: cleanliness, ahead/behind, stale branches. Local git only, read-only; no CI correlation in v1."""
+    # Deliberately no _ensure_first_time_setup: a read-only status probe must
+    # never trigger bootstrap writes (AGENTS.md / hook install).
+    with _store() as _s:
+        return _s.check_hygiene(project_root or None)
+
+
+@mcp.tool()
 def memory_supersede(old_id: int, new_content: str, rationale: str = "",
                       confidence: str = "assumed", session_id: str = "",
                       file_path: str = "", tags: str = "", expected_version: int = 0) -> dict:

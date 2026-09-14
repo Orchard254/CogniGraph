@@ -2,6 +2,7 @@
 import datetime
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -10,6 +11,29 @@ from pm_common import (
     _vec_to_blob, _get_embed_model,
     _EMBED_MODEL_NAME, _SEMANTIC_AVAILABLE, np,
 )
+
+
+def _run_git(root: Path, *args: str):
+    """Run one read-only git probe. Returns (stdout, error_kind).
+
+    error_kind is None on success, "no_git" when the git binary is missing,
+    "git_error" for any other failure (not a repo, no upstream, timeout).
+    stdin=DEVNULL plus a 15s timeout per the repo subprocess convention, so a
+    probe can never stall on an inherited MCP stdio pipe.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), *args],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15, check=False,
+        )
+    except FileNotFoundError:
+        return None, "no_git"
+    except (subprocess.TimeoutExpired, OSError):
+        return None, "git_error"
+    if proc.returncode != 0:
+        return None, "git_error"
+    return proc.stdout, None
 
 
 class LifecycleMixin:
@@ -166,6 +190,152 @@ class LifecycleMixin:
             "cross_dependencies": cross_dependencies,
             "briefings": file_briefings,
         }
+
+    def check_hygiene(self, project_root: Optional[str] = None,
+                      max_dirty_files: int = 20) -> Dict[str, Any]:
+        """Commit/push-discipline status for the working tree (local git only).
+
+        Read-only planning aid for the finalizing phase: working-tree
+        cleanliness, ahead/behind vs. the tracked upstream branch, and stale
+        branches whose upstream is gone. Never raises for git conditions —
+        every unavailable signal is reported as a value plus a reason in
+        limitations[] (same honest-limitations contract as blast_radius).
+
+        All probes are read-only (status, rev-parse, rev-list --count,
+        branch -vv) with stdin=DEVNULL and a 15s timeout, per the repo's
+        subprocess convention. v1 deliberately attempts no CI-status
+        correlation (needs the GitHub API plus a token — out of scope).
+
+        project_root defaults to the process CWD, which is correct under the
+        MCP server. Tests MUST pass an explicit scratch root: under pytest the
+        CWD is the real repo, so a bare call would probe live state instead
+        of the fixture (cf. the episodic #84 wrong-directory precedent).
+        """
+        limitations = [
+            "CI-status correlation is not attempted in v1: matching HEAD to "
+            "a green CI run needs the GitHub API plus a token (out of scope "
+            "for this local-git-only tool).",
+        ]
+        try:
+            cap = int(max_dirty_files)
+        except (TypeError, ValueError):
+            cap = 20
+        cap = max(1, min(cap, 200))
+
+        root = Path(project_root) if project_root else Path.cwd()
+        base: Dict[str, Any] = {
+            "status": "NOT_A_REPO",
+            "project_root": str(root),
+            "branch": None,
+            "detached": False,
+            "head": None,
+            "upstream": None,
+            "ahead": 0,
+            "behind": 0,
+            "dirty_files": [],
+            "dirty_total": 0,
+            "dirty_truncated": False,
+            "untracked_count": 0,
+            "stale_branches": [],
+            "limitations": limitations,
+        }
+        if not root.exists():
+            limitations.append(f"project root does not exist: {root}")
+            return base
+
+        _, err = _run_git(root, "rev-parse", "--git-dir")
+        if err == "no_git":
+            base["status"] = "GIT_UNAVAILABLE"
+            limitations.append("git binary not found on PATH")
+            return base
+        if err:
+            limitations.append("not a git repository (rev-parse --git-dir failed)")
+            return base
+
+        head_out, _ = _run_git(root, "rev-parse", "HEAD")
+        if head_out:
+            base["head"] = head_out.strip()
+        else:
+            limitations.append("no commits yet (empty repository)")
+
+        branch_out, _ = _run_git(root, "rev-parse", "--abbrev-ref", "HEAD")
+        if branch_out:
+            base["branch"] = branch_out.strip()
+            base["detached"] = base["branch"] == "HEAD"
+            if base["detached"]:
+                limitations.append("detached HEAD: branch comparisons use HEAD directly")
+
+        upstream_out, _ = _run_git(
+            root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+        if upstream_out:
+            base["upstream"] = upstream_out.strip()
+        else:
+            limitations.append(
+                f"no upstream configured for '{base['branch']}': "
+                "ahead/behind are reported as 0")
+
+        if base["upstream"]:
+            ab_out, _ = _run_git(root, "rev-list", "--count", "--left-right",
+                                 "HEAD...@{u}")
+            if ab_out:
+                try:
+                    ahead_s, behind_s = ab_out.strip().split()
+                    base["ahead"] = max(0, int(ahead_s))
+                    base["behind"] = max(0, int(behind_s))
+                except ValueError:
+                    limitations.append(
+                        f"unparseable ahead/behind output: {ab_out.strip()!r}")
+            else:
+                limitations.append("ahead/behind probe failed; reported as 0")
+
+        st_out, _ = _run_git(root, "status", "--porcelain=v1")
+        dirty: List[str] = []
+        untracked = 0
+        if st_out is not None:
+            for line in st_out.splitlines():
+                if len(line) < 4:
+                    continue
+                if line.startswith("??"):
+                    untracked += 1
+                    continue
+                if line.startswith("!!"):
+                    continue  # ignored files are not dirt
+                path = line[3:]
+                if " -> " in path:  # rename/copy: report the new path
+                    path = path.split(" -> ", 1)[1]
+                dirty.append(path.strip().strip('"'))
+        else:
+            limitations.append("git status probe failed; cleanliness unknown")
+        base["untracked_count"] = untracked
+        base["dirty_total"] = len(dirty)
+        base["dirty_files"] = dirty[:cap]
+        base["dirty_truncated"] = len(dirty) > cap
+
+        bv_out, _ = _run_git(root, "branch", "-vv")
+        if bv_out is not None:
+            for line in bv_out.splitlines():
+                stripped = line[2:] if line[:1] in " *+" else line
+                parts = stripped.split()
+                if len(parts) < 3:
+                    continue
+                name = parts[0]
+                track = stripped[stripped.find("[") + 1:stripped.find("]")] \
+                    if "[" in stripped and "]" in stripped else ""
+                if track.endswith(": gone"):
+                    base["stale_branches"].append(
+                        {"branch": name, "upstream": track[:-len(": gone")]})
+
+        if base["dirty_total"] or base["untracked_count"]:
+            base["status"] = "DIRTY"
+        elif base["ahead"] and base["behind"]:
+            base["status"] = "DIVERGED"
+        elif base["ahead"]:
+            base["status"] = "AHEAD"
+        elif base["behind"]:
+            base["status"] = "BEHIND"
+        else:
+            base["status"] = "CLEAN"
+        return base
 
     def scan_provenance(self, project_root: Optional[str] = None, auto_deprecate: bool = False, auto_heal: bool = False) -> Dict[str, Any]:
         """

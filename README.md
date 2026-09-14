@@ -121,7 +121,7 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 17 tools.
+The server registers 18 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -131,6 +131,7 @@ The server registers 17 tools.
 | `memory_get_context` | `query`, `agent_type?`, `max_tokens?`, `limit?`, `intent?` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. |
 | `memory_get_file_context` | `file_path` | Call while planning an approach to a file — and before editing it: its symbols, anchored facts, callers, and call-graph edges. |
 | `memory_check_safety` | `file_paths` | Call before a multi-file refactor: dependency risk matrix across the files you're about to change. |
+| `memory_check_hygiene` | `project_root?` | Commit/push-discipline status for the working tree: cleanliness, ahead/behind, stale branches. Local git only, read-only; no CI correlation in v1. |
 | `memory_supersede` | `old_id`, `new_content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `expected_version?` | Replace an outdated fact with corrected content. Use when you discover memory that is wrong. |
 | `memory_deprecate` | `id`, `reason?` | Mark a fact obsolete without replacement. |
 | `memory_stats` | — | Memory health: active/deprecated counts, category breakdown, edges. Call at session start per AGENTS.md. |
