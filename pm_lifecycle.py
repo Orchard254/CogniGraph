@@ -183,11 +183,53 @@ class LifecycleMixin:
                     "target_content": edge["target_content"],
                 })
 
+        # Structural code-graph union (#499): memory_edges alone misses real
+        # call/import deps. Additive — old cross_* fields are untouched.
+        structural_dependencies = []
+        known_limitations = []
+        try:
+            struct_rows = self.conn.execute(
+                "SELECT e.edge_type, "
+                "nc.file_path AS caller_file, nc.name AS caller_symbol, "
+                "nc.class_name AS caller_class, nc.line_start AS caller_line, "
+                "ne.file_path AS callee_file, ne.name AS callee_symbol, "
+                "ne.class_name AS callee_class "
+                "FROM structural_edges e "
+                "JOIN structural_nodes nc ON e.caller_id = nc.id "
+                "JOIN structural_nodes ne ON e.callee_id = ne.id "
+                "WHERE e.edge_type IN ('calls', 'imports')"
+            ).fetchall()
+        except Exception:
+            struct_rows = []
+            known_limitations.append("structural_edges unavailable; structural scan skipped")
+        for r in struct_rows:
+            cf = (r["caller_file"] or "").replace("\\", "/").lower()
+            tf = (r["callee_file"] or "").replace("\\", "/").lower()
+            if any(cp in cf for cp in clean_paths) and any(cp in tf for cp in clean_paths):
+                structural_dependencies.append({
+                    "edge_type": r["edge_type"],
+                    "caller_file": r["caller_file"],
+                    "caller_symbol": r["caller_symbol"],
+                    "caller_class": r["caller_class"],
+                    "caller_line": r["caller_line"],
+                    "callee_file": r["callee_file"],
+                    "callee_symbol": r["callee_symbol"],
+                    "callee_class": r["callee_class"],
+                })
+        if not known_limitations:
+            known_limitations.append(
+                "structural_edges reflect last watcher sync; may be stale; "
+                "sync callees before callers for cross-file resolution"
+            )
+
         return {
             "status": "CHECKED",
             "files_analyzed": len(clean_paths),
             "cross_dependencies_count": len(cross_dependencies),
             "cross_dependencies": cross_dependencies,
+            "structural_dependencies_count": len(structural_dependencies),
+            "structural_dependencies": structural_dependencies,
+            "known_limitations": known_limitations,
             "briefings": file_briefings,
         }
 
@@ -763,6 +805,11 @@ class LifecycleMixin:
                 sections.append(f"**[WARNING] Cross-File Dependencies ({len(safety['cross_dependencies'])} detected):**")
                 for dep in safety["cross_dependencies"]:
                     sections.append(f"- `{dep['source_file']}` --[{dep['relation']}]--> `{dep['target_file']}`")
+                sections.append("")
+            if safety.get("structural_dependencies"):
+                sections.append(f"**[WARNING] Structural Deps ({len(safety['structural_dependencies'])} call/import edges):**")
+                for dep in safety["structural_dependencies"][:20]:
+                    sections.append(f"- `{dep['caller_file']}:{dep['caller_symbol']}` --[{dep['edge_type']}]--> `{dep['callee_file']}:{dep['callee_symbol']}`")
                 sections.append("")
             if len(file_paths) > 1:
                 sections.append(self.get_dependency_map(file_paths))
