@@ -677,6 +677,30 @@ class TestUsageLearningPollution:
 
 
 # ============================================================
+# log_usage Allowlist Tests (#436)
+# ============================================================
+# Contract: user-initiated retrieval LOGS (default log_usage=True);
+# machine-initiated retrieval passes log_usage=False. Allowlist:
+#   LOG (default): server.memory_query, memory_cli query, get_context
+#   SILENT: prepare_task seed query, eval/eval_golden, eval_priming, bench
+# These tests lock both halves of the semantics on a scratch DB.
+
+class TestLogUsageAllowlist:
+    def test_default_query_logs_usage(self, temp_store):
+        temp_store.write(category='component', content='search ranking internals',
+                         file_path='pm_search.py')
+        before = temp_store.conn.execute(
+            'SELECT COUNT(*) AS c FROM memory_usage_log').fetchone()['c']
+
+        temp_store.query_hybrid('search ranking internals', limit=3)
+
+        after = temp_store.conn.execute(
+            'SELECT COUNT(*) AS c FROM memory_usage_log').fetchone()['c']
+        assert after == before + 1, \
+            "default query_hybrid must log usage (user-initiated contract)"
+
+
+# ============================================================
 # Code Graph Tests (calls / imports edges, one-hop queries)
 # ============================================================
 
@@ -884,6 +908,38 @@ class TestCodeGraph:
         assert beta == [('helper', 'SiblingB')], \
             f"CallerBeta.run misresolved: {beta}"
 
+    def test_imported_instance_call_resolves(self, temp_store, tmp_path):
+        """Unknown-local attribute calls must resolve via the imported
+        class's family: `store = Store()` + `store.run()` in a plain
+        function (no self, no with-alias) must still link the caller to
+        Store.run. Regression: resolve_callee returned None for any
+        prefix outside self/module-alias/known-class, so who_calls missed
+        run_once-style call sites (eval/eval_golden.py:124)."""
+        (tmp_path / 'store.py').write_text(
+            "class Store:\n"
+            "    def run(self):\n"
+            "        return 1\n")
+        (tmp_path / 'job.py').write_text(
+            "from store import Store\n"
+            "\n\n"
+            "def run_once():\n"
+            "    store = Store()\n"
+            "    return store.run()\n")
+        from structural_extract import extract_structures
+        # Callee file first: cross-file resolution needs the target
+        # indexed before the caller syncs (sync-order constraint).
+        temp_store.sync_structural_nodes(
+            'store.py', extract_structures(tmp_path / 'store.py'),
+            project_root=str(tmp_path))
+        temp_store.sync_structural_nodes(
+            'job.py', extract_structures(tmp_path / 'job.py'),
+            project_root=str(tmp_path))
+        r = temp_store.who_calls('run')
+        assert r['found'] is True
+        assert any(c['name'] == 'run_once' and c['file_path'] == 'job.py'
+                   for c in r['callers']), \
+            "run_once() in job.py must resolve store.run() to Store.run"
+
     def test_project_shape_renders(self, graph_store):
         shape = graph_store.project_shape()
         assert 'Project Shape' in shape
@@ -894,6 +950,36 @@ class TestCodeGraph:
         briefing = graph_store.get_file_context('b.py')
         assert 'Code Graph' in briefing
         assert 'calls' in briefing
+
+    def test_file_briefing_surfaces_callee_constraints(self, temp_store):
+        # White-box structural rows: caller `main` in 'caller_mod' calls
+        # `helper` in 'callee_mod'. Raw rows (not sync) because sync
+        # requires the files on disk, and shared '.py' fixtures would leak
+        # the fact into Direct facts via the FTS filename fallback ('py'
+        # token), masking the section under test.
+        now = "2026-09-15T00:00:00+00:00"
+        cur = temp_store.conn.execute(
+            "INSERT INTO structural_nodes (node_type, name, class_name, file_path, "
+            "line_start, line_end, created_at, last_seen_at) "
+            "VALUES ('function', 'main', '', 'caller_mod', 1, 3, ?, ?)",
+            (now, now))
+        caller_id = cur.lastrowid
+        cur = temp_store.conn.execute(
+            "INSERT INTO structural_nodes (node_type, name, class_name, file_path, "
+            "line_start, line_end, created_at, last_seen_at) "
+            "VALUES ('function', 'helper', '', 'callee_mod', 1, 2, ?, ?)",
+            (now, now))
+        temp_store.conn.execute(
+            "INSERT INTO structural_edges (caller_id, callee_id, edge_type, created_at) "
+            "VALUES (?, ?, 'calls', ?)",
+            (caller_id, cur.lastrowid, now))
+        cid = temp_store.write(category='constraint', importance=5,
+                               content='helper must never be called after midnight',
+                               file_path='callee_mod', embed=False, force=True)
+        briefing = temp_store.get_file_context('caller_mod')
+        assert 'Constraints From Called Files' in briefing, \
+            "caller briefing must surface callee-anchored constraints"
+        assert f'#{cid}' in briefing
 
 
 class TestStructuralFileDeletion:

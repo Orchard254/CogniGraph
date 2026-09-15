@@ -176,7 +176,8 @@ def benchmark_write_without_embed() -> float:
 def benchmark_query_hybrid_warm() -> float:
     """query_hybrid() on warm DB with 200 facts."""
     store, db_path = create_warm_db_with_facts(200)
-    store.query_hybrid('test query', limit=10)
+    # Machine traffic, not a user query: never feed usage learning (#436).
+    store.query_hybrid('test query', limit=10, log_usage=False)
     store.close()
     os.unlink(db_path)
 

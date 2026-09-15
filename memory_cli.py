@@ -236,6 +236,9 @@ def main():
         elif args.command == "query":
             limit = max(1, min(100, args.limit or 10))
             if args.hybrid:
+                # Deliberately logs usage (default log_usage=True): a CLI
+                # query is user-initiated retrieval, exactly what usage
+                # learning should learn from (#436 allowlist).
                 results = store.query_hybrid(args.text, category=args.category, tag=args.tag, limit=limit)
             else:
                 results = store.query(args.text, category=args.category, tag=args.tag, limit=limit)

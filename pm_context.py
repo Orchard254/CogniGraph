@@ -43,8 +43,8 @@ class ContextMixin:
                 "JOIN structural_nodes n ON e.caller_id = n.id "
                 "JOIN structural_nodes cn ON e.callee_id = cn.id "
                 "WHERE e.edge_type = 'calls' AND n.file_path = ? "
-                "ORDER BY n.line_start LIMIT ?",
-                (clean_path, max_edges),
+                "ORDER BY (cn.file_path != ?) DESC, n.line_start LIMIT ?",
+                (clean_path, clean_path, max_edges),
             ).fetchall()
             incoming = self.conn.execute(
                 "SELECT cn.name AS c_name, cn.class_name AS c_class, cn.file_path AS c_file, "
@@ -335,6 +335,58 @@ class ContextMixin:
         
         return result
 
+    def _callee_constraint_lines(self, clean_path: str, seen_ids: set) -> List[str]:
+        """Constraints anchored to files this file calls into (one hop out
+        via structural_edges). Caller-side briefings otherwise omit
+        callee-anchored rules that govern the call (e.g. pm_search.py's
+        log_usage discipline for query_hybrid callers). Capped at 5 facts
+        and empty (not a placeholder) when there is nothing to show, so
+        the token budget is untouched in the common case."""
+        try:
+            callee_files = [
+                r["t_file"] for r in self.conn.execute(
+                    "SELECT DISTINCT cn.file_path AS t_file "
+                    "FROM structural_edges e "
+                    "JOIN structural_nodes n ON e.caller_id = n.id "
+                    "JOIN structural_nodes cn ON e.callee_id = cn.id "
+                    "WHERE e.edge_type = 'calls' AND n.file_path = ? AND cn.file_path != ? "
+                    "LIMIT 10",
+                    (clean_path, clean_path),
+                ).fetchall()
+            ]
+        except sqlite3.OperationalError:
+            return []
+        callee_files = [t for t in callee_files if t]
+        if not callee_files:
+            return []
+        try:
+            cand_rows = self.conn.execute(
+                "SELECT id, content, file_path, importance FROM memory "
+                "WHERE category = 'constraint' AND deprecated_at IS NULL AND importance >= 4 "
+                "ORDER BY importance DESC LIMIT 40",
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        norm_targets = [t.strip().replace("\\", "/").lower() for t in callee_files]
+        picked = []
+        for cr in cand_rows:
+            if cr["id"] in seen_ids:
+                continue
+            cfp = (cr["file_path"] or "").strip().replace("\\", "/").lower()
+            if cfp and any(self._paths_match(cfp, t) for t in norm_targets):
+                picked.append(cr)
+                if len(picked) >= 5:
+                    break
+        if not picked:
+            return []
+        lines = ["#### Constraints From Called Files (call safety):"]
+        for c in picked:
+            seen_ids.add(c["id"])
+            lines.append(f"- **[CONSTRAINT #{c['id']}]** (via `{c['file_path']}`) "
+                         f"{self._cap_text(c['content'], self._FACT_CONTENT_CAP)}")
+        lines.append("")
+        return lines
+
     def get_file_context(self, file_path: str) -> str:
         """
         File-Centric Impact Analysis Briefing:
@@ -389,12 +441,15 @@ class ContextMixin:
         if not direct_facts:
             struct_only = self._structural_briefing_lines(clean_path)
             if struct_only:
+                seen: set = set()
                 block = [
                     f"### File Memory Briefing for: `{file_path}`",
                     "*No stored facts recorded for this file yet, but structural index has entries:*",
                     "",
                     "#### Code Structure (functions / classes / imports):",
                     *struct_only,
+                    "",
+                    *self._callee_constraint_lines(clean_path, seen),
                 ]
                 graph_only = self._call_graph_lines(clean_path)
                 if graph_only:
@@ -461,6 +516,11 @@ class ContextMixin:
             for c in constraints:
                 lines.append(f"- **[CONSTRAINT #{c['id']}]** {self._cap_text(c['content'], self._FACT_CONTENT_CAP)}")
             lines.append("")
+
+        # Cross-file call safety lives in _callee_constraint_lines (also
+        # served on the struct-only path above): constraints anchored to
+        # files this file calls into, capped and omitted when empty.
+        lines.extend(self._callee_constraint_lines(clean_path, seen_ids))
 
         if impacted_files:
             lines.append("#### Impacted / Linked Files:")

@@ -486,6 +486,51 @@ class StructuralMixin:
                             )
                         return own[0]["id"]
                     return resolve_in_composition(prefix, suffix)
+                # Imported-class family fallback: VAR.method where VAR is an
+                # unknown local (e.g. `store = MemoryStore(...)` then
+                # `store.query_hybrid(...)`). The prefix is neither self, a
+                # module alias, nor a known class, so scope the suffix to the
+                # composition families of classes imported into the caller's
+                # file. Exactly one hit class resolves; zero or ambiguous
+                # stays unresolved (same conservative contract as the
+                # repo-wide-unique fallback below).
+                if imports_by_symbol:
+                    try:
+                        syms = list(imports_by_symbol.keys())
+                        sph = ",".join("?" * len(syms))
+                        imported_classes = [
+                            r["name"] for r in self.conn.execute(
+                                "SELECT DISTINCT name FROM structural_nodes "
+                                f"WHERE node_type = 'class' AND name IN ({sph})",
+                                syms,
+                            ).fetchall()
+                        ]
+                    except sqlite3.OperationalError:
+                        imported_classes = []
+                    fam_hits: List[Tuple[str, int]] = []
+                    for cand_cls in imported_classes:
+                        for r in self.conn.execute(
+                            "SELECT id FROM structural_nodes WHERE name = ? AND class_name = ? "
+                            "AND node_type IN ('method','function')",
+                            (suffix, cand_cls),
+                        ).fetchall():
+                            fam_hits.append((cand_cls, r["id"]))
+                        comp_id = resolve_in_composition(cand_cls, suffix)
+                        if comp_id is not None:
+                            fam_hits.append((cand_cls, comp_id))
+                    hit_classes = sorted({c for c, _ in fam_hits})
+                    if len(hit_classes) == 1:
+                        if len(fam_hits) > 1:
+                            logger.warning(
+                                "ambiguous %s.%s in imported family %s: %d hits; first wins",
+                                prefix, suffix, hit_classes[0], len(fam_hits),
+                            )
+                        return fam_hits[0][1]
+                    if len(hit_classes) > 1:
+                        logger.warning(
+                            "ambiguous %s.%s across imported families %s; unresolved",
+                            prefix, suffix, hit_classes,
+                        )
                 return None
             key = ("function", callee_text, "")
             if key in defs:
