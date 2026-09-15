@@ -61,9 +61,39 @@ def timestamped_backup(db_path: str | Path, tag: str = "",
         backup_path.unlink(missing_ok=True)
         raise RuntimeError(f"backup integrity check failed for {backup_path}")
 
+    # The snapshot is self-contained (copied via the backup API,
+    # checkpointed, integrity-checked); drop any vestigial sidecars
+    # SQLite left beside it so kept backups stay sidecar-free.
+    for suffix in _SIDECAR_SUFFIXES:
+        (backup_path.parent / (backup_path.name + suffix)).unlink(missing_ok=True)
+
     kept, pruned = _prune_backups(src.parent, src.name, keep=keep)
     return {"backup_path": str(backup_path), "bytes": backup_path.stat().st_size,
             "kept": len(kept), "pruned": [str(p) for p in pruned]}
+
+
+_SIDECAR_SUFFIXES = ("-shm", "-wal", "-journal")
+
+
+def _unlink_with_sidecars(backup: Path) -> list:
+    """Unlink a `.bak` snapshot plus any SQLite sidecar siblings.
+
+    Returns the list of paths actually removed (the `.bak` itself plus
+    any `<name>.bak-shm/-wal/-journal` present). Missing files and
+    unlink errors are skipped silently — retention pruning must never
+    fail the backup that triggered it.
+    """
+    removed = []
+    candidates = [backup] + [backup.parent / (backup.name + s)
+                             for s in _SIDECAR_SUFFIXES]
+    for p in candidates:
+        try:
+            if p.is_file():
+                p.unlink()
+                removed.append(p)
+        except OSError:
+            pass
+    return removed
 
 
 def _prune_backups(directory: Path, db_name: str, keep: int = DEFAULT_KEEP):
@@ -71,17 +101,30 @@ def _prune_backups(directory: Path, db_name: str, keep: int = DEFAULT_KEEP):
 
     Only touches files matching memory.db.backup-<tag>-<ts>.bak in the
     same directory — historical ad-hoc *.bak files are never pruned.
+    Only real `.bak` snapshots compete for keep slots (sidecars used to
+    match the glob and steal slots independently); each pruned snapshot
+    takes its `-shm`/`-wal`/`-journal` siblings with it, and a final
+    sweep removes dangling sidecars whose parent `.bak` is already gone
+    (legacy orphans from before sibling-aware pruning).
     Returns (kept_paths_newest_first, pruned_paths_oldest_first).
     """
     pattern = f"{db_name}.backup-*"
-    backups = sorted(directory.glob(pattern),
-                     key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
+    backups = sorted(
+        (p for p in directory.glob(pattern) if p.name.endswith(".bak")),
+        key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
     keepers = backups[:max(1, keep)]
     removed = []
     for old in backups[max(1, keep):]:
-        try:
-            old.unlink()
-            removed.append(old)
-        except OSError:
-            pass
+        removed.extend(_unlink_with_sidecars(old))
+    for stray in directory.glob(pattern):
+        for suffix in _SIDECAR_SUFFIXES:
+            if stray.name.endswith(".bak" + suffix):
+                parent = directory / stray.name[: -len(suffix)]
+                if not parent.exists():
+                    try:
+                        stray.unlink()
+                        removed.append(stray)
+                    except OSError:
+                        pass
+                break
     return keepers, removed

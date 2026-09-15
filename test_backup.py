@@ -69,6 +69,36 @@ def test_backup_prunes_beyond_keep(tmp_path):
     assert legacy.exists()
 
 
+def test_backup_prune_removes_sidecars_with_parent(tmp_path):
+    import os
+    db = tmp_path / "memory.db"
+    _make_db(db)
+    # Two old snapshots, each with -shm/-wal siblings; old0 is prunable.
+    old0 = tmp_path / "memory.db.backup-routine-20260101-000000.bak"
+    old1 = tmp_path / "memory.db.backup-routine-20260101-000001.bak"
+    for f in (old0, old1):
+        f.write_bytes(b"x")
+        (tmp_path / (f.name + "-shm")).write_bytes(b"s")
+        (tmp_path / (f.name + "-wal")).write_bytes(b"")
+    # A dangling sidecar whose parent .bak is long gone (legacy orphan).
+    (tmp_path / "memory.db.backup-routine-20250101-000000.bak-wal").write_bytes(b"")
+    os.utime(old0, (1000, 1000))
+    os.utime(old1, (2000, 2000))
+    res = timestamped_backup(db, tag="test", keep=2)
+    pruned_names = {Path(p).name for p in res["pruned"]}
+    assert old0.name in pruned_names
+    assert not old0.exists()
+    assert not (tmp_path / (old0.name + "-shm")).exists()
+    assert not (tmp_path / (old0.name + "-wal")).exists()
+    # The kept snapshot and the dangling orphan are handled correctly.
+    assert old1.exists()
+    assert not (tmp_path / "memory.db.backup-routine-20250101-000000.bak-wal").exists()
+    # Fresh backups are stored sidecar-free.
+    fresh = Path(res["backup_path"])
+    assert not (tmp_path / (fresh.name + "-shm")).exists()
+    assert not (tmp_path / (fresh.name + "-wal")).exists()
+
+
 def test_corpus_hygiene_apply_backs_up_first(tmp_path):
     from corpus_hygiene import corpus_hygiene
     db = tmp_path / "memory.db"
