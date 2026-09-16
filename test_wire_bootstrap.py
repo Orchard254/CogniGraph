@@ -483,7 +483,7 @@ def test_classify_agents_md_four_outcomes():
 
 
 def test_known_hashes_cover_shipped_history():
-    assert len(wire.KNOWN_AGENTS_TEMPLATE_HASHES) == 8
+    assert len(wire.KNOWN_AGENTS_TEMPLATE_HASHES) == 9
     assert all(re.fullmatch(r"[0-9a-f]{64}", h)
                for h in wire.KNOWN_AGENTS_TEMPLATE_HASHES)
     real = Path(wire.__file__).resolve().parent / "AGENTS.md"

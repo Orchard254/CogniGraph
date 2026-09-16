@@ -40,8 +40,9 @@ Structural layer (tree-sitter, Python/JS/TS/TSX):
 Code graph (one-hop queries — ask these mid-reasoning instead of re-reading files):
 - `memory_blast_radius(symbol)` — transitive blast radius ("what breaks if I change this"): call this while planning an approach or estimating effort, before making changes — not just as a pre-edit gate.
 - `memory_who_calls(symbol)` — definitions, callers, and importing files for a symbol, from AST ground truth. Accepts `query` or `MemoryStore.write`. Ask mid-reasoning while planning, not just before a rename.
+- `memory_who_inherits(symbol)` — which classes inherit from a base class, exact and transitive, from AST ground truth. Ask mid-reasoning while planning, not just before a hierarchy change.
 - `memory_project_shape()` — indexed file inventory and code-graph size; call once early for orientation.
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.
 - If `memory_cli.py wire` reports `WIRED_WITH_ERRORS`, fix `config_errors` first - the listed config was not written (wire.py:207-222).
-<!-- cognigraph-template sha256:52230ced414bbbc78df005fecc5944ddf5a3d7edb576f9f13d1a5cf9e933aa76 -->
+<!-- cognigraph-template sha256:42cc909e4c37db07a3a671bc48a40aefff2854d1b927ec99623a9c76abc24ab9 -->
