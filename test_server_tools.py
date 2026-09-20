@@ -733,3 +733,73 @@ def test_read_code_path_escape_symlink(real_db, tmp_path):
             os.unlink(target)
         except OSError:
             pass
+
+
+def test_uri_to_path_and_resolve_db(tmp_path):
+    proj = tmp_path / "custom_proj"
+    proj.mkdir()
+    (proj / ".git").mkdir()
+    db_file = proj / ".cognigraph" / "memory.db"
+    db_file.parent.mkdir()
+    db_file.write_text("", encoding="utf-8")
+
+    assert server._uri_to_path(f"file:///{proj.as_posix()}") == proj
+    assert server._resolve_db_from_root(proj) == str(db_file)
+
+
+@pytest.mark.anyio
+async def test_dynamic_call_tool_routes_by_roots(tmp_path, monkeypatch):
+    proj_a = tmp_path / "proj_a"
+    proj_a.mkdir()
+    db_a = proj_a / ".cognigraph" / "memory.db"
+    store_a = MemoryStore(str(db_a))
+    store_a.write("component", "Alpha component in project A")
+    store_a.close()
+
+    class FakeRoot:
+        def __init__(self, uri):
+            self.uri = uri
+
+    class FakeRootsResult:
+        def __init__(self, roots):
+            self.roots = roots
+
+    class FakeSession:
+        async def list_roots(self):
+            return FakeRootsResult([FakeRoot(f"file:///{proj_a.as_posix()}")])
+
+    class FakeContext:
+        session = FakeSession()
+
+    monkeypatch.setattr(server.mcp, "get_context", lambda: FakeContext())
+    res = await server.mcp.call_tool("memory_stats", {})
+    import json
+    data = json.loads(res[0].text)
+    assert data["db_path"] == str(db_a)
+    assert data["total_active"] == 1
+
+
+@pytest.mark.anyio
+async def test_dynamic_call_tool_routes_by_file_path(tmp_path, monkeypatch):
+    proj_b = tmp_path / "proj_b"
+    proj_b.mkdir()
+    (proj_b / ".git").mkdir()
+    src_dir = proj_b / "src"
+    src_dir.mkdir()
+    sample_file = src_dir / "service.py"
+    sample_file.write_text("def run(): pass\n", encoding="utf-8")
+
+    db_b = proj_b / ".cognigraph" / "memory.db"
+    store_b = MemoryStore(str(db_b))
+    store_b.write("decision", "Beta decision in project B", file_path="src/service.py")
+    store_b.close()
+
+    class EmptyContext:
+        session = None
+
+    monkeypatch.setattr(server.mcp, "get_context", lambda: EmptyContext())
+    res = await server.mcp.call_tool("memory_get_file_context", {"file_path": str(sample_file)})
+    import json
+    data = json.loads(res[0].text)
+    assert "Beta decision" in data.get("briefing_markdown", "")
+

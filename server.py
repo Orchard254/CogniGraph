@@ -3,12 +3,21 @@ MCP server exposing an enterprise project memory store as tools a coding agent c
 
 Run via stdio - point opencode's `mcp` config (others use `mcpServers`) at this script.
 """
+import contextvars
 import logging
 import threading
 from contextlib import contextmanager
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Iterator
+from urllib.parse import urlparse, unquote
 from mcp.server.fastmcp import FastMCP
 from memory_store import MemoryStore
+from pm_common import (
+    DATA_DIR_NAME,
+    LEGACY_DATA_DIR_NAME,
+    default_db_path,
+    find_project_root,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +25,45 @@ mcp = FastMCP("CogniGraph")
 # Create a function to get a store instance (not a global singleton)
 # Global flag to track if first-time setup has been done
 _first_time_setup_done = False
+_first_time_setup_dbs: set = set()
 _setup_lock = threading.Lock()
+_active_db_path: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_active_db_path", default=None)
 
-def _get_store():
+
+def _uri_to_path(uri: str) -> Optional[Path]:
+    """Convert a file:// URI or filesystem path string to a Path object."""
+    try:
+        parsed = urlparse(str(uri))
+        if parsed.scheme != "file":
+            return Path(uri)
+        path = unquote(parsed.path)
+        if path.startswith("/") and len(path) > 2 and path[2] == ":":
+            path = path[1:]
+        return Path(path)
+    except Exception:
+        return None
+
+
+def _resolve_db_from_root(root_dir: Path) -> Optional[str]:
+    """Given a project root directory, locate existing or canonical memory.db."""
+    try:
+        root_dir = Path(root_dir).resolve()
+        if (root_dir / DATA_DIR_NAME / "memory.db").is_file():
+            return str(root_dir / DATA_DIR_NAME / "memory.db")
+        if (root_dir / LEGACY_DATA_DIR_NAME / "memory.db").is_file():
+            return str(root_dir / LEGACY_DATA_DIR_NAME / "memory.db")
+        if root_dir.is_dir():
+            return str(root_dir / DATA_DIR_NAME / "memory.db")
+    except Exception:
+        pass
+    return None
+
+
+def _get_store(*args, **kwargs):
     from memory_store import MemoryStore
-    return MemoryStore()
+    db_path = kwargs.get("db_path_override") or _active_db_path.get() or default_db_path()
+    return MemoryStore(db_path)
+
 
 @contextmanager
 def _store() -> Iterator["MemoryStore"]:
@@ -38,6 +81,7 @@ def _store() -> Iterator["MemoryStore"]:
             store.close()
         except Exception as e:
             logger.warning("store close failed: %r", e)
+
 
 def _clamp_limit(limit: int, default: int = 10, maximum: int = 100) -> int:
     try:
@@ -70,22 +114,23 @@ def _clamp_importance(importance: int, default: int = 3) -> int:
         return default
     return max(1, min(5, importance))
 
-def _ensure_first_time_setup():
+def _ensure_first_time_setup(db_path: Optional[str] = None):
     """Run automatic first-time setup (bootstrap) on first tool call."""
     global _first_time_setup_done
-    if _first_time_setup_done:
+    target_db = db_path or _active_db_path.get() or default_db_path()
+    if target_db in _first_time_setup_dbs:
         return
     
     with _setup_lock:
         # Double-check after acquiring lock
-        if _first_time_setup_done:
+        if target_db in _first_time_setup_dbs:
             return
 
         store = None
         try:
             from bootstrap import bootstrap_project
             from pathlib import Path
-            store = _get_store()
+            store = _get_store(target_db)
             root = Path(store.db_path).parent.parent
             
             # Check if database is empty (new database)
@@ -100,19 +145,20 @@ def _ensure_first_time_setup():
                 conn.close()
             
             if count == 0:
-                logger.info("New database detected, running automatic bootstrap...")
+                logger.info("New database detected, running automatic bootstrap for %s...", root)
                 try:
                     bootstrap_project(root, store=store, dry_run=False, full=False, max_facts=20, install_hook=False, drop_protocol=False)
                     logger.info("Automatic bootstrap completed for %s", root)
                 except Exception as e:
                     logger.warning("Automatic bootstrap failed: %r", e)
             else:
-                logger.info("Database already contains %d facts, skipping bootstrap", count)
+                logger.info("Database %s already contains %d facts, skipping bootstrap", store.db_path, count)
                 
             _first_time_setup_done = True
+            _first_time_setup_dbs.add(target_db)
             
         except Exception as e:
-            logger.warning("First-time setup failed: %r", e)
+            logger.warning("First-time setup failed for %s: %r", target_db, e)
             # Continue anyway - the system should still work
         finally:
             if store is not None:
@@ -488,6 +534,71 @@ def memory_flag_fact(fact_id: int, note: str = "", flag_type: str = "misleading"
     """Flag a fact as misleading or unverified so future briefings carry a warning. Use when memory looks wrong but you lack the correction."""
     with _store() as _s:
         return _s.flag_fact(fact_id, note=note, flag_type=flag_type)
+
+
+_orig_call_tool = mcp.call_tool
+
+
+async def _dynamic_call_tool(name: str, arguments: dict[str, Any]) -> Any:
+    """Dynamically route tool invocations to the active workspace's database."""
+    resolved_db = None
+
+    # 1. Explicit project_root argument in tool call (if present)
+    if arguments and isinstance(arguments, dict):
+        explicit_root = arguments.get("project_root")
+        if explicit_root:
+            cand = _resolve_db_from_root(Path(explicit_root))
+            if cand:
+                resolved_db = cand
+
+    # 2. Attempt to resolve active workspace root from MCP session roots (e.g. Antigravity)
+    if not resolved_db:
+        try:
+            context = mcp.get_context()
+            if context and hasattr(context, "session") and context.session:
+                roots_result = await context.session.list_roots()
+                if roots_result and hasattr(roots_result, "roots") and roots_result.roots:
+                    for r in roots_result.roots:
+                        uri = getattr(r, "uri", None) or (r.get("uri") if isinstance(r, dict) else None)
+                        if uri:
+                            root_path = _uri_to_path(str(uri))
+                            if root_path:
+                                candidate_db = _resolve_db_from_root(root_path)
+                                if candidate_db:
+                                    resolved_db = candidate_db
+                                    break
+        except Exception as e:
+            logger.debug("dynamic roots resolution skipped: %r", e)
+
+    # 3. Fallback: inspect arguments for file_path / file_paths / items
+    if not resolved_db and arguments and isinstance(arguments, dict):
+        file_arg = arguments.get("file_path")
+        if not file_arg and isinstance(arguments.get("file_paths"), list) and arguments["file_paths"]:
+            file_arg = arguments["file_paths"][0]
+        if not file_arg and isinstance(arguments.get("items"), list) and arguments["items"]:
+            first_item = arguments["items"][0]
+            if isinstance(first_item, dict):
+                file_arg = first_item.get("file_path") or first_item.get("file")
+        if file_arg and isinstance(file_arg, str):
+            try:
+                cand_root = find_project_root(Path(file_arg).resolve())
+                if cand_root:
+                    resolved_db = _resolve_db_from_root(cand_root)
+            except Exception:
+                pass
+
+    if resolved_db:
+        token = _active_db_path.set(resolved_db)
+        try:
+            return await _orig_call_tool(name, arguments)
+        finally:
+            _active_db_path.reset(token)
+    else:
+        return await _orig_call_tool(name, arguments)
+
+
+mcp.call_tool = _dynamic_call_tool
+mcp._mcp_server.call_tool()(_dynamic_call_tool)
 
 
 if __name__ == "__main__":

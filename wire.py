@@ -43,7 +43,7 @@ AGENT_ALIASES = {
     "roocode": "roo",
 }
 AGENT_DISPLAY_NAMES = {
-    "antigravity": "Google Antigravity (.agents/mcp_config.json)",
+    "antigravity": "Google Antigravity (.agents/plugins/cognigraph/mcp_config.json)",
     "cursor": "Cursor (.cursor/mcp.json)",
     "windsurf": "Windsurf (~/.codeium/windsurf/mcp_config.json)",
     "claude": "Claude Desktop (global config)",
@@ -441,16 +441,31 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
         cfg = proj_root / ".cursor" / "mcp.json"
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
     elif agent == "antigravity":
-        # Primary: workspace .agents/mcp_config.json (project-local, STATIC).
-        # The old global-only write (~/.gemini/config/mcp_config.json) meant
-        # the last-wired project's DB path bled into every other workspace,
-        # so global is now opt-in via global_config=True, never the default.
-        ws_cfg = proj_root / ".agents" / "mcp_config.json"
+        # Antigravity supports workspace MCP servers via plugins:
+        # .agents/plugins/cognigraph/ (plugin.json + mcp_config.json).
+        # We also clean up any legacy unsupported .agents/mcp_config.json.
+        plugin_dir = proj_root / ".agents" / "plugins" / "cognigraph"
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+        manifest = plugin_dir / "plugin.json"
+        if not manifest.exists():
+            _write_text_atomic(manifest, json.dumps({"name": "cognigraph"}, indent=2) + "\n")
+            written.append(str(manifest))
+        ws_cfg = plugin_dir / "mcp_config.json"
         _safe_merge(ws_cfg, "mcpServers", {"command": py, "args": [server], "env": env})
+
+        legacy_ws = proj_root / ".agents" / "mcp_config.json"
+        if legacy_ws.is_file():
+            try:
+                legacy_ws.unlink()
+            except Exception:
+                pass
+
         if global_config:
+            # Global config: server.py dynamically detects workspace roots via
+            # MCP roots/list, so global config omits MEMORY_DB_PATH to avoid cross-project bleed.
             gbl_cfg = Path.home() / ".gemini" / "config" / "mcp_config.json"
             _safe_merge(gbl_cfg, "mcpServers",
-                        {"command": py, "args": [server], "env": env})
+                        {"command": py, "args": [server]})
     elif agent == "windsurf":
         cfg = Path.home() / ".codeium" / "windsurf" / "mcp_config.json"
         _safe_merge(cfg, "mcpServers", {"command": py, "args": [server], "env": env})
