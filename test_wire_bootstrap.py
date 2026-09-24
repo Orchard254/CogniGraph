@@ -406,6 +406,36 @@ def test_wire_protocol_customized_writes_new_sibling(tmp_path):
     assert "agents_md_new_file" not in res_quiet
 
 
+def test_wire_protocol_force_overwrites_customized_with_backup(tmp_path):
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    (proj / "AGENTS.md").write_text("# Protocol\n\nMy team edits.\n", encoding="utf-8")
+    (proj / "AGENTS.md.new").write_text("stale leftover\n", encoding="utf-8")
+    res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm),
+                     force_protocol=True)
+    assert res["agents_md"] == "updated_forced"
+    assert "agents_md_new_file" not in res
+    content = (proj / "AGENTS.md").read_text(encoding="utf-8")
+    body, marker = wire._split_agents_marker(content)
+    assert body == "# Protocol\n"
+    assert marker == wire._agents_body_hash(body)
+    assert (proj / "AGENTS.md.bak").read_text(encoding="utf-8") == "# Protocol\n\nMy team edits.\n"
+    assert str(proj / "AGENTS.md.bak") in res["backups"]
+    assert not (proj / "AGENTS.md.new").exists()
+    assert any("force-protocol" in s for s in res["next_steps"])
+
+
+def test_wire_protocol_force_is_opt_in(tmp_path):
+    # Without the flag the safe default is unchanged: customized files are
+    # staged as .new, never overwritten.
+    pm = _make_pm_root(tmp_path)
+    proj = _make_proj(tmp_path)
+    (proj / "AGENTS.md").write_text("mine\n", encoding="utf-8")
+    res = wire_agent("opencode", project_root=str(proj), project_memory_root=str(pm))
+    assert res["agents_md"] == "skipped_customized_update_available"
+    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "mine\n"
+
+
 def test_wire_protocol_stale_unmodified_overwrites_with_backup(tmp_path, monkeypatch):
     pm = _make_pm_root(tmp_path)
     proj = _make_proj(tmp_path)

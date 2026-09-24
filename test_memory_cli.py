@@ -176,7 +176,7 @@ def test_wire_never_constructs_store(cli, monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr("wire.wire_agent",
                         lambda agent, project_root=None, drop_protocol=True,
-                        global_config=False:
+                        global_config=False, force_protocol=False:
                         seen.update(agent=agent, root=project_root,
                                     drop=drop_protocol,
                                     global_config=global_config) or {"status": "WIRED"})
@@ -191,7 +191,7 @@ def test_wire_global_flag_passthrough(cli, monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr("wire.wire_agent",
                         lambda agent, project_root=None, drop_protocol=True,
-                        global_config=False:
+                        global_config=False, force_protocol=False:
                         seen.update(agent=agent, global_config=global_config)
                         or {"status": "WIRED"})
     monkeypatch.setattr(sys, "argv", ["memory_cli.py", "wire", "antigravity",
@@ -200,11 +200,24 @@ def test_wire_global_flag_passthrough(cli, monkeypatch, tmp_path):
     assert seen == {"agent": "antigravity", "global_config": True}
 
 
+def test_wire_force_protocol_passthrough(cli, monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr("wire.wire_agent",
+                        lambda agent, project_root=None, drop_protocol=True,
+                        global_config=False, force_protocol=False:
+                        seen.update(agent=agent, force=force_protocol)
+                        or {"status": "WIRED"})
+    monkeypatch.setattr(sys, "argv", ["memory_cli.py", "wire", "opencode",
+                                      "--root", str(tmp_path), "--force-protocol"])
+    memory_cli.main()
+    assert seen == {"agent": "opencode", "force": True}
+
+
 def test_wire_auto_detect_dispatched(cli, monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr("wire.wire_agent",
                         lambda agent, project_root=None, drop_protocol=True,
-                        global_config=False:
+                        global_config=False, force_protocol=False:
                         seen.update(agent=agent, root=project_root,
                                     global_config=global_config) or {"status": "WIRED"})
     monkeypatch.setattr("wire.detect_agent", lambda proj: "antigravity")
@@ -344,10 +357,22 @@ def test_bootstrap_dispatch_maps_flags(cli, monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr("bootstrap.bootstrap_project",
                         lambda root, store=None, dry_run=True, full=False,
-                        max_facts=150, install_hook=True, drop_protocol=True:
+                        max_facts=150, install_hook=True, drop_protocol=True,
+                        force_protocol=False:
                         seen.update(root=root, dry=dry_run, full=full, max=max_facts,
                                     hook=install_hook, proto=drop_protocol) or {"status": "x"})
     cli("bootstrap", "--root", str(tmp_path), "--apply", "--full",
         "--max-facts", "5000", "--no-hook")
     assert seen == {"root": str(tmp_path), "dry": False, "full": True,
                     "max": 1000, "hook": False, "proto": True}  # max-facts clamped
+
+
+def test_bootstrap_force_protocol_passthrough(cli, monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr("bootstrap.bootstrap_project",
+                        lambda root, store=None, dry_run=True, full=False,
+                        max_facts=150, install_hook=True, drop_protocol=True,
+                        force_protocol=False:
+                        seen.update(force=force_protocol) or {"status": "x"})
+    cli("bootstrap", "--root", str(tmp_path), "--apply", "--force-protocol")
+    assert seen == {"force": True}

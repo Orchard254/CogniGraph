@@ -156,6 +156,7 @@ def main():
     boot_p.add_argument("--max-facts", type=int, default=150, help="Cap on facts to ingest")
     boot_p.add_argument("--no-hook", action="store_true", help="Skip git post-commit hook installation")
     boot_p.add_argument("--no-protocol", action="store_true", help="Skip AGENTS.md drop")
+    boot_p.add_argument("--force-protocol", action="store_true", help="Back up and overwrite a customized AGENTS.md instead of staging AGENTS.md.new")
     boot_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
 
     # wire
@@ -164,6 +165,7 @@ def main():
                         help="Target coding agent (antigravity, cursor, windsurf, claude, zed, roo, cline, opencode, kiro, vscode, zcode, generic). Omit for interactive menu.")
     wire_p.add_argument("--root", help="Project root to wire (default: CWD)")
     wire_p.add_argument("--no-protocol", action="store_true", help="Skip AGENTS.md drop")
+    wire_p.add_argument("--force-protocol", action="store_true", help="Back up and overwrite a customized AGENTS.md instead of staging AGENTS.md.new")
     wire_p.add_argument("--global", dest="global_config", action="store_true",
                         help="Also update the user-global config (antigravity only; default is project-local)")
     wire_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
@@ -335,7 +337,8 @@ def main():
             res = bootstrap_project(args.root, store=store, dry_run=not args.apply,
                                     full=args.full, max_facts=max(1, min(1000, args.max_facts or 150)),
                                     install_hook=not args.no_hook,
-                                    drop_protocol=not args.no_protocol)
+                                    drop_protocol=not args.no_protocol,
+                                    force_protocol=getattr(args, "force_protocol", False))
             print(json.dumps(res, indent=2))
         elif args.command == "wire":
             from wire import wire_agent, detect_agent, prompt_agent_choice, SUPPORTED_AGENTS, AGENT_ALIASES
@@ -365,7 +368,8 @@ def main():
             try:
                 res = wire_agent(agent, project_root=args.root,
                                  drop_protocol=not args.no_protocol,
-                                 global_config=getattr(args, "global_config", False))
+                                 global_config=getattr(args, "global_config", False),
+                                 force_protocol=getattr(args, "force_protocol", False))
                 print(json.dumps(res, indent=2))
             except ValueError as e:
                 sys.stderr.write(f"Error: {e}\n")

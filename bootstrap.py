@@ -364,10 +364,11 @@ def install_git_hook(root: Path) -> str:
     return "installed"
 
 
-def drop_agents_md(root: Path) -> str:
+def drop_agents_md(root: Path, force: bool = False) -> str:
     """Sync the AGENTS.md protocol file (versioned logic shared with wire.py)."""
     return sync_agents_md(Path(root) / "AGENTS.md",
-                          Path(__file__).resolve().parent)["status"]
+                          Path(__file__).resolve().parent,
+                          force=force)["status"]
 
 
 def _stub_already_present(store: MemoryStore, file_path: str, content: str) -> bool:
@@ -396,7 +397,8 @@ def _stub_already_present(store: MemoryStore, file_path: str, content: str) -> b
 
 def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True,
                       full: bool = False, max_facts: int = 150,
-                      install_hook: bool = True, drop_protocol: bool = True) -> Dict[str, Any]:
+                      install_hook: bool = True, drop_protocol: bool = True,
+                      force_protocol: bool = False) -> Dict[str, Any]:
     """
     Onboard a repository into project memory.
     dry_run=True (default) previews without writing. Apply writes facts,
@@ -420,7 +422,8 @@ def bootstrap_project(root: Any, store: MemoryStore = None, dry_run: bool = True
             agents_new_file = None
             if drop_protocol:
                 agents_sync = sync_agents_md(root_path / "AGENTS.md",
-                                             Path(__file__).resolve().parent)
+                                             Path(__file__).resolve().parent,
+                                             force=force_protocol)
                 agents_status = agents_sync["status"]
                 agents_new_file = agents_sync["new_file"]
 

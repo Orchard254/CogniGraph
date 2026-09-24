@@ -337,13 +337,14 @@ def _write_text_atomic(path: Path, text: str) -> None:
         raise
 
 
-def sync_agents_md(target: Path, pm_root: Path) -> Dict[str, Any]:
+def sync_agents_md(target: Path, pm_root: Path, force: bool = False) -> Dict[str, Any]:
     """Version-aware AGENTS.md sync shared by wire_agent and bootstrap.
 
     Returns {"status", "new_file", "backup"}: new_file is the .new sibling
     (customized case only; overwrites any stale sibling from a prior run) and
-    backup is the rotated backup (stale case only). An unreadable existing file
-    is treated as customized — the real file is never touched in that case.
+    backup is the rotated backup (stale and forced cases). An unreadable
+    existing file is treated as customized — the real file is never touched
+    in that case unless force=True, which backs up and overwrites it.
     """
     target = Path(target)
     current = _current_agents_template(pm_root)
@@ -365,6 +366,16 @@ def sync_agents_md(target: Path, pm_root: Path) -> Dict[str, Any]:
         backup = _backup(target)
         _write_text_atomic(target, rendered)
         return {"status": "updated_clean", "new_file": None, "backup": backup}
+    if force:
+        backup = _backup(target)
+        _write_text_atomic(target, rendered)
+        stale_sibling = target.with_name(target.name + ".new")
+        try:
+            if stale_sibling.is_file():
+                stale_sibling.unlink()
+        except Exception:
+            pass
+        return {"status": "updated_forced", "new_file": None, "backup": backup}
     new_file = target.with_name(target.name + ".new")
     _write_text_atomic(new_file, rendered)
     return {"status": "skipped_customized_update_available",
@@ -374,7 +385,8 @@ def sync_agents_md(target: Path, pm_root: Path) -> Dict[str, Any]:
 def wire_agent(agent: str, project_root: Optional[str] = None,
                project_memory_root: Optional[str] = None,
                drop_protocol: bool = True,
-               global_config: bool = False) -> Dict[str, Any]:
+               global_config: bool = False,
+               force_protocol: bool = False) -> Dict[str, Any]:
     """
     Wire a target project to CogniGraph for the given coding agent.
     Returns a report with config file paths, backups, and exact next-step commands.
@@ -383,6 +395,10 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
     (currently antigravity): when False (default) only the project-local
     workspace file is written so one project's DB path cannot bleed into
     other projects; pass True to also update the user-global file.
+
+    force_protocol backs up and overwrites a customized AGENTS.md in place
+    (status "updated_forced") instead of staging AGENTS.md.new. Default
+    False keeps the safe behavior: customized files are never touched.
     """
     if not isinstance(agent, str):
         raise ValueError(f"agent must be one of {SUPPORTED_AGENTS}, got {type(agent).__name__}")
@@ -551,12 +567,16 @@ def wire_agent(agent: str, project_root: Optional[str] = None,
     agents_md_status = "skipped_disabled"
     agents_md_new_file: Optional[str] = None
     if drop_protocol:
-        sync = sync_agents_md(proj_root / "AGENTS.md", pm_root)
+        sync = sync_agents_md(proj_root / "AGENTS.md", pm_root, force=force_protocol)
         agents_md_status = sync["status"]
         agents_md_new_file = sync["new_file"]
         if sync["backup"]:
             backups.append(sync["backup"])
-        if agents_md_status == "skipped_customized_update_available":
+        if agents_md_status == "updated_forced":
+            warnings.append(
+                "AGENTS.md was customized, so --force-protocol backed it up "
+                f"({sync['backup']}) and overwrote it with the latest protocol.")
+        elif agents_md_status == "skipped_customized_update_available":
             warnings.append(
                 "AGENTS.md update available: your AGENTS.md appears customized, so it "
                 "was left untouched. The latest protocol was written to "
