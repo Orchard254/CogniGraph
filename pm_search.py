@@ -770,6 +770,30 @@ class SearchMixin:
             except sqlite3.OperationalError:
                 pass
 
+        # Deprecation is authoritative in `memory`, not in the episodic store.
+        # MemoryStore.deprecate() sets memory.deprecated_at and deliberately
+        # leaves episodic_memories.status alone, because that table is the
+        # historical/branch record. But episodic lanes 1b/2b/3b filter only
+        # episodic status, so a deprecated fact used to keep ranking in hybrid
+        # results -- the default path behind memory_query, memory_get_context
+        # and prepare_task. `memory` is the single source of truth for whether a
+        # fact is active, so drop any episodic candidate whose memory row is
+        # deprecated. An episodic id with NO memory row is not deprecated and
+        # must still be served (that is a real state, not a filtered one).
+        deprecated_memory_ids: set = set()
+        if all_episodic_ids:
+            placeholders = ",".join("?" * len(all_episodic_ids))
+            try:
+                deprecated_memory_ids = {
+                    r["id"] for r in self.conn.execute(
+                        f"SELECT id FROM memory WHERE deprecated_at IS NOT NULL "
+                        f"AND id IN ({placeholders})",
+                        list(all_episodic_ids),
+                    ).fetchall()
+                }
+            except sqlite3.OperationalError:
+                deprecated_memory_ids = set()
+
         # File-anchor boost: facts anchored to a file named (or basenamed) in the
         # query rank higher, so "fix watcher.py ..." surfaces watcher.py facts.
         file_mentions = self._mentioned_files(text)
@@ -806,6 +830,8 @@ class SearchMixin:
         usage_boosts = self._usage_boost(text)
 
         def rrf_add(source: str, fact_id: int, rank: int, lane_weight: float = 1.0):
+            if source == "episodic" and fact_id in deprecated_memory_ids:
+                return  # deprecated in `memory`; the episodic copy is history
             if source == "memory":
                 created_at, access_count, importance = recency_info.get(fact_id, (None, 0, 3))
                 tags = tags_info.get(fact_id, "")
