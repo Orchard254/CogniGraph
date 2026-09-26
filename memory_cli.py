@@ -31,6 +31,11 @@ def main():
     audit_p.add_argument("--lexical-threshold", type=float, default=argparse.SUPPRESS,
                          help="Jaccard cutoff for facts with no embedding (default 0.65)")
 
+    pollution_p = subparsers.add_parser(
+        "pollution", help="Report throwaway test/stress artifacts (read-only)")
+    pollution_p.add_argument("--db", default=argparse.SUPPRESS,
+                              help="Path to SQLite database file")
+
     # export
     export_parser = subparsers.add_parser("export", help="Export active memory as Markdown")
     export_parser.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
@@ -241,6 +246,21 @@ def main():
                               f" {item.get(f'fact{n}_file_path') or '-'}: {item[f'fact{n}_content']}")
             else:
                 print("No duplicate active facts detected.")
+
+        elif args.command == "pollution":
+            res = store.detect_pollution()
+            print("=== Pollution Scan (read-only) ===")
+            print(f"Scanned              : {res['scanned']} boosted-category active facts")
+            print(f"Flagged              : {res['count']}")
+            if res["pollution"]:
+                print(f"\n  {res['note']}")
+                for item in res["pollution"]:
+                    print(f"\n  #{item['id']} [{item['category']}] {item['reason']}")
+                    print(f"    {item['content'][:100]}")
+                    if item["rationale"]:
+                        print(f"    rationale: {item['rationale'][:80]}")
+            else:
+                print("No pollution detected.")
 
         elif args.command == "export":
             md = store.export_markdown(category=args.category)

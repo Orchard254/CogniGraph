@@ -2,6 +2,7 @@
 import datetime
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
@@ -520,6 +521,94 @@ class LifecycleMixin:
                 count += 1
 
         return {"status": "OK", "backfilled": count, "skipped": len(existing_ids), "total_active": len(rows)}
+
+    # Pollution markers. Anchored on purpose: a loose prefix regex flagged a
+    # real recorded decision (#183 'Placeholder GitHub URLs removed from
+    # package.json rather than replaced'), so a marker must consume the whole
+    # content string, not merely appear at the start. Each pattern is a
+    # synthetic-fixture shape written by a throwaway script, not a phrase a
+    # curated fact would plausibly use.
+    POLLUTION_PATTERNS = (
+        (r"^(?:batch|stress|test)\s+fact\s*\d*\s*$", "synthetic indexed fixture"),
+        (r"^(?:batch|stress)\s+test\s*\d*\s*$", "synthetic indexed fixture"),
+        (r"^fact\s+\d+\s*$", "synthetic indexed fixture"),
+        # Prefix forms with trailing prose ("Stress test fact 1: ...", "Batch
+        # fact 0"). The length cap plus no-edges requirement carry the
+        # false-positive load here, so a distinctive anchored prefix is enough.
+        (r"^stress\s+test\b.*$", "stress-test artifact"),
+        (r"^batch\s+fact\b.*$", "synthetic indexed fixture"),
+        (r"^test\s+batch\s*\d*\s*$", "test scaffold"),
+        (r"^test\s+fact\s*$", "test scaffold"),
+        (r"^test\s+fact\s+for\b.*$", "test scaffold"),
+        (r"^latency\s+test\b.*$", "test scaffold"),
+        (r"^another\s+test\s+via\b.*$", "test scaffold"),
+    )
+    # Categories whose facts retrieval boosts; pollution there costs result
+    # slots. prune_stale only looks at ('state','other'), which is why it
+    # reported 0 candidates while 8 junk facts sat in 'component'.
+    POLLUTION_CATEGORIES = ("component", "decision", "constraint")
+    POLLUTION_MAX_CHARS = 80
+
+    def detect_pollution(self) -> Dict[str, Any]:
+        """Report throwaway test/stress artifacts. Read-only; never deprecates.
+
+        Complements prune_stale, which selects by inactivity and so cannot see
+        artifacts that were written recently and are being actively retrieved.
+
+        Deliberately conservative: an anchored full-content match, a length
+        cap, and no graph edges are all required, so a real fact that merely
+        starts with a similar word is not reported. Deciding whether a flagged
+        fact actually matters needs human judgment, so this only produces a
+        worklist; reconcile with memory_deprecate.
+        """
+        stub_sql = " AND ".join("content NOT LIKE ?" for _ in STUB_PREFIXES)
+        cats = ",".join("?" * len(self.POLLUTION_CATEGORIES))
+        rows = self.conn.execute(
+            f"SELECT m.id, m.category, m.content, m.rationale, m.file_path, "
+            f"m.created_at, m.importance FROM memory m "
+            f"WHERE m.deprecated_at IS NULL AND {stub_sql} "
+            f"AND m.category IN ({cats})",
+            tuple(f"{p}%" for p in STUB_PREFIXES) + self.POLLUTION_CATEGORIES,
+        ).fetchall()
+
+        scanned = len(rows)
+        findings: List[Dict[str, Any]] = []
+        for r in rows:
+            text = (r["content"] or "").strip()
+            if not text or len(text) > self.POLLUTION_MAX_CHARS:
+                continue
+            reason = next(
+                (why for pat, why in self.POLLUTION_PATTERNS
+                 if re.match(pat, text, re.IGNORECASE)),
+                None,
+            )
+            if reason is None:
+                continue
+            edged = self.conn.execute(
+                "SELECT 1 FROM memory_edges WHERE source_id=? OR target_id=? LIMIT 1",
+                (r["id"], r["id"])).fetchone()
+            if edged is not None:
+                continue  # graph-connected: something depends on it
+            findings.append({
+                "id": r["id"],
+                "content": text,
+                "category": r["category"],
+                "rationale": r["rationale"],
+                "file_path": r["file_path"],
+                "created_at": r["created_at"],
+                "importance": r["importance"],
+                "reason": reason,
+            })
+
+        findings.sort(key=lambda d: d["id"])
+        return {
+            "read_only": True,
+            "scanned": scanned,
+            "count": len(findings),
+            "pollution": findings,
+            "note": ("Report only. Reconcile with memory_deprecate; a human "
+                     "decides whether a flagged fact still matters."),
+        }
 
     def prune_stale(self, days_inactive: int = 90, dry_run: bool = True,
                     min_keep: int = 10) -> Dict[str, Any]:
