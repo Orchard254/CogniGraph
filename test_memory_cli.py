@@ -258,6 +258,49 @@ def test_audit_empty_and_duplicates(cli, capsys, monkeypatch):
     assert "Potential Duplicates : 1" in capsys.readouterr().out
 
 
+def test_audit_threshold_flags_forward_to_store(cli, capsys, monkeypatch):
+    """--semantic-threshold/--lexical-threshold reach store.audit() as kwargs."""
+    seen = {}
+
+    def _audit(self, **kwargs):
+        seen.update(kwargs)
+        return {"total_active_checked": 2, "potential_duplicates_count": 1,
+                "potential_duplicates": [{
+                    "similarity": 0.91, "category": "decision", "method": "semantic",
+                    "cross_category": True,
+                    "fact1_id": 1, "fact1_content": "a", "fact1_category": "state",
+                    "fact1_file_path": "README.md",
+                    "fact2_id": 2, "fact2_content": "b", "fact2_category": "decision",
+                    "fact2_file_path": None}],
+                "method": "semantic", "embedded_checked": 2,
+                "thresholds": {"semantic": 0.9, "lexical": 0.5}}
+
+    monkeypatch.setattr(FakeCLIStore, "audit", _audit)
+    cli("audit", "--semantic-threshold", "0.9", "--lexical-threshold", "0.5")
+    assert seen == {"semantic_threshold": 0.9, "lexical_threshold": 0.5}
+    out = capsys.readouterr().out
+    assert "semantic>=0.9" in out
+    assert "read-only report" in out
+    assert "CROSS-CATEGORY" in out
+    assert "via semantic" in out
+    assert "README.md" in out
+
+
+def test_audit_without_flags_calls_store_with_no_kwargs(cli, monkeypatch):
+    """argparse.SUPPRESS keeps the no-flag call at audit(), so a stubbed
+    audit(self) signature keeps working."""
+    calls = []
+
+    def _audit(self):
+        calls.append(1)
+        return {"total_active_checked": 0, "potential_duplicates_count": 0,
+                "potential_duplicates": []}
+
+    monkeypatch.setattr(FakeCLIStore, "audit", _audit)
+    cli("audit")
+    assert calls == [1]
+
+
 def test_export_stdout_and_file(cli, tmp_path, capsys):
     cli("export", "--category", "decision")
     store = FakeCLIStore.instances[-1]

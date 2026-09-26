@@ -10,7 +10,9 @@ from pm_common import (
     tokenize_text, MAX_LIMIT,
     _vec_to_blob, _get_embed_model,
     _EMBED_MODEL_NAME, _SEMANTIC_AVAILABLE, np,
+    _blob_to_vec,
 )
+from corpus_hygiene import STUB_PREFIXES
 
 
 def _run_git(root: Path, *args: str):
@@ -37,6 +39,16 @@ def _run_git(root: Path, *args: str):
 
 
 class LifecycleMixin:
+    # Audit sweep thresholds. The semantic default sits just under the
+    # write-time dedup threshold in write() (0.88) on purpose: dedup only ever
+    # sees a pair at the instant of writing, and this corpus is re-embedded
+    # over time (backfill, watcher re_embed), so a pair can drift above 0.88
+    # after both facts already exist. A periodic sweep is the complement to
+    # that lagging guard, not a duplicate of it. The lexical default is the
+    # original audit() constant, kept so the Jaccard path is unchanged.
+    AUDIT_SEMANTIC_THRESHOLD = 0.80
+    AUDIT_LEXICAL_THRESHOLD = 0.65
+
     def flag_fact(self, fact_id: int, note: str = "", flag_type: str = "misleading",
                   flagged_by: Optional[str] = None) -> Dict[str, Any]:
         """CORRECTION HOOK: record that a served fact misled the agent.
@@ -707,40 +719,140 @@ class LifecycleMixin:
         target.write_text(html_content, encoding="utf-8")
         return str(target)
 
-    def audit(self) -> Dict[str, Any]:
-        active_facts = self.get_state(limit=MAX_LIMIT)
-        duplicates = []
-        for i in range(len(active_facts)):
-            for j in range(i + 1, len(active_facts)):
-                f1 = active_facts[i]
-                f2 = active_facts[j]
-                if f1["category"] == f2["category"]:
-                    # Skip file-coverage vs file-coverage with different file_path (templated docs) — not true dupes
-                    fp1 = (f1.get("file_path") or "").strip().replace("\\", "/").lower()
-                    fp2 = (f2.get("file_path") or "").strip().replace("\\", "/").lower()
-                    tags1 = (f1.get("tags") or "").lower()
-                    tags2 = (f2.get("tags") or "").lower()
-                    if fp1 and fp2 and fp1 != fp2:
-                        # Different files — only flag if both are non-file-coverage or one is not templated
-                        if "file-coverage" in tags1 or "file-coverage" in tags2:
+    def audit(self, semantic_threshold: Optional[float] = None,
+              lexical_threshold: Optional[float] = None,
+              block: int = 512) -> Dict[str, Any]:
+        """Read-only sweep for stale / contradictory ACTIVE fact pairs.
+
+        Reports pairs that a human should reconcile with memory_supersede.
+        It never mutates: a decision about which fact survives needs judgment
+        (e.g. "six" vs "seven" rewritten scripts), so the sweeper only prints
+        the worklist.
+
+        Similarity is semantic cosine over the stored embeddings when both
+        facts have one, and tokenized Jaccard otherwise. Semantic matters
+        here: stale state facts are usually near-identical in MEANING but
+        differently worded, which Jaccard scores far too low to catch.
+
+        Template stubs (corpus_hygiene.STUB_PREFIXES) are excluded. They are
+        whole-file boilerplate, so two of them read as near-identical while
+        describing different files -- reporting those was the only thing the
+        previous lexical audit found on the live corpus.
+
+        The old implementation compared facts only within the same category
+        and read them through get_state(limit=MAX_LIMIT), which silently
+        truncated the sweep to the first 200 active facts.
+
+        The similarity matrix is computed in row blocks so memory stays
+        bounded as the corpus grows (a dense n x n float32 matrix is ~2 GB at
+        n=20_000; blocks keep it at block x n).
+        """
+        semantic_threshold = (self.AUDIT_SEMANTIC_THRESHOLD if semantic_threshold is None
+                              else float(semantic_threshold))
+        lexical_threshold = (self.AUDIT_LEXICAL_THRESHOLD if lexical_threshold is None
+                             else float(lexical_threshold))
+
+        stub_sql = " AND ".join("content NOT LIKE ?" for _ in STUB_PREFIXES)
+        rows = self.conn.execute(
+            f"SELECT id, category, content, rationale, file_path, created_at "
+            f"FROM memory WHERE deprecated_at IS NULL AND {stub_sql}",
+            tuple(f"{p}%" for p in STUB_PREFIXES),
+        ).fetchall()
+        facts = {r["id"]: dict(r) for r in rows}
+
+        pairs: Dict[Tuple[int, int], Dict[str, Any]] = {}
+        method = "lexical"
+
+        # --- semantic pass: stored embeddings, no model inference ---
+        vectors: Dict[int, Any] = {}
+        if _SEMANTIC_AVAILABLE and facts:
+            for r in self.conn.execute(
+                "SELECT fact_id, embedding FROM memory_embeddings"
+            ):
+                if r["fact_id"] in facts:
+                    v = _blob_to_vec(r["embedding"])
+                    if v is not None and v.size:
+                        # _cosine_sim assumes L2-normalized input. Stored
+                        # vectors normally already are; normalizing again is a
+                        # no-op for those and rescues any that are not.
+                        vectors[r["fact_id"]] = v / (np.linalg.norm(v) + 1e-9)
+
+        if len(vectors) >= 2:
+            method = "semantic"
+            emb_ids = list(vectors)
+            M = np.asarray([vectors[i] for i in emb_ids], dtype=np.float32)
+            for start in range(0, len(emb_ids), max(1, block)):
+                chunk_ids = emb_ids[start:start + max(1, block)]
+                sims = M[start:start + max(1, block)] @ M.T
+                for r_i, fact_a in enumerate(chunk_ids):
+                    sims[r_i, start + r_i] = -1.0  # never self-pair
+                    for r_j in np.nonzero(sims[r_i] >= semantic_threshold)[0]:
+                        fact_b = emb_ids[int(r_j)]
+                        if fact_a == fact_b:
                             continue
-                    w1 = tokenize_text(f1["content"])
-                    w2 = tokenize_text(f2["content"])
-                    if w1 and w2:
-                        jaccard = len(w1 & w2) / float(len(w1 | w2))
-                        if jaccard >= 0.65:
-                            duplicates.append({
-                                "fact1_id": f1["id"],
-                                "fact1_content": f1["content"],
-                                "fact2_id": f2["id"],
-                                "fact2_content": f2["content"],
-                                "similarity": round(jaccard, 2),
-                                "category": f1["category"]
-                            })
+                        lo, hi = (fact_a, fact_b) if fact_a < fact_b else (fact_b, fact_a)
+                        score = float(sims[r_i, int(r_j)])
+                        prev = pairs.get((lo, hi))
+                        if prev is None or score > prev["similarity"]:
+                            pairs[(lo, hi)] = {
+                                "similarity": round(score, 3), "method": "semantic",
+                                "fact1_id": lo, "fact2_id": hi,
+                            }
+                del sims
+
+        # --- lexical pass: only for facts with no usable embedding ---
+        unembedded = [fid for fid in facts if fid not in vectors]
+        if len(unembedded) >= 2:
+            token_cache = {fid: tokenize_text(facts[fid]["content"]) for fid in unembedded}
+            for i, fact_a in enumerate(unembedded):
+                wa = token_cache[fact_a]
+                if not wa:
+                    continue
+                for fact_b in unembedded[i + 1:]:
+                    wb = token_cache[fact_b]
+                    if not wb:
+                        continue
+                    union = len(wa | wb)
+                    if not union:
+                        continue
+                    jaccard = len(wa & wb) / float(union)
+                    if jaccard >= lexical_threshold:
+                        lo, hi = (fact_a, fact_b) if fact_a < fact_b else (fact_b, fact_a)
+                        pairs.setdefault((lo, hi), {
+                            "similarity": round(jaccard, 3), "method": "lexical",
+                            "fact1_id": lo, "fact2_id": hi,
+                        })
+
+        # --- assemble, keeping the original return shape backward compatible ---
+        duplicates = []
+        for (lo, hi), meta in sorted(pairs.items(), key=lambda kv: -kv[1]["similarity"]):
+            f1, f2 = facts[lo], facts[hi]
+            duplicates.append({
+                "fact1_id": lo,
+                "fact1_content": f1["content"],
+                "fact1_category": f1["category"],
+                "fact1_file_path": f1["file_path"],
+                "fact1_created_at": f1["created_at"],
+                "fact2_id": hi,
+                "fact2_content": f2["content"],
+                "fact2_category": f2["category"],
+                "fact2_file_path": f2["file_path"],
+                "fact2_created_at": f2["created_at"],
+                "similarity": meta["similarity"],
+                "method": meta["method"],
+                "category": f1["category"],
+                "cross_category": f1["category"] != f2["category"],
+            })
+
         return {
-            "total_active_checked": len(active_facts),
+            "total_active_checked": len(facts),
             "potential_duplicates_count": len(duplicates),
             "potential_duplicates": duplicates,
+            "method": method,
+            "embedded_checked": len(vectors),
+            "stubs_excluded": True,
+            "read_only": True,
+            "thresholds": {"semantic": semantic_threshold, "lexical": lexical_threshold},
         }
 
     def export_markdown(self, category: Optional[str] = None) -> str:

@@ -24,6 +24,12 @@ def main():
     # audit
     audit_p = subparsers.add_parser("audit", help="Run conflict and duplicate detection audit")
     audit_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
+    # SUPPRESS so an unsupplied flag is absent from the namespace and the store
+    # call stays audit() with no kwargs -- callers that stub audit() keep working.
+    audit_p.add_argument("--semantic-threshold", type=float, default=argparse.SUPPRESS,
+                         help="Cosine cutoff for embedded fact pairs (default 0.80)")
+    audit_p.add_argument("--lexical-threshold", type=float, default=argparse.SUPPRESS,
+                         help="Jaccard cutoff for facts with no embedding (default 0.65)")
 
     # export
     export_parser = subparsers.add_parser("export", help="Export active memory as Markdown")
@@ -211,16 +217,28 @@ def main():
                 print(f"  - {cat:12s}: {count}")
 
         elif args.command == "audit":
-            res = store.audit()
+            audit_kwargs = {}
+            for opt in ("semantic_threshold", "lexical_threshold"):
+                if hasattr(args, opt):
+                    audit_kwargs[opt] = getattr(args, opt)
+            res = store.audit(**audit_kwargs)
             print("=== CogniGraph Audit ===")
             print(f"Total Active Checked : {res['total_active_checked']}")
             print(f"Potential Duplicates : {res['potential_duplicates_count']}")
-            if res['potential_duplicates']:
+            if res.get("thresholds"):
+                th = res["thresholds"]
+                print(f"Thresholds           : semantic>={th['semantic']} lexical>={th['lexical']}"
+                      f" (method: {res.get('method', 'n/a')}, {res.get('embedded_checked', 0)} embedded)")
+            if res["potential_duplicates"]:
                 print("\nFlagged Candidates:")
-                for item in res['potential_duplicates']:
-                    print(f"\nSimilarity: {item['similarity']} [{item['category']}]")
-                    print(f"  ID {item['fact1_id']}: {item['fact1_content']}")
-                    print(f"  ID {item['fact2_id']}: {item['fact2_content']}")
+                print("  (read-only report -- reconcile with memory_supersede, nothing was changed)")
+                for item in res["potential_duplicates"]:
+                    cross = "  CROSS-CATEGORY" if item.get("cross_category") else ""
+                    print(f"\nSimilarity: {item['similarity']} [{item['category']}]"
+                          f" via {item.get('method', '?')}{cross}")
+                    for n in (1, 2):
+                        print(f"  ID {item[f'fact{n}_id']} [{item.get(f'fact{n}_category', '?')}]"
+                              f" {item.get(f'fact{n}_file_path') or '-'}: {item[f'fact{n}_content']}")
             else:
                 print("No duplicate active facts detected.")
 
