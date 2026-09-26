@@ -4,7 +4,7 @@ An enterprise-grade, state-of-the-art persistent memory system for AI coding age
 
 It provides cross-session, vendor-neutral memory for project components, architectural decisions, constraints, file dependency graph edges, code-anchored provenance, and state checkpoints.
 
-For the full agent-orientation deep dive — tech stack, annotated file tree, complete 14-tool catalog, conventions, and current state — see [project-brief.md](project-brief.md).
+Coding conventions and the context-building pipeline are recorded in project memory — query `memory_get_context` for "engineering conventions" or "context building" rather than reading a static doc that would drift.
 
 ---
 
