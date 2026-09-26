@@ -122,27 +122,19 @@ async def test_roots_routing_onboards_an_uninitialised_project(tmp_path, monkeyp
 
 
 @pytest.mark.anyio
-async def test_file_path_heuristic_cannot_reach_an_uninitialised_project(tmp_path, monkeypatch):
-    """DOCUMENTS A REAL GAP: mentioning a file is NOT enough to route.
+async def test_file_path_heuristic_reaches_an_uninitialised_project(tmp_path, monkeypatch):
+    """The gap this file originally documented, now closed.
 
-    find_project_root() searches upward for an EXISTING .cognigraph/memory.db
-    (or legacy) -- it looks for a database, not for a project marker like .git
-    or pyproject.toml. So for a project that has no memory yet it returns None,
-    resolved_db stays None, and the call silently falls back to the server's
-    OWN database.
-
-    Consequence: memory_get_file_context() for a file in an un-onboarded
-    project returns THIS project's facts, and a memory_write() anchored to such
-    a file would be stored in the wrong database. Contrast with the roots path
-    above, which does onboard a fresh project.
-
-    Pinned so the gap is explicit. Changing find_project_root to fall back to
-    project markers would fix it, but that changes which database many existing
-    calls resolve to, so it is a deliberate decision rather than a drive-by fix.
+    find_project_root() looks for an EXISTING memory.db, so a file in a project
+    with no memory yet used to resolve to None and the call silently fell back
+    to THIS server's own database. _resolve_db_for_path adds a marker-based
+    fallback for exactly that case, so the call is routed to the target project
+    instead of contaminating this one.
     """
     proj = _project(tmp_path, "via_filepath")
     target = proj / "src" / "svc.py"
     expected = proj / ".cognigraph" / "memory.db"
+    assert not expected.exists()
 
     class EmptyContext:
         session = None
@@ -152,12 +144,42 @@ async def test_file_path_heuristic_cannot_reach_an_uninitialised_project(tmp_pat
         "memory_get_file_context", {"file_path": str(target)})
     data = json.loads(res[0].text)
 
-    assert not expected.exists(), (
-        "premise: the file_path heuristic must not be able to onboard a project")
-    # It answered, but from the server's own database, not the target project.
+    assert expected.is_file(), (
+        "routing should have onboarded the target project, not used this one")
     assert "svc.py" in data.get("briefing_markdown", "")
-    assert find_project_root(target.resolve()) is None, (
-        "premise: find_project_root finds no DB, so no routing is possible")
+
+
+def test_marker_fallback_does_not_capture_unrelated_paths(tmp_path):
+    """Any resolution must be justified by a real marker on an ancestor.
+
+    Environment-independent: rather than asserting a specific outcome (which
+    depends on whether the temp dir happens to sit under a project), it asserts
+    the invariant -- if the resolver claims a root, that root must genuinely
+    carry a marker.
+    """
+    plain = tmp_path / "not_a_project" / "notes.txt"
+    plain.parent.mkdir(parents=True, exist_ok=True)
+    plain.write_text("hello", encoding="utf-8")
+
+    resolved = server._resolve_db_for_path(str(plain))
+    if resolved is None:
+        return  # no marker anywhere above: correctly declined to guess
+    root = Path(resolved).parent.parent
+    assert any((root / m).exists() for m in server._PROJECT_MARKERS), (
+        f"resolver claimed {root} without any project marker on it")
+
+
+def test_existing_database_still_wins_over_marker_fallback(tmp_path):
+    """Additive guarantee: a project that already has a DB resolves as before.
+
+    find_project_root() is consulted first, so this is the path every
+    previously-working setup takes and the behaviour must be unchanged.
+    """
+    proj = _project(tmp_path, "onboarded", seed_content="already here")
+    db = proj / ".cognigraph" / "memory.db"
+    target = proj / "src" / "svc.py"
+
+    assert server._resolve_db_for_path(str(target)) == str(db)
 
 
 # --- contract 2: batch routing uses the first file only ------------------

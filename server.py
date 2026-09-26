@@ -21,6 +21,10 @@ from pm_common import (
 
 logger = logging.getLogger(__name__)
 
+# Directories that identify a project root for routing purposes only. Kept
+# separate from find_project_root(), which looks for an existing database.
+_PROJECT_MARKERS = (".git", "pyproject.toml", "package.json", "Cargo.toml", "go.mod")
+
 mcp = FastMCP("CogniGraph")
 # Create a function to get a store instance (not a global singleton)
 # Global flag to track if first-time setup has been done
@@ -71,6 +75,55 @@ def _resolve_db_from_root(root_dir: Path) -> Optional[str]:
             return str(root_dir / DATA_DIR_NAME / "memory.db")
     except Exception:
         pass
+    return None
+
+
+def _find_enclosing_project(start_path: Path) -> Optional[Path]:
+    """Walk upward for a project marker when no memory.db exists yet.
+
+    find_project_root() deliberately looks for an EXISTING database, not a
+    project marker, because default_db_path() shares it and must not start
+    inventing project roots. Routing needs the looser question, so it gets its
+    own resolver and leaves the shared helper alone.
+
+    Returns None when no marker is found, so an unrelated path keeps falling
+    back to the server's own database rather than being captured by whatever
+    directory happens to enclose it.
+    """
+    try:
+        current = Path(start_path).resolve()
+        if current.is_file():
+            current = current.parent
+        for parent in [current, *current.parents]:
+            for marker in _PROJECT_MARKERS:
+                if (parent / marker).exists():
+                    return parent
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_db_for_path(file_arg: str) -> Optional[str]:
+    """Resolve the database for a file path mentioned in a tool call.
+
+    Order matters and is chosen to be additive:
+      1. An enclosing project that ALREADY has a memory.db (find_project_root).
+         This is every case that resolved before, unchanged.
+      2. Failing that, an enclosing project identified by a marker. Only the
+         previously-broken case changes: a file in a project with no memory yet
+         used to fall through to the server's OWN database, so a write anchored
+         to that file landed in the wrong store.
+    """
+    try:
+        target = Path(file_arg).resolve()
+    except Exception:
+        return None
+    existing = find_project_root(target)
+    if existing:
+        return _resolve_db_from_root(existing)
+    marked = _find_enclosing_project(target)
+    if marked:
+        return _resolve_db_from_root(marked)
     return None
 
 
@@ -586,16 +639,10 @@ async def _dynamic_call_tool(name: str, arguments: dict[str, Any]) -> Any:
             logger.debug("dynamic roots resolution skipped: %r", e)
 
     # 3. Fallback: inspect arguments for file_path / file_paths / items
-    # TWO LIMITATIONS, both pinned by test_multi_project_routing.py:
-    #   a) Only the FIRST entry of file_paths/items is consulted, so a batch
-    #      spanning two projects routes to whichever project the first file is in.
-    #   b) find_project_root() searches upward for an EXISTING memory.db, not
-    #      for a project marker like .git or pyproject.toml. A file in a project
-    #      that has no memory yet therefore resolves to None, and the call falls
-    #      back to THIS server's own database -- so get_file_context for such a
-    #      file returns this project's facts, and a write anchored to it would
-    #      land in the wrong store. The roots path (step 2) does not share this
-    #      limitation, because a root is supplied directly.
+    # Only the FIRST entry of file_paths/items is consulted, so a batch spanning
+    # two projects routes to whichever project the first file is in (pinned by
+    # test_multi_project_routing.py). _resolve_db_for_path handles both an
+    # already-onboarded project and one with no memory yet.
     if not resolved_db and arguments and isinstance(arguments, dict):
         file_arg = arguments.get("file_path")
         if not file_arg and isinstance(arguments.get("file_paths"), list) and arguments["file_paths"]:
@@ -605,12 +652,7 @@ async def _dynamic_call_tool(name: str, arguments: dict[str, Any]) -> Any:
             if isinstance(first_item, dict):
                 file_arg = first_item.get("file_path") or first_item.get("file")
         if file_arg and isinstance(file_arg, str):
-            try:
-                cand_root = find_project_root(Path(file_arg).resolve())
-                if cand_root:
-                    resolved_db = _resolve_db_from_root(cand_root)
-            except Exception:
-                pass
+            resolved_db = _resolve_db_for_path(file_arg)
 
     if resolved_db:
         token = _active_db_path.set(resolved_db)
