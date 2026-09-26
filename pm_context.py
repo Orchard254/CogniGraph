@@ -3,11 +3,6 @@ import sqlite3
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from pm_common import (
-    MAX_LIMIT,
-)
-
-
 class ContextMixin:
     _CODING_INTENTS = {"fix", "implement", "refactor", "add", "remove", "optimize", "test", "debug"}
     _FACT_CONTENT_CAP = 500
@@ -403,7 +398,12 @@ class ContextMixin:
         via query_hybrid/get_context, not via file path.
         """
         clean_path = file_path.strip().replace("\\", "/").lower()
-        all_active = self.get_state(limit=MAX_LIMIT)
+        # limit=None: the briefing must see EVERY active fact. Clamping to
+        # MAX_LIMIT hid facts about the target file entirely once the corpus
+        # passed 200 facts. The fact #498 standing rule (do not uncap the
+        # STRUCTURAL lane without a retrieval re-tuning pass) does not apply
+        # here: this read feeds no ranking, only the pre-edit briefing.
+        all_active = self.get_state(limit=None)
 
         direct_facts = []
         for f in all_active:
@@ -606,7 +606,12 @@ class ContextMixin:
             clean_paths.append(fp.strip().replace("\\", "/").lower())
 
         facts_by_file: Dict[str, List[Dict[str, Any]]] = {p: [] for p in clean_paths}
-        all_active = self.get_state(limit=MAX_LIMIT)
+        # limit=None: the briefing must see EVERY active fact. Clamping to
+        # MAX_LIMIT hid facts about the target file entirely once the corpus
+        # passed 200 facts. The fact #498 standing rule (do not uncap the
+        # STRUCTURAL lane without a retrieval re-tuning pass) does not apply
+        # here: this read feeds no ranking, only the pre-edit briefing.
+        all_active = self.get_state(limit=None)
         for f in all_active:
             if not f["file_path"]:
                 continue

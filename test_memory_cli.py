@@ -88,8 +88,10 @@ class FakeCLIStore:
         self._rec("export_interactive_html", out=out)
         return out or "graph.html"
 
-    def get_state(self, category=None):
-        self._rec("get_state", category=category)
+    def get_state(self, category=None, limit=None):
+        # limit=None is passed by the `state` command so the printed
+        # "Active State (N facts)" count is the true active total.
+        self._rec("get_state", category=category, limit=limit)
         return [{"id": 1, "category": "state", "confidence": "confirmed", "content": "s"}]
 
     def scan_provenance(self, project_root=None, auto_deprecate=False, auto_heal=False):
@@ -336,7 +338,9 @@ def test_verify_state_and_context_family(cli, capsys, tmp_path):
     assert _call(s, "verify_provenance")[0][1:] == ((3,), {"project_root": str(tmp_path)})
     assert "Provenance status for fact 3: ok" in capsys.readouterr().out
     s = cli("state", "--json")
-    assert _call(s, "get_state")[0][2] == {"category": None}
+    # limit=None: the command prints "Active State (N facts)", so N must be the
+    # true active count rather than the 200-row default.
+    assert _call(s, "get_state")[0][2] == {"category": None, "limit": None}
     assert json.loads(capsys.readouterr().out)[0]["id"] == 1
     s = cli("context", "how does X work?", "--limit", "200")
     assert _call(s, "get_context")[0][2] == {"limit": 50}

@@ -921,7 +921,8 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
     def get_by_file(self, file_path: str, limit: int = 50) -> List[Dict[str, Any]]:
         """Retrieve active facts recorded for a specific file path."""
         clean_path = file_path.strip().replace("\\", "/").lower()
-        all_active = self.get_state(limit=MAX_LIMIT)
+        # limit=None: this means "every active fact", not "200 of them".
+        all_active = self.get_state(limit=None)
         matches = []
 
         for f in all_active:
@@ -1070,9 +1071,20 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             "tags": row["tags"] if "tags" in keys else None,
         }
 
-    def get_state(self, category: Optional[str] = None, limit: int = 200,
+    def get_state(self, category: Optional[str] = None, limit: Optional[int] = 200,
                 session_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        limit = max(1, min(int(limit), MAX_LIMIT))
+        """Active facts, newest first.
+
+        limit=None means NO ceiling -- use it for internal full-corpus reads
+        (exports, file/dependency briefings), never for a caller-facing count.
+        A caller-supplied limit is still clamped to MAX_LIMIT so a request for
+        10000 cannot dump the whole corpus into a model's context; the clamp is
+        the caller's, and MAX_LIMIT keeps its original meaning as that ceiling.
+
+        MAX_LIMIT is NOT a corpus-size guard. It dates from the initial commit
+        and silently truncated every full-corpus read once the corpus passed
+        200 facts (export_markdown dropped 350 of 550 with no warning).
+        """
         sql = "SELECT * FROM memory WHERE deprecated_at IS NULL"
         params: List[Any] = []
         if category:
@@ -1081,16 +1093,23 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         if session_id:
             sql += " AND session_id = ?"
             params.append(session_id)
-        sql += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
+        if limit is None:
+            sql += " ORDER BY created_at DESC"
+        else:
+            sql += " ORDER BY created_at DESC LIMIT ?"
+            params.append(max(1, min(int(limit), MAX_LIMIT)))
         rows = self.conn.execute(sql, params).fetchall()
 
         return [self._row_to_dict(r) for r in rows]
 
-    def get_episodic_state(self, category: Optional[str] = None, limit: int = 200,
+    def get_episodic_state(self, category: Optional[str] = None, limit: Optional[int] = 200,
                            repo_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Mirror of get_state for episodic_memories, filtered to root branch ACTIVE."""
-        limit = max(1, min(int(limit), MAX_LIMIT))
+        """Mirror of get_state for episodic_memories, filtered to root branch ACTIVE.
+
+        limit=None means no ceiling, matching get_state().
+        """
+        if limit is not None:
+            limit = max(1, min(int(limit), MAX_LIMIT))
         # If repo_id is None, derive single "own" repo (first repo) — single-repo deployment.
         # This avoids unioning all roots in multi-repo (which would leak cross-repo canonical content).
         if repo_id is None:
@@ -1104,8 +1123,11 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         if category:
             sql += " AND em.category = ?"
             params.append(category.lower().strip())
-        sql += " ORDER BY em.created_at DESC LIMIT ?"
-        params.append(limit)
+        if limit is None:
+            sql += " ORDER BY em.created_at DESC"
+        else:
+            sql += " ORDER BY em.created_at DESC LIMIT ?"
+            params.append(limit)
         try:
             rows = self.conn.execute(sql, params).fetchall()
         except sqlite3.OperationalError:

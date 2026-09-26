@@ -593,7 +593,13 @@ class SearchMixin:
         fts_results = self.query(text, category=category, tag=tag, limit=50, session_id=session_id)
 
         # --- Memory Lane 2: Tokenized Jaccard ---
-        all_active = self.get_state(category=category, limit=MAX_LIMIT, session_id=session_id)
+        # limit=None: the lane scored only the 200 most recent facts, so older
+        # facts could never compete. Unlike the STRUCTURAL lane (whose cap has
+        # a standing do-not-touch rule, fact #498) this lane is pure token
+        # overlap with no structural coupling, so untruncating it only widens
+        # candidacy. The eval gate is the arbiter: if this re-ranks and
+        # regresses, revert here rather than adjusting the baseline.
+        all_active = self.get_state(category=category, limit=None, session_id=session_id)
         query_words = tokenize_text(text)
         query_lower = text.lower().strip()
         tok_scores: List[Tuple[int, float]] = []

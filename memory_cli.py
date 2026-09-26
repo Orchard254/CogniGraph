@@ -330,7 +330,10 @@ def main():
             print(f"Exported interactive knowledge graph UI to {html_path}")
 
         elif args.command == "state":
-            facts = store.get_state(category=args.category)
+            # limit=None: this command labels its output "Active State (N facts)",
+            # so N must be the true active count. The 200 default made it report
+            # 200 while hundreds more existed.
+            facts = store.get_state(category=args.category, limit=None)
             if args.json:
                 print(json.dumps(facts, indent=2))
             else:

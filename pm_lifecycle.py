@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
 from pm_common import (
-    tokenize_text, MAX_LIMIT,
+    tokenize_text,
     _vec_to_blob, _get_embed_model,
     _EMBED_MODEL_NAME, _SEMANTIC_AVAILABLE, np,
     _blob_to_vec,
@@ -669,7 +669,8 @@ class LifecycleMixin:
         Generate a self-contained standalone single-file HTML page containing an
         interactive 2D graph visualizer of project memory facts and relationship edges.
         """
-        facts = self.get_state(limit=MAX_LIMIT)
+        # limit=None: an export that silently drops facts is data loss.
+        facts = self.get_state(limit=None)
         edges = self.conn.execute(
             "SELECT source_id, target_id, relation FROM memory_edges"
         ).fetchall()
@@ -945,7 +946,8 @@ class LifecycleMixin:
         }
 
     def export_markdown(self, category: Optional[str] = None) -> str:
-        facts = self.get_state(category=category, limit=MAX_LIMIT)
+        # limit=None: an export that silently drops facts is data loss.
+        facts = self.get_state(category=category, limit=None)
         if not facts:
             return "# CogniGraph Snapshot\n\n*No active facts stored.*"
 
