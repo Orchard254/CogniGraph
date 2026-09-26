@@ -85,8 +85,35 @@ question is the mistake this section exists to prevent.
 
 | split   | pairs | recall@5 | recall@10 | MRR    |
 |---------|-------|----------|-----------|--------|
-| tuning  | 36    | 0.9167   | 0.9444    | 0.5796 |
-| holdout | 16    | 0.75     | 1.0       | 0.561  |
+| tuning  | 36    | 0.9444   | 0.9722    | 0.6582 |
+| holdout | 16    | 0.8125   | 1.0       | 0.6131 |
+
+Refrozen 2026-09-27 after the episodic-deprecation retrieval fix. The corpus is
+unchanged from the previous freeze: the fixture was re-snapshotted from a copy
+of itself, NOT from the live DB, so the 330 active facts and the pinned clock
+are identical and the new numbers are directly comparable to the old ones.
+
+| metric           | before | after  |
+|------------------|--------|--------|
+| tuning recall@5  | 0.9167 | 0.9444 |
+| tuning recall@10 | 0.9444 | 0.9722 |
+| tuning MRR       | 0.5796 | 0.6582 |
+| holdout recall@5 | 0.75   | 0.8125 |
+| holdout MRR      | 0.561  | 0.6131 |
+
+Cause: `query_hybrid`'s episodic lanes filtered only
+`episodic_memories.status`, so facts deprecated in `memory` kept ranking. With
+all 104 episodic rows still ACTIVE, those deprecated copies were competing for
+top-5 slots; filtering them out moved relevant facts up on both splits. One
+tuning item (#111) fell out of top-5 — it is itself a stale fact prescribing
+the retired `memory_query_hybrid` / `memory_scan_provenance` calls, so losing
+that slot is the correct outcome rather than a fresh regression.
+
+Freezing from a copy of the fixture rather than from live is deliberate. The
+live corpus has grown well past this fixture, and freezing from live would
+replace the regression yardstick with today's corpus and weaken the gate — the
+exact failure mode the "Fixture vs. live drift" section above warns about. See
+"Intentional retrieval changes" for the process.
 
 These measure the frozen artifact (precomputed query vectors) rather than
 the live model's query encoding, so they differ from the live-DB numbers

@@ -2,13 +2,13 @@
   "description": "Committed eval-gate baseline for golden_fixture.db. Regenerate both files together via scripts/freeze_eval_fixture.py.",
   "pinned_now": "2026-09-11T00:00:00+00:00",
   "rrf_k": 5,
-  "created_at_utc": "2026-09-12T18:26:31.553643+00:00",
-  "git_commit_sha": "e92bc4b90e82a33459f4b74f337293ae3335bcdf",
+  "created_at_utc": "2026-09-26T22:04:41.021872+00:00",
+  "git_commit_sha": "872acae0f3fdf50ce325ef0926910f33736b3ca4",
   "fixture": {
     "path": "eval/fixtures/golden_fixture.db",
-    "source_db": "C:\\PROJECT\\project-memory\\.cognigraph\\memory.db",
-    "bytes": 6148096,
-    "sha256": "e045e473a41f1555aa00e9e0cd336bb1a79c0004c266e69ce6c98798b74ee0cd",
+    "source_db": "C:\\Users\\orcha\\AppData\\Local\\Temp\\opencode\\fixture_source.db",
+    "bytes": 6152192,
+    "sha256": "965d71c2fc965cb1be683abcea36c3f04d5baaddfcf2f435b4838062baa63e92",
     "active_facts": 330,
     "embeddings_precomputed": true,
     "golden_query_embeddings": 52
@@ -17,19 +17,18 @@
   "splits": {
     "tuning": {
       "n": 36,
-      "recall@5": 0.9167,
-      "recall@10": 0.9444,
-      "mrr": 0.5796,
+      "recall@5": 0.9444,
+      "recall@10": 0.9722,
+      "mrr": 0.6582,
       "missed_fact_ids": [
-        111,
-        153
+        111
       ]
     },
     "holdout": {
       "n": 16,
-      "recall@5": 0.75,
+      "recall@5": 0.8125,
       "recall@10": 1.0,
-      "mrr": 0.561,
+      "mrr": 0.6131,
       "missed_fact_ids": []
     }
   }
