@@ -45,7 +45,22 @@ def _uri_to_path(uri: str) -> Optional[Path]:
 
 
 def _resolve_db_from_root(root_dir: Path) -> Optional[str]:
-    """Given a project root directory, locate existing or canonical memory.db."""
+    """Given a project root directory, locate existing or canonical memory.db.
+
+    Preference order: existing .cognigraph/memory.db, then legacy
+    .project-memory/memory.db, then the canonical .cognigraph path for a
+    directory that has neither.
+
+    That last fallback is deliberate lazy onboarding, and it is how the MCP
+    roots path reaches a project with no memory yet (a root is supplied
+    directly, so this fallback applies and the store is created and
+    bootstrapped on first use). It is NOT reachable from the file_path
+    heuristic, because find_project_root() requires an existing memory.db --
+    see the limitation note in _dynamic_call_tool.
+
+    Returns None when root_dir is not a directory, since nothing can be hosted
+    there.
+    """
     try:
         root_dir = Path(root_dir).resolve()
         if (root_dir / DATA_DIR_NAME / "memory.db").is_file():
@@ -571,6 +586,16 @@ async def _dynamic_call_tool(name: str, arguments: dict[str, Any]) -> Any:
             logger.debug("dynamic roots resolution skipped: %r", e)
 
     # 3. Fallback: inspect arguments for file_path / file_paths / items
+    # TWO LIMITATIONS, both pinned by test_multi_project_routing.py:
+    #   a) Only the FIRST entry of file_paths/items is consulted, so a batch
+    #      spanning two projects routes to whichever project the first file is in.
+    #   b) find_project_root() searches upward for an EXISTING memory.db, not
+    #      for a project marker like .git or pyproject.toml. A file in a project
+    #      that has no memory yet therefore resolves to None, and the call falls
+    #      back to THIS server's own database -- so get_file_context for such a
+    #      file returns this project's facts, and a write anchored to it would
+    #      land in the wrong store. The roots path (step 2) does not share this
+    #      limitation, because a root is supplied directly.
     if not resolved_db and arguments and isinstance(arguments, dict):
         file_arg = arguments.get("file_path")
         if not file_arg and isinstance(arguments.get("file_paths"), list) and arguments["file_paths"]:
