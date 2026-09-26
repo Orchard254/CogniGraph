@@ -119,3 +119,33 @@ These measure the frozen artifact (precomputed query vectors) rather than
 the live model's query encoding, so they differ from the live-DB numbers
 recorded in the Phase 5 decision; the gate compares only against its own
 committed baseline.
+
+## Known blocker before the next freeze (as of 2026-09-27)
+
+Four `eval/golden_tuning.json` items point at facts that have since been
+deprecated in the **live** database. The committed fixture is unaffected — it
+is a frozen snapshot in which all four are still ACTIVE — so the gate passes
+and needs no action. But `scripts/freeze_eval_fixture.py` validates golden ids
+against its `--db` source, so a freeze **from live** will fail with
+`golden fact ids missing/deprecated/unembedded` until they are repointed:
+
+| golden fact_id | query                                          | repoint to |
+|----------------|------------------------------------------------|------------|
+| 111            | mandatory session protocol order               | 142 (current AGENTS.md protocol capture) |
+| 126            | where repo_id derivation lives now             | 435 (same decision, with file anchor) |
+| 259            | which watcher verification approach backfired  | 266 (the corrected live-test outcome) |
+| 375            | is there a project brief with the conventions  | no in-fixture replacement — see below |
+
+142, 435 and 266 are present and ACTIVE in the committed fixture, so those
+three can be repointed without a live dependency. #375 is the odd one out: it
+described `project-brief.md`, which was deleted on 2026-09-27, and the fact
+recording that deletion (#728) postdates this fixture. Repointing it requires
+either a fact that exists in the freeze source, or accepting a live freeze —
+and freezing from live is precisely what "Fixture vs. live drift" forbids.
+
+Left deliberately unresolved rather than churned here: the golden set, the
+fixture and the expectations are a coherent triple, so repointing one without
+re-freezing all three would break the pair, and re-freezing would move the
+baseline a second time for no correctness gain. The failure is loud and names
+the ids, so it cannot be hit silently. Whoever next needs a live freeze should
+apply the table above first.

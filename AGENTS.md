@@ -29,7 +29,8 @@ At the end of every session:
 8. Call `memory_checkpoint_task` with the verified test output: `summary` (string), `test_baseline` (string), plus optional `components` and `decisions` (each a list of dicts with a required `content` key and optional `rationale`, `confidence`, `file_path`, `line_start`, `line_end`, `code_hash`, `tags`, `importance`), and optional `failures` (list of dicts with a required `content` key and optional `rationale`) for approaches that did not work.
 
 Maintenance (weekly or when drift is suspected) runs via CLI/background, not MCP:
-- `backup`, `scan-provenance`, `audit`, `prune`, `optimize`, `backfill`, `export`, `bootstrap`, `branch` via `memory_cli.py`; auto-maintenance also runs on server startup and takes a timestamped full-DB backup first (keep 8). Migration scripts snapshot automatically before mutating.
+- `backup`, `scan-provenance`, `audit`, `pollution`, `prune`, `optimize`, `backfill`, `export`, `bootstrap`, `branch` via `memory_cli.py`; auto-maintenance also runs on server startup and takes a timestamped full-DB backup first (keep 8). Migration scripts snapshot automatically before mutating.
+- `python scripts/check_corpus_truth.py` — exits non-zero when an active fact contradicts the running system (currently: claims an MCP tool count the live registry disagrees with). Run it after any change to the tool surface, and before concluding a corpus cleanup is finished. `.cognigraph/` is gitignored so this cannot be a CI job; run it locally.
 
 Structural layer (tree-sitter, Python/JS/TS/TSX):
 - `structural_extract.py:extract_structures(file_path)` — parse file into function/class/method/import nodes
@@ -45,4 +46,4 @@ Code graph (one-hop queries — ask these mid-reasoning instead of re-reading fi
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.
 - If `memory_cli.py wire` reports `WIRED_WITH_ERRORS`, fix `config_errors` first - the listed config was not written (wire.py:207-222).
-<!-- cognigraph-template sha256:42cc909e4c37db07a3a671bc48a40aefff2854d1b927ec99623a9c76abc24ab9 -->
+<!-- cognigraph-template sha256:d4d3bd19534e4220c96ac757b2823b954dc02b9da31caea3aa58eb024c0ed477 -->

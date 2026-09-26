@@ -253,6 +253,8 @@ KNOWN_AGENTS_TEMPLATE_HASHES = frozenset({
     "52230ced414bbbc78df005fecc5944ddf5a3d7edb576f9f13d1a5cf9e933aa76",
     # docs(agents): add memory_who_inherits to Code graph section
     "42cc909e4c37db07a3a671bc48a40aefff2854d1b927ec99623a9c76abc24ab9",
+    # docs(agents): document scripts/check_corpus_truth.py in the maintenance list
+    "d4d3bd19534e4220c96ac757b2823b954dc02b9da31caea3aa58eb024c0ed477",
 })
 
 

@@ -513,7 +513,11 @@ def test_classify_agents_md_four_outcomes():
 
 
 def test_known_hashes_cover_shipped_history():
-    assert len(wire.KNOWN_AGENTS_TEMPLATE_HASHES) == 9
+    # A floor, not an equality: the set must only ever GROW. Every legitimate
+    # AGENTS.md template change appends one hash, so pinning an exact count
+    # would fail on every correct update and discourage them. What must never
+    # happen is entries being removed, hence >= against the high-water mark.
+    assert len(wire.KNOWN_AGENTS_TEMPLATE_HASHES) >= 10
     assert all(re.fullmatch(r"[0-9a-f]{64}", h)
                for h in wire.KNOWN_AGENTS_TEMPLATE_HASHES)
     real = Path(wire.__file__).resolve().parent / "AGENTS.md"
