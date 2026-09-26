@@ -24,6 +24,8 @@ While working:
 5. Write new facts IMMEDIATELY after verifying them (`memory_write` with `file_path`, `line_start`, `line_end`, and `code_hash` for provenance; `memory_write_batch` for several related facts — its item schema lists every accepted key, `content` required).
    - Get `line_start`/`line_end`/`code_hash` from `memory_read_code` rather than computing them: each result carries `provenance_lines` and a `code_hash` over exactly that span, which is what `memory_cli.py verify` will later re-hash. Recomputing by hand is easy to get wrong (trailing newlines are part of the digest).
 6. Correct outdated facts with `memory_supersede` — never write duplicates. If `memory_write` returns `DUPLICATE_DETECTED`, supersede the reported ID instead. Use `memory_deprecate` to mark a fact obsolete without replacement; it also accepts a list of ids for batch cleanups and reports each outcome, so one unknown id does not abandon the rest.
+   - `memory_supersede` INHERITS `file_path`/`line_start`/`line_end`/`code_hash` from the fact it replaces. That is right when restating the same knowledge and wrong when the file was deleted or the code moved — you would keep a dead anchor plus a stale line range and hash that `memory_cli.py verify` re-hashes against the wrong span. Pass `inherit_provenance=false` to supply them yourself (blank clears), or `file_path=""` on its own to clear just the anchor.
+   - Use `memory_cli.py locate <id>` when you need to know where an id lives: it reports whether it is in `memory`, in `episodic_memories`, or both, and flags an episodic row that is ACTIVE while its `memory` row is deprecated (which means NOT served — `memory.deprecated_at` is the liveness authority, episodic `status` is branch state).
 7. Never store secrets, tokens, or credentials. The store refuses them automatically.
 
 At the end of every session:
@@ -47,4 +49,4 @@ Code graph (one-hop queries — ask these mid-reasoning instead of re-reading fi
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.
 - If `memory_cli.py wire` reports `WIRED_WITH_ERRORS`, fix `config_errors` first - the listed config was not written (wire.py:207-222).
-<!-- cognigraph-template sha256:741022d3c57c541eb14b2a558424a78f31a4aedf28a013e501d659662e1e8da9 -->
+<!-- cognigraph-template sha256:37c48b70521ce0efc59d1d407b2e725ccbfd4c295397421717f7f0d491980703 -->

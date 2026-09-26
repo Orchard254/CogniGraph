@@ -132,7 +132,7 @@ The server registers 18 tools.
 | `memory_get_file_context` | `file_path` | Call while planning an approach to a file — and before editing it: its symbols, anchored facts, callers, and call-graph edges. |
 | `memory_check_safety` | `file_paths` | Call before a multi-file refactor: dependency risk matrix across the files you're about to change. |
 | `memory_check_hygiene` | `project_root?` | Commit/push-discipline status for the working tree: cleanliness, ahead/behind, stale branches. Local git only, read-only; no CI correlation in v1. |
-| `memory_supersede` | `old_id`, `new_content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `expected_version?` | Replace an outdated fact with corrected content. Use when you discover memory that is wrong. |
+| `memory_supersede` | `old_id`, `new_content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `expected_version?`, `inherit_provenance?`, `line_start?`, `line_end?`, `code_hash?`, `git_commit_sha?` | Replace an outdated fact with corrected content. Use when you discover memory that is wrong. |
 | `memory_deprecate` | `id`, `reason?` | Mark one fact (or a batch of ids) obsolete without replacement. |
 | `memory_stats` | — | Memory health: active/deprecated counts, category breakdown, edges. Call at session start per AGENTS.md. |
 | `memory_prepare_task` | `intent`, `file_paths?`, `limit?` | REQUIRED before writing or modifying any code in this repository. Returns the task briefing: relevant decisions, constraints, component facts, file-level impacts, cross-file dependency risks, and the current verified test baseline. |
