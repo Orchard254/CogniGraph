@@ -274,6 +274,35 @@ def parse_manifests(root: Path) -> List[Dict[str, Any]]:
     return facts
 
 
+# Auto-generated doc regions, marked by the convention gen_tool_table.py writes:
+#   <!-- tool-table:start auto-generated -->  ...  <!-- tool-table:end -->
+# A fact that mirrors generated content is a snapshot that the next regeneration
+# falsifies -- capturing README's tool table produced a fact asserting
+# "The server registers 14 tools" that outlived the count. Replace the block
+# with a pointer instead of dropping the section, so the chunk still says the
+# table exists. Matched generically on the :start/:end marker convention so any
+# future generated region is covered without editing this list.
+GENERATED_REGION_RE = re.compile(
+    r"<!--\s*[\w.-]+:start[^>]*-->.*?<!--\s*[\w.-]+:end[^>]*-->",
+    re.DOTALL,
+)
+GENERATED_PLACEHOLDER = (
+    "(auto-generated region — see {name} to regenerate; contents intentionally "
+    "not captured into memory)"
+)
+
+
+def strip_generated_regions(text: str, name: str) -> str:
+    """Replace auto-generated marker blocks with a non-rotting pointer.
+
+    An unbalanced start marker is left alone rather than swallowing the rest of
+    the document: a partial region is a doc bug, and silently truncating the
+    facts would hide it.
+    """
+    return GENERATED_REGION_RE.sub(
+        GENERATED_PLACEHOLDER.format(name=name), text)
+
+
 def extract_docs(root: Path, max_chars: int = 900) -> List[Dict[str, Any]]:
     """Split markdown docs (repo root + docs/) into heading-based facts."""
     facts: List[Dict[str, Any]] = []
@@ -289,6 +318,7 @@ def extract_docs(root: Path, max_chars: int = 900) -> List[Dict[str, Any]]:
                 text = p.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
+            text = strip_generated_regions(text, p.name)
             for sec in re.split(r"\n(?=#{1,3} )", text):
                 sec = sec.strip()
                 if not sec:
