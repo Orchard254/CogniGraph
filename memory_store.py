@@ -886,6 +886,27 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             (now, reason, id),
         )
 
+    def deprecate_many(self, ids: List[int], reason: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Deprecate several facts, reporting each outcome independently.
+
+        One bad id must never abandon the rest of a cleanup batch, so a missing
+        id is recorded as an error for that entry rather than raised. Callers
+        doing a corpus cleanup previously had to issue N separate calls.
+        """
+        out: List[Dict[str, Any]] = []
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        for fid in ids:
+            row = self.conn.execute("SELECT id FROM memory WHERE id = ?", (fid,)).fetchone()
+            if row is None:
+                out.append({"id": fid, "status": "not_found"})
+                continue
+            self.conn.execute(
+                "UPDATE memory SET deprecated_at = ?, deprecated_reason = ? WHERE id = ?",
+                (now, reason, fid),
+            )
+            out.append({"id": fid, "status": "deprecated"})
+        return out
+
     def revision_transaction(self, repo_id: int) -> "RevisionTransaction":
 
         """Phase 0 revision protocol entry point: allocate a revision number atomically."""

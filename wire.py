@@ -255,6 +255,8 @@ KNOWN_AGENTS_TEMPLATE_HASHES = frozenset({
     "42cc909e4c37db07a3a671bc48a40aefff2854d1b927ec99623a9c76abc24ab9",
     # docs(agents): document scripts/check_corpus_truth.py in the maintenance list
     "d4d3bd19534e4220c96ac757b2823b954dc02b9da31caea3aa58eb024c0ed477",
+    # docs(agents): take provenance from memory_read_code; batch memory_deprecate
+    "741022d3c57c541eb14b2a558424a78f31a4aedf28a013e501d659662e1e8da9",
 })
 
 

@@ -8,7 +8,8 @@ import logging
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Iterator
+from typing import List, Dict, Any, Optional, Iterator, Union
+from typing_extensions import TypedDict, Required
 from urllib.parse import urlparse, unquote
 from mcp.server.fastmcp import FastMCP
 from memory_store import MemoryStore
@@ -335,9 +336,41 @@ def memory_write(category: str, content: str, rationale: str = "",
     return {"id": new_id, "status": "written"}
 
 
+class FactSpec(TypedDict, total=False):
+    """One fact's fields for memory_write_batch.
+
+    Declared as a TypedDict so the advertised JSON schema is a real object
+    rather than `Array<{}>`. The previous `List[Dict[str, Any]]` gave an agent
+    no way to discover the accepted keys without reading the source, and a
+    malformed guess fails the whole batch.
+
+    `content` is Required so the schema states it; everything else defaults as
+    it does in memory_write. Keep the two in sync when adding a field.
+    """
+    content: Required[str]
+    category: str
+    rationale: str
+    confidence: str
+    session_id: str
+    file_path: str
+    tags: str
+    importance: int
+    line_start: int
+    line_end: int
+    code_hash: str
+    git_commit_sha: str
+
+
 @mcp.tool()
-def memory_write_batch(facts: List[Dict[str, Any]]) -> dict:
-    """Atomic batch form of memory_write for several related facts."""
+def memory_write_batch(facts: List[FactSpec]) -> dict:
+    """Atomic batch form of memory_write for several related facts.
+
+    Each item accepts: content (required), category, rationale, confidence,
+    session_id, file_path, tags, importance, line_start, line_end, code_hash,
+    git_commit_sha. Same defaults as memory_write. For provenance, call
+    memory_read_code first and pass its `provenance_lines` as line_start/line_end
+    and its `code_hash` verbatim.
+    """
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     unembedded: List[int] = []
     with _store() as _s:
@@ -491,12 +524,27 @@ def memory_supersede(old_id: int, new_content: str, rationale: str = "",
 
 
 @mcp.tool()
-def memory_deprecate(id: int, reason: str = "") -> dict:
-    """Mark a fact obsolete without replacement."""
+def memory_deprecate(id: Union[int, List[int]], reason: str = "") -> dict:
+    """Mark one fact (or a batch of ids) obsolete without replacement.
+
+    Pass a single int or a list of ints. Per-id outcomes are reported, so one
+    unknown id never abandons the rest of a cleanup batch.
+    """
     _ensure_first_time_setup()  # Auto-bootstrap on first use
+    batch = isinstance(id, (list, tuple))
+    ids = [int(i) for i in id] if batch else [int(id)]
     with _store() as _s:
-        _s.deprecate(id, reason or None)
-    return {"id": id, "status": "deprecated"}
+        results = _s.deprecate_many(ids, reason or None)
+    payload = {
+        "status": "deprecated",
+        "results": results,
+        "count": sum(1 for r in results if r["status"] == "deprecated"),
+        "not_found": [r["id"] for r in results if r["status"] == "not_found"],
+    }
+    # Backward-compatible shape for the single-id call.
+    payload["id"] = None if batch else ids[0]
+    payload["ids"] = ids
+    return payload
 
 
 @mcp.tool()

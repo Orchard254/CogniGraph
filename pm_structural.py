@@ -1369,10 +1369,20 @@ class StructuralMixin:
             n = len(disk_lines)
             lo = max(1, min(want_lo, want_hi))
             hi = min(n, max(want_lo, want_hi))
+            # Provenance hash. verify_provenance recomputes this as
+            # sha256("".join(file_lines[line_start-1:line_end])) with
+            # splitlines(keepends=True), so trailing newlines are part of the
+            # digest and an agent recomputing it by hand is likely to get the
+            # line-ending convention wrong. It is computed over the FULL
+            # `actual` span, NOT the possibly-truncated [lo, hi] text returned
+            # below, because `actual` is what a caller records as
+            # line_start/line_end and therefore what will be re-hashed later.
+            prov_lo = max(1, min(n, actual[0]) if n else 1)
+            prov_hi = min(n, max(1, actual[1]))
+            prov_snippet = "".join(disk_lines[prov_lo - 1:prov_hi]) if n else ""
+            prov_hash = hashlib.sha256(prov_snippet.encode("utf-8")).hexdigest()
             if stored_hash:
-                full = "".join(disk_lines[max(0, actual[0] - 1):min(n, actual[1])])
-                digest = hashlib.sha256(full.encode("utf-8")).hexdigest()
-                stale = digest != stored_hash
+                stale = prov_hash != stored_hash
                 reason = None if not stale else "snippet_hash_mismatch"
             else:
                 stale, reason = _stale_by_mtime(disk, clean)
@@ -1393,6 +1403,8 @@ class StructuralMixin:
                             "returned_lines": [lo, hi] if text or n else [],
                             "actual_lines": actual, "truncated": truncated,
                             "stale": stale, "stale_reason": reason,
+                            "provenance_lines": [prov_lo, prov_hi],
+                            "code_hash": prov_hash,
                             "text": text})
 
         for raw in seq:

@@ -144,6 +144,10 @@ class FakeStore:
         self._rec("deprecate", id=id, reason=reason)
         return None
 
+    def deprecate_many(self, ids, reason=None):
+        self._rec("deprecate_many", ids=list(ids), reason=reason)
+        return [{"id": i, "status": "deprecated"} for i in ids]
+
     def get_state(self, category=None, session_id=None):
         self._rec("get_state", category=category, session_id=session_id)
         return [{"id": 1, "content": "canned-state"}]
@@ -448,7 +452,12 @@ def test_supersede_deprecate_shapes(fake_store):
     assert sup == {"new_id": 9, "old_id": 1, "status": "superseded"}
 
     dep = server.memory_deprecate(id=2, reason="stale")
-    assert dep == {"id": 2, "status": "deprecated"}
+    # Backward-compatible single-id shape. The batch form (id as a list) adds
+    # results/count/not_found/ids on top; see test_deprecate_batch.py.
+    assert dep["id"] == 2
+    assert dep["status"] == "deprecated"
+    assert dep["count"] == 1
+    assert dep["not_found"] == []
 
 
 # ---------------------------------------------------------------------------
