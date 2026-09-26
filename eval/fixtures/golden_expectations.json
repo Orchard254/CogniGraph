@@ -2,13 +2,13 @@
   "description": "Committed eval-gate baseline for golden_fixture.db. Regenerate both files together via scripts/freeze_eval_fixture.py.",
   "pinned_now": "2026-09-11T00:00:00+00:00",
   "rrf_k": 5,
-  "created_at_utc": "2026-09-26T22:04:41.021872+00:00",
-  "git_commit_sha": "872acae0f3fdf50ce325ef0926910f33736b3ca4",
+  "created_at_utc": "2026-09-26T22:39:37.603887+00:00",
+  "git_commit_sha": "21d3349e265db20164b6099b1c978487b65436a5",
   "fixture": {
     "path": "eval/fixtures/golden_fixture.db",
-    "source_db": "C:\\Users\\orcha\\AppData\\Local\\Temp\\opencode\\fixture_source.db",
+    "source_db": "C:\\Users\\orcha\\AppData\\Local\\Temp\\opencode\\fx2.db",
     "bytes": 6152192,
-    "sha256": "965d71c2fc965cb1be683abcea36c3f04d5baaddfcf2f435b4838062baa63e92",
+    "sha256": "05ae5d89383977a9f2c8115c14c10c8bb21bbdb31ef3f61c10d4bfe3349e7ea5",
     "active_facts": 330,
     "embeddings_precomputed": true,
     "golden_query_embeddings": 52
@@ -17,18 +17,18 @@
   "splits": {
     "tuning": {
       "n": 36,
-      "recall@5": 0.9444,
+      "recall@5": 0.9722,
       "recall@10": 0.9722,
-      "mrr": 0.6582,
+      "mrr": 0.7963,
       "missed_fact_ids": [
         111
       ]
     },
     "holdout": {
       "n": 16,
-      "recall@5": 0.8125,
+      "recall@5": 0.9375,
       "recall@10": 1.0,
-      "mrr": 0.6131,
+      "mrr": 0.676,
       "missed_fact_ids": []
     }
   }

@@ -85,35 +85,45 @@ question is the mistake this section exists to prevent.
 
 | split   | pairs | recall@5 | recall@10 | MRR    |
 |---------|-------|----------|-----------|--------|
-| tuning  | 36    | 0.9444   | 0.9722    | 0.6582 |
-| holdout | 16    | 0.8125   | 1.0       | 0.6131 |
+| tuning  | 36    | 0.9722   | 0.9722    | 0.7963 |
+| holdout | 16    | 0.9375   | 1.0       | 0.676  |
 
-Refrozen 2026-09-27 after the episodic-deprecation retrieval fix. The corpus is
-unchanged from the previous freeze: the fixture was re-snapshotted from a copy
-of itself, NOT from the live DB, so the 330 active facts and the pinned clock
-are identical and the new numbers are directly comparable to the old ones.
+Refrozen twice on 2026-09-27, each time from a copy of the fixture rather than
+from the live DB, so the corpus (330 active facts) and the pinned clock stayed
+identical and the deltas are attributable purely to the retrieval change.
 
-| metric           | before | after  |
-|------------------|--------|--------|
-| tuning recall@5  | 0.9167 | 0.9444 |
-| tuning recall@10 | 0.9444 | 0.9722 |
-| tuning MRR       | 0.5796 | 0.6582 |
-| holdout recall@5 | 0.75   | 0.8125 |
-| holdout MRR      | 0.561  | 0.6131 |
+| metric           | original   | after episodic fix | after MAX_LIMIT fix |
+|------------------|------------|--------------------|---------------------|
+| tuning recall@5  | 0.9167     | 0.9444             | 0.9722              |
+| tuning recall@10 | 0.9444     | 0.9722             | 0.9722              |
+| tuning MRR       | 0.5796     | 0.6582             | 0.7963              |
+| holdout recall@5 | 0.75       | 0.8125             | 0.9375              |
+| holdout MRR      | 0.561      | 0.6131             | 0.676               |
 
-Cause: `query_hybrid`'s episodic lanes filtered only
-`episodic_memories.status`, so facts deprecated in `memory` kept ranking. With
-all 104 episodic rows still ACTIVE, those deprecated copies were competing for
-top-5 slots; filtering them out moved relevant facts up on both splits. One
-tuning item (#111) fell out of top-5 — it is itself a stale fact prescribing
-the retired `memory_query_hybrid` / `memory_scan_provenance` calls, so losing
-that slot is the correct outcome rather than a fresh regression.
+**Change 1 — episodic deprecation.** `query_hybrid`'s episodic lanes filtered
+only `episodic_memories.status`, so facts deprecated in `memory` kept ranking.
+All 104 episodic rows were ACTIVE, and those deprecated copies competed for
+top-5 slots.
 
-Freezing from a copy of the fixture rather than from live is deliberate. The
-live corpus has grown well past this fixture, and freezing from live would
-replace the regression yardstick with today's corpus and weaken the gate — the
-exact failure mode the "Fixture vs. live drift" section above warns about. See
-"Intentional retrieval changes" for the process.
+**Change 2 — MAX_LIMIT truncation (the larger win).** The tokenized-Jaccard
+memory lane loaded only the 200 most recent facts, so older facts could never
+compete in that lane at all. Untruncating it moved tuning MRR 0.6582 -> 0.7963
+and holdout recall@5 0.8125 -> 0.9375. Note this is the OPPOSITE outcome to the
+structural lane's cap, which regresses the gate when removed and therefore
+carries a standing do-not-touch rule (fact #498, "Intentional retrieval
+changes"). The two caps look identical and behave oppositely: the Jaccard lane
+is pure token overlap and only needed more candidates, whereas the structural
+lane is coupled into the RRF weighting.
+
+One tuning item (#111) is still missed. It is a stale fact prescribing the
+retired `memory_query_hybrid` / `memory_scan_provenance` calls and is deprecated
+in the live DB; see the repoint table below.
+
+Freezing from a copy of the fixture rather than from live is deliberate
+throughout. The live corpus is far larger than this fixture, and freezing from
+live would replace the regression yardstick with today's corpus and weaken the
+gate — the exact failure mode the "Fixture vs. live drift" section above warns
+about. See "Intentional retrieval changes" for the process.
 
 These measure the frozen artifact (precomputed query vectors) rather than
 the live model's query encoding, so they differ from the live-DB numbers
