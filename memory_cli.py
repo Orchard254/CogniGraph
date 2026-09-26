@@ -36,6 +36,11 @@ def main():
     pollution_p.add_argument("--db", default=argparse.SUPPRESS,
                               help="Path to SQLite database file")
 
+    locate_p = subparsers.add_parser(
+        "locate", help="Show where a fact id lives and whether it is live")
+    locate_p.add_argument("fact_id", type=int, help="fact id to locate")
+    locate_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
+
     # export
     export_parser = subparsers.add_parser("export", help="Export active memory as Markdown")
     export_parser.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
@@ -210,6 +215,8 @@ def main():
             print("=== CogniGraph Statistics ===")
             print(f"Database Path    : {stats['db_path']}")
             print(f"Total Active     : {stats['total_active']}")
+            print(f"  Curated        : {stats.get('active_curated', 'n/a')}")
+            print(f"  Template Stubs : {stats.get('active_stubs', 'n/a')}")
             print(f"Active post-genesis (live)  : {stats.get('active_post_genesis_count', stats.get('active_post_genesis', 0))}  (memory table is the live intake store by contract)")
             print(f"Genesis migrated : {stats.get('genesis_migrated', 0)}")
             print(f"Episodic Active  : {stats.get('episodic_active', 0)}")
@@ -261,6 +268,25 @@ def main():
                         print(f"    rationale: {item['rationale'][:80]}")
             else:
                 print("No pollution detected.")
+
+        elif args.command == "locate":
+            res = store.locate_fact(args.fact_id)
+            print(f"=== Fact {args.fact_id} ===")
+            print(f"Liveness        : {res['liveness']}  (authority: {res['liveness_authority']})")
+            print(f"In `memory`     : {res['in_memory']}")
+            if res["memory_deprecated_at"]:
+                print(f"  deprecated_at : {res['memory_deprecated_at']}")
+                print(f"  reason        : {res['memory_deprecated_reason']}")
+            if res["category"]:
+                print(f"  category      : {res['category']}")
+            print(f"Episodic rows   : {len(res['episodic'])}")
+            for e in res["episodic"]:
+                print(f"  branch {e['branch_id']} repo {e['repo_id']} status {e['status']}")
+            if res["episodic_active_but_not_served"]:
+                print("  ** ACTIVE in episodic but DEPRECATED in memory -> NOT served **")
+            print(f"Graph edges     : {len(res['edges'])}")
+            for e in res["edges"]:
+                print(f"  {e['source_id']} [{e['relation']}] -> {e['target_id']}")
 
         elif args.command == "export":
             md = store.export_markdown(category=args.category)

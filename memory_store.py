@@ -34,6 +34,10 @@ from pm_search import SearchMixin
 from pm_context import ContextMixin
 from pm_lifecycle import LifecycleMixin
 from pm_structural import StructuralMixin
+# corpus_hygiene is stdlib-only at module top level, so this is cycle-free
+# (same import the mixins already do). Used by stats() to split the active
+# total into stubs vs curated so audit()'s "checked" figure is derivable.
+from corpus_hygiene import _stub_where, _stub_params
 
 __all__ = [
     "MemoryStore",
@@ -814,7 +818,28 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
     def supersede(self, old_id: int, new_content: str, rationale: Optional[str] = None,
                   confidence: str = "assumed", session_id: Optional[str] = None,
                   file_path: Optional[str] = None, tags: Optional[str] = None,
-                  expected_version: Optional[int] = None) -> int:
+                  expected_version: Optional[int] = None,
+                  inherit_provenance: bool = True,
+                  line_start: Optional[int] = None, line_end: Optional[int] = None,
+                  code_hash: Optional[str] = None,
+                  git_commit_sha: Optional[str] = None) -> int:
+        """Replace a fact, deprecating the original.
+
+        PROVENANCE INHERITANCE. By default the replacement inherits the old
+        fact's file_path / line_start / line_end / code_hash / git_commit_sha.
+        That is convenient when restating the same knowledge, but it silently
+        propagates a DANGLING anchor once the file has been deleted, and it
+        carries a stale line range plus a stale snippet hash when the code has
+        MOVED -- after which verify_provenance re-hashes the wrong span.
+
+        It also made an anchor impossible to clear: file_path=None (the default,
+        and what every caller passes) inherited rather than cleared, so a fact
+        about a deleted file stayed anchored to it indefinitely.
+
+        Pass inherit_provenance=False to take those fields exactly as supplied,
+        so None clears them. An empty string clears the string fields too.
+        category / importance / tags are always inherited; that is intended.
+        """
         row = self.conn.execute("SELECT * FROM memory WHERE id = ?", (old_id,)).fetchone()
         if row is None:
             raise ValueError(f"no memory row with id {old_id}")
@@ -830,8 +855,26 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         new_version = row["version"] + 1
-        # Normalize file_path to use forward slashes for consistent matching
-        norm_file_path = file_path.strip().replace("\\", "/") if file_path else row["file_path"]
+        # Provenance: inherit by default, or take as supplied (None clears).
+        # An explicit "" on a string field means "clear just this one" -- it is
+        # the only way a caller can drop a dead anchor without also discarding
+        # the line range and snippet hash it still wants to keep.
+        def _prov_str(value, inherited):
+            if value is not None and not str(value).strip():
+                return None                      # explicit clear
+            if value and str(value).strip():
+                return str(value).strip().replace("\\", "/")
+            return inherited if inherit_provenance else None
+
+        norm_file_path = _prov_str(file_path, row["file_path"])
+        if inherit_provenance:
+            norm_line_start, norm_line_end = row["line_start"], row["line_end"]
+            norm_code_hash, norm_sha = row["code_hash"], row["git_commit_sha"]
+        else:
+            norm_line_start = line_start if line_start else None
+            norm_line_end = line_end if line_end else None
+            norm_code_hash = _prov_str(code_hash, None)
+            norm_sha = _prov_str(git_commit_sha, None)
         try:
             self.conn.execute("BEGIN IMMEDIATE")
             cur = self.conn.execute(
@@ -842,7 +885,7 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                  new_version, row["importance"],
                  norm_file_path,
                  tags.strip() if tags else row["tags"],
-                 row["line_start"], row["line_end"], row["code_hash"], row["git_commit_sha"]),
+                 norm_line_start, norm_line_end, norm_code_hash, norm_sha),
             )
             new_id = cur.lastrowid
             self.conn.execute(
@@ -1165,11 +1208,84 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             result.append(d)
         return result
 
+    def locate_fact(self, fact_id: int) -> Dict[str, Any]:
+        """Where does this id live, and is it live? One call, no guessing.
+
+        A fact id can exist in `memory` AND in `episodic_memories` at the same
+        time, and nothing used to surface that. This is the same class of blind
+        spot as the retrieval leak fixed in f28109f: the store could not tell an
+        agent something it needed, and it surfaced only by accident.
+
+        LIVENESS AUTHORITY IS `memory.deprecated_at`, and only that.
+        `episodic_memories.status` is BRANCH state
+        (ACTIVE / SUPERSEDED / INVALIDATED / ORPHANED) and its triggers enforce
+        that reading -- updating a row to SUPERSEDED is rejected unless
+        superseded_by_memory_id is set, because a deprecation is not a
+        supersession. So an episodic row reading ACTIVE does NOT mean the fact
+        is served, and query_hybrid agrees: its episodic lanes drop any
+        candidate whose `memory` row is deprecated.
+
+        `episodic_active_but_not_served` is the explicit flag for that exact
+        shape, so it can be asserted on rather than inferred.
+        """
+        out: Dict[str, Any] = {
+            "fact_id": fact_id,
+            "in_memory": False,
+            "liveness": "absent",
+            "liveness_authority": "memory.deprecated_at",
+            "memory_deprecated_at": None,
+            "memory_deprecated_reason": None,
+            "category": None,
+            "episodic": [],
+            "episodic_active_but_not_served": False,
+            "edges": [],
+            "content_excerpt": None,
+        }
+        row = self.conn.execute(
+            "SELECT category, content, deprecated_at, deprecated_reason "
+            "FROM memory WHERE id = ?", (fact_id,)).fetchone()
+        if row is not None:
+            out["in_memory"] = True
+            out["category"] = row["category"]
+            out["memory_deprecated_at"] = row["deprecated_at"]
+            out["memory_deprecated_reason"] = row["deprecated_reason"]
+            out["liveness"] = "deprecated" if row["deprecated_at"] else "active"
+            out["content_excerpt"] = (row["content"] or "")[:200]
+
+        try:
+            epi = self.conn.execute(
+                "SELECT memory_id, repo_id, branch_id, status, created_revision, "
+                "closed_revision FROM episodic_memories WHERE memory_id = ?",
+                (fact_id,)).fetchall()
+        except sqlite3.OperationalError:
+            epi = []  # episodic schema absent on an older DB
+        out["episodic"] = [dict(r) for r in epi]
+        if out["liveness"] == "deprecated" and any(
+                r["status"] == "ACTIVE" for r in epi):
+            out["episodic_active_but_not_served"] = True
+
+        out["edges"] = [dict(r) for r in self.conn.execute(
+            "SELECT source_id, target_id, relation FROM memory_edges "
+            "WHERE source_id = ? OR target_id = ?", (fact_id, fact_id)).fetchall()]
+        return out
+
     def stats(self) -> Dict[str, Any]:
         rows = self.conn.execute(
             "SELECT category, COUNT(*) as n FROM memory WHERE deprecated_at IS NULL GROUP BY category"
         ).fetchall()
         total_active = sum(r["n"] for r in rows)
+        # Split the active total so audit()'s "checked" figure is derivable
+        # rather than puzzling: it reports non-stub facts, stats() counted every
+        # active row, and nothing explained the difference (e.g. 565 active vs
+        # 456 checked on a live corpus of 109 whole-file template stubs).
+        # _stub_where() is the MATCHING form (OR); reusing the NOT LIKE
+        # exclusion here would count curated facts and swap the two figures.
+        try:
+            active_stubs = self.conn.execute(
+                f"SELECT COUNT(*) as n FROM memory WHERE deprecated_at IS NULL "
+                f"AND ({_stub_where()})", _stub_params()).fetchone()["n"]
+        except sqlite3.OperationalError:
+            active_stubs = 0
         total_deprecated = self.conn.execute(
             "SELECT COUNT(*) as n FROM memory WHERE deprecated_at IS NOT NULL"
         ).fetchone()["n"]
@@ -1211,6 +1327,8 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         return {
             "active_by_category": {r["category"]: r["n"] for r in rows},
             "total_active": total_active,
+            "active_stubs": active_stubs,
+            "active_curated": total_active - active_stubs,
             "active_post_genesis": active_post_genesis,
             "active_post_genesis_count": active_post_genesis,  # explicit alias requested in task
             "genesis_migrated": genesis_migrated,

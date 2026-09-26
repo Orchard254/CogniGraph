@@ -506,8 +506,19 @@ def memory_check_hygiene(project_root: str = "") -> dict:
 @mcp.tool()
 def memory_supersede(old_id: int, new_content: str, rationale: str = "",
                       confidence: str = "assumed", session_id: str = "",
-                      file_path: str = "", tags: str = "", expected_version: int = 0) -> dict:
-    """Replace an outdated fact with corrected content. Use when you discover memory that is wrong."""
+                      file_path: str = "", tags: str = "", expected_version: int = 0,
+                     inherit_provenance: bool = True,
+                     line_start: int = 0, line_end: int = 0,
+                     code_hash: str = "", git_commit_sha: str = "") -> dict:
+    """Replace an outdated fact with corrected content. Use when you discover memory that is wrong.
+
+    Provenance is INHERITED from the replaced fact by default. Pass
+    inherit_provenance=false to supply these fields yourself (blank clears
+    them) — do that when the file was deleted or the code moved, since
+    inheriting keeps a dead anchor and a stale line range/hash that
+    `memory_cli.py verify` will re-hash against the wrong span. Pass
+    file_path="" on its own to clear just the anchor.
+    """
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
         new_id = _s.supersede(
@@ -519,6 +530,11 @@ def memory_supersede(old_id: int, new_content: str, rationale: str = "",
             file_path=file_path or None,
             tags=tags or None,
             expected_version=expected_version if expected_version > 0 else None,
+            inherit_provenance=inherit_provenance,
+            line_start=line_start or None,
+            line_end=line_end or None,
+            code_hash=code_hash or None,
+            git_commit_sha=git_commit_sha or None,
         )
     return {"new_id": new_id, "old_id": old_id, "status": "superseded"}
 
