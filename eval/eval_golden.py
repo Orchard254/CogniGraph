@@ -19,6 +19,7 @@ day as facts age and committed baseline numbers rot.
 """
 import argparse
 import json
+import logging
 import os
 import shutil
 import sqlite3
@@ -107,7 +108,27 @@ def load_query_embeddings(store: MemoryStore) -> Optional[Dict[str, Any]]:
 
 
 def run_once(copy_path: str, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    store = MemoryStore(copy_path)
+    # The frozen fixture predates the ux_stub_once fix (#530), so opening any
+    # copy of it logs "run the #530 backfill, then reopen" -- advice that must
+    # NOT be followed here, because this database exists to stay byte-frozen
+    # and its sha256 is checked. The live corpus has the index and zero
+    # duplicate cohorts, so the warning is true of the fixture and only of the
+    # fixture. Muted narrowly, by message substring, rather than by lowering a
+    # logger level: every OTHER warning from this constructor is still real and
+    # still wanted.
+    class _MuteFrozenFixture(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            return "ux_stub_once deferred" not in record.getMessage()
+
+    # The warning is emitted by pm_common's module logger, which memory_store
+    # imports -- filter that logger, not "memory_store".
+    _ms_logger = logging.getLogger("pm_common")
+    _flt = _MuteFrozenFixture()
+    _ms_logger.addFilter(_flt)
+    try:
+        store = MemoryStore(copy_path)
+    finally:
+        _ms_logger.removeFilter(_flt)
     query_vecs = load_query_embeddings(store)
     if query_vecs is not None:
         def _frozen_lookup(text: str):
