@@ -104,6 +104,7 @@ class FakeStore:
         intent="",
         agent_type="",
         explain=False,
+        fields=None,
     ):
         self._rec(
             "query_hybrid",
@@ -114,7 +115,11 @@ class FakeStore:
             intent=intent,
             agent_type=agent_type,
             explain=explain,
+            fields=fields,
         )
+        from pm_common import ProjectFieldError, project_fields
+        if fields:
+            project_fields([{"id": 2, "content": "canned-hybrid"}], fields)
         return [{"id": 2, "content": "canned-hybrid"}]
 
     def get_context(
@@ -437,6 +442,29 @@ def test_query_explain_defaults_off_and_threads_through(fake_store):
     assert _last_call(fake_store, "query_hybrid")["explain"] is False
     server.memory_query("x", explain=True)
     assert _last_call(fake_store, "query_hybrid")["explain"] is True
+
+
+def test_query_projection_is_self_describing(fake_store):
+    """A narrowed response must say so, or it reads as a complete one."""
+    out = server.memory_query("x")
+    assert "projected_fields" not in out          # default is complete
+    out = server.memory_query("x", fields="category,content")
+    assert out["projected_fields"] == ["category", "content", "id"]
+    assert _last_call(fake_store, "query_hybrid")["fields"] == "category,content"
+
+
+def test_query_projection_passes_none_when_unset(fake_store):
+    """Empty string means 'no projection' so an unset CLI option needs no branch."""
+    server.memory_query("x", fields="")
+    assert _last_call(fake_store, "query_hybrid")["fields"] is None
+
+
+def test_query_bad_field_returns_an_error_with_the_valid_list(fake_store):
+    """Loud, not a silently short result set."""
+    out = server.memory_query("x", fields="id,not_a_field")
+    assert "error" in out and "not_a_field" in out["error"]
+    assert "content" in out["valid_fields"]
+    assert "results" not in out
 
 
 def test_get_context_clamps_and_detects_intent(fake_store):

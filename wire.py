@@ -263,6 +263,8 @@ KNOWN_AGENTS_TEMPLATE_HASHES = frozenset({
     "8958b7b913e32e73eabd2cafb316608fce9e201485a77323f4562da0276779ee",
     # docs(agents): memory_query explain=True per-lane provenance
     "0c43220201f693281c4882481a93cdca88a47bbc1caf5c898522e5ed55f2824d",
+    # docs(agents): memory_query fields= projection
+    "9d4a5b903139ae0ea3a3fa4480b11e43e7ad55acfae5dbbe4d603e0b994626c9",
 })
 
 

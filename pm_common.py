@@ -96,6 +96,93 @@ VALID_CONFIDENCE = {"confirmed", "assumed", "uncertain"}
 VALID_RELATIONS = {"depends_on", "implements", "conflicts_with", "relates_to"}
 MAX_LIMIT = 200
 
+
+class ProjectFieldError(ValueError):
+    """A caller asked to project onto a field that does not exist.
+
+    Raised rather than silently ignored on purpose. Field projection exists to
+    cut token cost, and the only reason it can be trusted is that a mistake in
+    the field list is loud: a caller who misspells `file_path` and receives a
+    short, plausible result set with no anchor has been handed silent data
+    loss, which is the exact failure mode projection is supposed to reduce.
+
+    Note that `id` is auto-added rather than required. The first draft raised
+    on a projection that omitted `id`, which looked more explicit but created
+    an error path with a bad escape: a caller scripting `fields="content"`
+    hits the error, and the obvious "fix" is to drop `content` too. Auto-adding
+    makes the safety property structural instead of something to remember.
+    """
+
+
+# Every key a query_hybrid result may carry. Derived from the live corpus
+# rather than hand-maintained, so a new result key cannot make a previously
+# valid projection raise. This is a *permissive* set: anything not listed is
+# rejected, and the list is checked by test_every_live_result_key_is_known.
+KNOWN_RESULT_FIELDS = frozenset({
+    "id", "content", "category", "rationale", "confidence", "session_id",
+    "file_path", "tags", "importance", "line_start", "line_end", "code_hash",
+    "git_commit_sha", "created_at", "updated_at", "access_count",
+    "last_accessed_at", "score", "source", "version", "superseded_by",
+    "deprecated_at", "deprecated_reason",
+    # query_hybrid(..., explain=True) only
+    "fused_score", "lanes",
+    # episodic / locate_fact only
+    "status", "closed_revision", "memory_id", "fact_id", "in_memory",
+    "in_episodic", "episodic_status", "memory_deprecated_at",
+})
+
+
+def parse_fields(fields):
+    """Normalize a `fields` argument to an ordered list, or None for 'all'.
+
+    Accepts a comma-separated string (handy on the CLI, where a list is
+    awkward to type) or an already-split list. None, empty, and
+    whitespace-only all mean "no projection", so a caller can pass through an
+    unset CLI option without branching.
+    """
+    if fields is None:
+        return None
+    if isinstance(fields, str):
+        parts = [p.strip() for p in fields.split(",")]
+    else:
+        parts = [str(p).strip() for p in fields]
+    parts = [p for p in parts if p]
+    if not parts:
+        return None
+    seen, out = set(), []
+    for p in parts:
+        if p not in seen:          # keep caller order, drop repeats
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def project_fields(results, fields, extra_keep=()):
+    """Narrow each result dict to `fields` (plus `id`, always).
+
+    `id` is auto-added if absent -- see ProjectFieldError for why it is not
+    required. `extra_keep` carries keys the caller asked for through a
+    *different* flag: query_hybrid passes ("fused_score", "lanes") when
+    explain=True, so that an explicit explain request is not silently undone
+    by a narrow `fields` whitelist. Same principle as auto-adding `id` -- a
+    flag you passed is itself a request for its keys.
+
+    A requested field that a given result does not carry is simply absent from
+    that result -- never invented, never null-filled, because a fabricated null
+    would be indistinguishable from a real one.
+    """
+    wanted = parse_fields(fields)
+    if wanted is None:
+        return results
+    unknown = [f for f in wanted if f not in KNOWN_RESULT_FIELDS]
+    if unknown:
+        raise ProjectFieldError(
+            f"unknown result field(s): {', '.join(unknown)}. "
+            f"Valid fields: {', '.join(sorted(KNOWN_RESULT_FIELDS))}")
+    keep = set(wanted) | {"id"} | set(extra_keep)
+    return [{k: v for k, v in r.items() if k in keep} for r in results]
+
+
 _SECRET_PATTERNS = [
     re.compile(r"AKIA[0-9A-Z]{16}"),                              # AWS access key id
     re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"),

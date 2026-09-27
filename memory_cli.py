@@ -63,6 +63,12 @@ def main():
     query_parser.add_argument("--explain", action="store_true",
                               help="Show per-lane provenance: which retrieval lanes "
                                    "found each result, at what rank and weight")
+    query_parser.add_argument("--fields",
+                              help="Comma-separated result keys to show, e.g. "
+                                   "'id,category,content'. Cuts token cost about "
+                                   "55%% on a routine query. 'id' is always included "
+                                   "and an unknown field is an error, not a silent "
+                                   "drop. Omit for the full result.")
 
     # link
     link_parser = subparsers.add_parser("link", help="Link two facts with a directed graph edge")
@@ -199,7 +205,8 @@ def main():
     # CLI entry — never per command internals (os.replace on an open SQLite
     # file fails on Windows). An explicit --db bypasses CWD/env sniffing;
     # an explicit --root migrates just that project.
-    from pm_common import ensure_startup_migration, maybe_migrate_legacy_data_dir
+    from pm_common import (ensure_startup_migration, maybe_migrate_legacy_data_dir,
+                       parse_fields, ProjectFieldError)
     if getattr(args, "db", None) or getattr(args, "root", None):
         hints = [args.root] if getattr(args, "root", None) else []
         ensure_startup_migration(hints=hints, include_cwd=False, include_env=False)
@@ -317,24 +324,40 @@ def main():
 
         elif args.command == "query":
             limit = max(1, min(100, args.limit or 10))
+            fields = getattr(args, "fields", None)
             if args.hybrid:
                 # Deliberately logs usage (default log_usage=True): a CLI
                 # query is user-initiated retrieval, exactly what usage
                 # learning should learn from (#436 allowlist).
-                results = store.query_hybrid(args.text, category=args.category,
-                                             tag=args.tag, limit=limit,
-                                             explain=args.explain)
+                try:
+                    results = store.query_hybrid(args.text, category=args.category,
+                                                 tag=args.tag, limit=limit,
+                                                 explain=args.explain,
+                                                 fields=fields or None)
+                except ProjectFieldError as e:
+                    # Loud and specific. Silently returning a short result set
+                    # here would hand the caller data loss dressed as success.
+                    print(f"Field projection error: {e}", file=sys.stderr)
+                    raise SystemExit(2)
             else:
                 results = store.query(args.text, category=args.category, tag=args.tag, limit=limit)
+            if fields:
+                print(f"(projected onto: {', '.join(parse_fields(fields))}, "
+                      f"plus id — other keys are not present in this output)")
             print(f"Found {len(results)} matching facts:")
             for r in results:
                 lanes = r.get("lanes")
                 score = f" score={r['fused_score']:.6f}" if r.get("fused_score") is not None else ""
-                print(f"[{r['id']}] ({r['category']}){score} {r['content']}")
+                # An absent key prints as an em dash, never as blank: under
+                # projection a blank would read as an empty value rather than
+                # a field the caller chose not to fetch.
+                cat = r.get("category") or "—"
+                body = r.get("content") or "—"
+                print(f"[{r['id']}] ({cat}){score} {body}")
                 if lanes:
                     print("     lanes: " + ", ".join(
                         f"{ln['lane']}@rank{ln['rank']}(w={ln['weight']})" for ln in lanes))
-                if r['file_path']:
+                if r.get('file_path'):
                     print(f"     file: {r['file_path']}")
 
         elif args.command == "link":

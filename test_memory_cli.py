@@ -46,9 +46,16 @@ class FakeCLIStore:
         self._rec("query", text, category=category, tag=tag, limit=limit)
         return [{"id": 1, "category": "decision", "content": "hit", "file_path": "a.py"}]
 
-    def query_hybrid(self, text, category=None, tag=None, limit=10, explain=False):
+    def query_hybrid(self, text, category=None, tag=None, limit=10, explain=False,
+                     fields=None):
         self._rec("query_hybrid", text, category=category, tag=tag, limit=limit,
-                  explain=explain)
+                  explain=explain, fields=fields)
+        from pm_common import ProjectFieldError, project_fields
+        if fields:
+            # Mirror the real store so a bad field list fails the way it does
+            # in production rather than being swallowed by the fake.
+            project_fields([{"id": 1, "category": "decision", "content": "hit"}],
+                           fields)
         return []
 
     def link_facts(self, s, t, r):
@@ -329,6 +336,24 @@ def test_query_explain_flag(cli):
     assert _call(s, "query_hybrid")[0][2]["explain"] is False
     s = cli("query", "hello", "--hybrid", "--explain")
     assert _call(s, "query_hybrid")[0][2]["explain"] is True
+
+
+def test_query_fields_flag(cli, capsys):
+    s = cli("query", "hello", "--hybrid")
+    assert _call(s, "query_hybrid")[0][2]["fields"] is None
+    s = cli("query", "hello", "--hybrid", "--fields", "id,content")
+    assert _call(s, "query_hybrid")[0][2]["fields"] == "id,content"
+    out = capsys.readouterr().out
+    # The projection must be announced, and absent keys must not print blank.
+    assert "projected onto: id, content" in out
+    assert "—" in out
+
+
+def test_query_bad_field_exits_nonzero(cli, capsys):
+    with pytest.raises(SystemExit) as e:
+        cli("query", "hello", "--hybrid", "--fields", "id,file_pth")
+    assert e.value.code == 2
+    assert "unknown result field" in capsys.readouterr().err
 
 
 def test_link_and_graph(cli, capsys):
