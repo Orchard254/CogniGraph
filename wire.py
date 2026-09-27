@@ -267,6 +267,8 @@ KNOWN_AGENTS_TEMPLATE_HASHES = frozenset({
     "9d4a5b903139ae0ea3a3fa4480b11e43e7ad55acfae5dbbe4d603e0b994626c9",
     # docs(agents): memory_cli.py prune-stubs
     "e6de0eaebea6d909d9f2ca932916c66ae3325b372eb6836bed54886162d095f7",
+    # docs(agents): no bare corpus counts in facts
+    "013d78febaf7fbc833d1b8f2a523e816f1aef8cc2aa5b3bb10a296492b3b9215",
 })
 
 

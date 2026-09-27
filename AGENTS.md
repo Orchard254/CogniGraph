@@ -22,6 +22,7 @@ Learning (usage patterns):
 
 While working:
 5. Write new facts IMMEDIATELY after verifying them (`memory_write` with `file_path`, `line_start`, `line_end`, and `code_hash` for provenance; `memory_write_batch` for several related facts — its item schema lists every accepted key, `content` required).
+   - **Do not put a bare corpus count in a fact.** "409 active facts", "137 have file_path" — these rot the moment anything is written or deprecated, and they read as present-tense long after they stop being true. Measured 2026-09-28: four such facts had already drifted, including one written hours earlier. State the *conclusion*; if a number is the evidence, date it ("as measured on 2026-09-14 against 409 active non-stub facts") so it reads as a snapshot. Current numbers are one `memory_stats` call away.
    - Get `line_start`/`line_end`/`code_hash` from `memory_read_code` rather than computing them: each result carries `provenance_lines` and a `code_hash` over exactly that span, which is what `memory_cli.py verify` will later re-hash. Recomputing by hand is easy to get wrong (trailing newlines are part of the digest).
 6. Correct outdated facts with `memory_supersede` — never write duplicates. If `memory_write` returns `DUPLICATE_DETECTED`, supersede the reported ID instead. Use `memory_deprecate` to mark a fact obsolete without replacement; it also accepts a list of ids for batch cleanups and reports each outcome, so one unknown id does not abandon the rest.
    - `memory_supersede` INHERITS `file_path`/`line_start`/`line_end`/`code_hash` from the fact it replaces. That is right when restating the same knowledge and wrong when the file was deleted or the code moved — you would keep a dead anchor plus a stale line range and hash that `memory_cli.py verify` re-hashes against the wrong span. Pass `inherit_provenance=false` to supply them yourself (blank clears), or `file_path=""` on its own to clear just the anchor.
@@ -53,4 +54,4 @@ Code graph (one-hop queries — ask these mid-reasoning instead of re-reading fi
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.
 - If `memory_cli.py wire` reports `WIRED_WITH_ERRORS`, fix `config_errors` first - the listed config was not written (wire.py:207-222).
-<!-- cognigraph-template sha256:e6de0eaebea6d909d9f2ca932916c66ae3325b372eb6836bed54886162d095f7 -->
+<!-- cognigraph-template sha256:013d78febaf7fbc833d1b8f2a523e816f1aef8cc2aa5b3bb10a296492b3b9215 -->
