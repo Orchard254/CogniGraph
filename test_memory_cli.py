@@ -46,8 +46,9 @@ class FakeCLIStore:
         self._rec("query", text, category=category, tag=tag, limit=limit)
         return [{"id": 1, "category": "decision", "content": "hit", "file_path": "a.py"}]
 
-    def query_hybrid(self, text, category=None, tag=None, limit=10):
-        self._rec("query_hybrid", text, category=category, tag=tag, limit=limit)
+    def query_hybrid(self, text, category=None, tag=None, limit=10, explain=False):
+        self._rec("query_hybrid", text, category=category, tag=tag, limit=limit,
+                  explain=explain)
         return []
 
     def link_facts(self, s, t, r):
@@ -321,6 +322,13 @@ def test_query_plain_hybrid_and_limit_clamps(cli):
     assert _call(s, "query_hybrid")[0][2]["tag"] == "t"
     s = cli("query", "hello", "--limit", "0")
     assert _call(s, "query")[0][2]["limit"] == 10  # falsy -> default
+
+
+def test_query_explain_flag(cli):
+    s = cli("query", "hello", "--hybrid")
+    assert _call(s, "query_hybrid")[0][2]["explain"] is False
+    s = cli("query", "hello", "--hybrid", "--explain")
+    assert _call(s, "query_hybrid")[0][2]["explain"] is True
 
 
 def test_link_and_graph(cli, capsys):

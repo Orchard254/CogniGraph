@@ -388,7 +388,7 @@ def memory_write_batch(facts: List[FactSpec]) -> dict:
 
 
 @mcp.tool()
-def memory_query(text: str, category: str = "", tag: str = "", limit: int = 10, expand_graph: bool = True, session_id: str = "", repo_id: Optional[int] = None, intent: str = "", agent_type: str = "") -> dict:
+def memory_query(text: str, category: str = "", tag: str = "", limit: int = 10, expand_graph: bool = True, session_id: str = "", repo_id: Optional[int] = None, intent: str = "", agent_type: str = "", explain: bool = False) -> dict:
     """Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     limit = _clamp_limit(limit, default=10)
@@ -396,7 +396,7 @@ def memory_query(text: str, category: str = "", tag: str = "", limit: int = 10, 
     with _store() as _s:
         if repo_id is None:
             repo_id = _s._derive_default_repo_id()
-        results = _s.query_hybrid(text, category=category or None, tag=tag or None, limit=limit, expand_graph=expand_graph, session_id=session_id or None, repo_id=repo_id, intent=intent, agent_type=agent_type)
+        results = _s.query_hybrid(text, category=category or None, tag=tag or None, limit=limit, expand_graph=expand_graph, session_id=session_id or None, repo_id=repo_id, intent=intent, agent_type=agent_type, explain=explain)
     return {"count": len(results), "results": results}
 
 

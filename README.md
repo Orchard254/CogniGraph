@@ -127,7 +127,7 @@ The server registers 18 tools.
 |---|---|---|
 | `memory_write` | `category`, `content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `importance?`, `line_start?`, `line_end?`, `code_hash?`, `git_commit_sha?` | Record a durable fact this session learned that future sessions will need: decisions, constraints, gotchas, where components live. Secrets are refused. |
 | `memory_write_batch` | `facts` | Atomic batch form of memory_write for several related facts. |
-| `memory_query` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?` | Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have. |
+| `memory_query` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?`, `explain?` | Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have. |
 | `memory_get_context` | `query`, `agent_type?`, `max_tokens?`, `limit?`, `intent?` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. |
 | `memory_get_file_context` | `file_path` | Call while planning an approach to a file — and before editing it: its symbols, anchored facts, callers, and call-graph edges. |
 | `memory_check_safety` | `file_paths` | Call before a multi-file refactor: dependency risk matrix across the files you're about to change. |

@@ -103,6 +103,7 @@ class FakeStore:
         repo_id=None,
         intent="",
         agent_type="",
+        explain=False,
     ):
         self._rec(
             "query_hybrid",
@@ -112,6 +113,7 @@ class FakeStore:
             repo_id=repo_id,
             intent=intent,
             agent_type=agent_type,
+            explain=explain,
         )
         return [{"id": 2, "content": "canned-hybrid"}]
 
@@ -427,6 +429,14 @@ def test_query_clamps_and_derives_repo(fake_store):
     assert call["limit"] == 100
     assert call["repo_id"] == 7  # FakeStore._derive_default_repo_id()
     assert out["count"] == 1
+
+
+def test_query_explain_defaults_off_and_threads_through(fake_store):
+    """explain is opt-in: off by default, and the flag reaches the store."""
+    server.memory_query("x")
+    assert _last_call(fake_store, "query_hybrid")["explain"] is False
+    server.memory_query("x", explain=True)
+    assert _last_call(fake_store, "query_hybrid")["explain"] is True
 
 
 def test_get_context_clamps_and_detects_intent(fake_store):

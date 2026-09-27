@@ -261,6 +261,8 @@ KNOWN_AGENTS_TEMPLATE_HASHES = frozenset({
     "37c48b70521ce0efc59d1d407b2e725ccbfd4c295397421717f7f0d491980703",
     # docs(agents): tool_reference truth check + audit --disagreements-only
     "8958b7b913e32e73eabd2cafb316608fce9e201485a77323f4562da0276779ee",
+    # docs(agents): memory_query explain=True per-lane provenance
+    "0c43220201f693281c4882481a93cdca88a47bbc1caf5c898522e5ed55f2824d",
 })
 
 

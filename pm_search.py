@@ -546,7 +546,7 @@ class SearchMixin:
     def query_hybrid(self, text: str, category: Optional[str] = None, tag: Optional[str] = None,
                       limit: int = 10, expand_graph: bool = True, session_id: Optional[str] = None,
                       repo_id: Optional[int] = None, intent: str = "", agent_type: str = "",
-                      log_usage: bool = True) -> List[Dict[str, Any]]:
+                      log_usage: bool = True, explain: bool = False) -> List[Dict[str, Any]]:
         """
         7-lane Hybrid RRF query (4 memory lanes + 3 episodic lanes):
           Memory Lane 1 — FTS5 BM25 lexical (memory_fts)
@@ -556,6 +556,15 @@ class SearchMixin:
           Episodic Lane 2b — Tokenized Jaccard over episodic_memories (root ACTIVE)
           Episodic Lane 3b — Semantic cosine over episodic_embeddings/vec_episodic_memory (root ACTIVE)
           Lane 4 — Structural node name matching (memory-only, unchanged)
+
+        explain=True attaches a per-result `lanes` trace (every contributing
+        lane with its rank and weight) and `fused_score`. The fused number is
+        otherwise not decomposable: seven lanes combine with per-agent weights,
+        intent boosts, importance weighting, recency decay and file-anchor
+        boosts. Opt-in because the trace would multiply the token cost of every
+        result on every query. This is the tool for verifying a lane change --
+        the MAX_LIMIT fix, for instance, could previously only be evidenced by a
+        before/after eval-gate comparison.
 
         All lanes are fused via RRF (k=5) with importance + recency weighting,
         but RRF is now keyed by (source, id) tuples to avoid the integer ID-space
@@ -835,9 +844,19 @@ class SearchMixin:
         # skip the structural scan; lane_w is already resolved there.)
         usage_boosts = self._usage_boost(text)
 
-        def rrf_add(source: str, fact_id: int, rank: int, lane_weight: float = 1.0):
+        # Per-lane provenance, recorded only when asked for: (source, id) ->
+        # [{lane, rank, weight}]. Always collected into a local so the fusion
+        # arithmetic below is untouched, and only attached to results when
+        # explain=True.
+        lane_trace: Dict[tuple, List[Dict[str, Any]]] = {}
+
+        def rrf_add(source: str, fact_id: int, rank: int, lane_weight: float = 1.0,
+                    lane: str = ""):
             if source == "episodic" and fact_id in deprecated_memory_ids:
                 return  # deprecated in `memory`; the episodic copy is history
+            if lane:
+                lane_trace.setdefault((source, fact_id), []).append(
+                    {"lane": lane, "rank": rank, "weight": round(lane_weight, 4)})
             if source == "memory":
                 created_at, access_count, importance = recency_info.get(fact_id, (None, 0, 3))
                 tags = tags_info.get(fact_id, "")
@@ -862,24 +881,24 @@ class SearchMixin:
             rrf[key] = rrf.get(key, 0.0) + (1.0 / (k + rank)) * recency * imp_mult * lane_weight
 
         for rank, r in enumerate(fts_results, start=1):
-            rrf_add("memory", r["id"], rank, lane_weight=lane_w["fts"])
+            rrf_add("memory", r["id"], rank, lane_weight=lane_w["fts"], lane="fts")
         for rank, (fid, score) in enumerate(tok_top, start=1):
             if score > 0:
-                rrf_add("memory", fid, rank, lane_weight=lane_w["tok"])
+                rrf_add("memory", fid, rank, lane_weight=lane_w["tok"], lane="tok")
         for rank, (fid, sim) in enumerate(sem_top, start=1):
             if sim > 0.1:
-                rrf_add("memory", fid, rank, lane_weight=lane_w["sem"])
+                rrf_add("memory", fid, rank, lane_weight=lane_w["sem"], lane="sem")
         for rank, r in enumerate(episodic_fts_results, start=1):
-            rrf_add("episodic", r["id"], rank, lane_weight=lane_w["epi_fts"])
+            rrf_add("episodic", r["id"], rank, lane_weight=lane_w["epi_fts"], lane="epi_fts")
         for rank, (fid, score) in enumerate(episodic_tok_top, start=1):
             if score > 0:
-                rrf_add("episodic", fid, rank, lane_weight=lane_w["epi_tok"])
+                rrf_add("episodic", fid, rank, lane_weight=lane_w["epi_tok"], lane="epi_tok")
         for rank, (fid, sim) in enumerate(episodic_sem_top, start=1):
             if sim > 0.1:
-                rrf_add("episodic", fid, rank, lane_weight=lane_w["epi_sem"])
+                rrf_add("episodic", fid, rank, lane_weight=lane_w["epi_sem"], lane="epi_sem")
         for rank, (fid, score) in enumerate(struct_top, start=1):
             if score > 0:
-                rrf_add("memory", fid, rank, lane_weight=lane_w["struct"])
+                rrf_add("memory", fid, rank, lane_weight=lane_w["struct"], lane="struct")
 
         sorted_keys = sorted(rrf.keys(), key=lambda x: rrf[x], reverse=True)[:limit]
         if not sorted_keys:
@@ -925,6 +944,10 @@ class SearchMixin:
 
 
         results = [row_dict[k] for k in sorted_keys if k in row_dict]
+        if explain:
+            for r in results:
+                r["fused_score"] = round(rrf[(r.get("source"), r["id"])], 6)
+                r["lanes"] = lane_trace.get((r.get("source"), r["id"]), [])
 
         # Access counters and usage logging apply only to real agent queries;
         # internal seeding and eval calls pass log_usage=False so they cannot

@@ -60,6 +60,9 @@ def main():
     query_parser.add_argument("--tag", help="Tag filter")
     query_parser.add_argument("--hybrid", action="store_true", help="Use hybrid RRF query")
     query_parser.add_argument("--limit", type=int, default=10, help="Max results")
+    query_parser.add_argument("--explain", action="store_true",
+                              help="Show per-lane provenance: which retrieval lanes "
+                                   "found each result, at what rank and weight")
 
     # link
     link_parser = subparsers.add_parser("link", help="Link two facts with a directed graph edge")
@@ -318,12 +321,19 @@ def main():
                 # Deliberately logs usage (default log_usage=True): a CLI
                 # query is user-initiated retrieval, exactly what usage
                 # learning should learn from (#436 allowlist).
-                results = store.query_hybrid(args.text, category=args.category, tag=args.tag, limit=limit)
+                results = store.query_hybrid(args.text, category=args.category,
+                                             tag=args.tag, limit=limit,
+                                             explain=args.explain)
             else:
                 results = store.query(args.text, category=args.category, tag=args.tag, limit=limit)
             print(f"Found {len(results)} matching facts:")
             for r in results:
-                print(f"[{r['id']}] ({r['category']}) {r['content']}")
+                lanes = r.get("lanes")
+                score = f" score={r['fused_score']:.6f}" if r.get("fused_score") is not None else ""
+                print(f"[{r['id']}] ({r['category']}){score} {r['content']}")
+                if lanes:
+                    print("     lanes: " + ", ".join(
+                        f"{ln['lane']}@rank{ln['rank']}(w={ln['weight']})" for ln in lanes))
                 if r['file_path']:
                     print(f"     file: {r['file_path']}")
 

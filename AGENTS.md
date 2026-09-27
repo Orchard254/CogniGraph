@@ -47,7 +47,8 @@ Code graph (one-hop queries — ask these mid-reasoning instead of re-reading fi
 - `memory_who_calls(symbol)` — definitions, callers, and importing files for a symbol, from AST ground truth. Accepts `query` or `MemoryStore.write`. Ask mid-reasoning while planning, not just before a rename.
 - `memory_who_inherits(symbol)` — which classes inherit from a base class, exact and transitive, from AST ground truth. Ask mid-reasoning while planning, not just before a hierarchy change.
 - `memory_project_shape()` — indexed file inventory and code-graph size; call once early for orientation.
+- `memory_query(..., explain=True)` (or `memory_cli.py query --hybrid --explain`) — attaches a per-result `lanes` trace (which of the 7 lanes found it, at what rank and weight) and `fused_score`. Opt-in: the fused number is otherwise not decomposable across lane weights, intent boosts, importance, recency and file-anchor boosts. Use it to verify a ranking change directly instead of inferring the cause from eval deltas.
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.
 - If `memory_cli.py wire` reports `WIRED_WITH_ERRORS`, fix `config_errors` first - the listed config was not written (wire.py:207-222).
-<!-- cognigraph-template sha256:8958b7b913e32e73eabd2cafb316608fce9e201485a77323f4562da0276779ee -->
+<!-- cognigraph-template sha256:0c43220201f693281c4882481a93cdca88a47bbc1caf5c898522e5ed55f2824d -->
