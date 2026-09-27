@@ -58,6 +58,18 @@ class FakeCLIStore:
                            fields)
         return []
 
+    def prune_stale_stubs(self, root, dry_run=True):
+        # Mirror the real store's refusal of a non-directory root, so the CLI
+        # wiring for that error path is actually exercised.
+        from pathlib import Path as _P
+        root = _P(root)
+        if not root.is_dir():
+            raise ValueError(f"prune root is not a directory: {root}")
+        self._rec("prune_stale_stubs", root, dry_run=dry_run)
+        return {"root": str(root), "dry_run": dry_run, "candidates": [],
+                "scanned": 0, "candidate_count": 0, "pruned": 0,
+                "note": ""}
+
     def link_facts(self, s, t, r):
         self._rec("link_facts", s, t, r)
         return 7
@@ -354,6 +366,46 @@ def test_query_bad_field_exits_nonzero(cli, capsys):
         cli("query", "hello", "--hybrid", "--fields", "id,file_pth")
     assert e.value.code == 2
     assert "unknown result field" in capsys.readouterr().err
+
+
+def test_prune_stubs_dry_run_is_the_default(cli, capsys):
+    s = cli("prune-stubs")
+    assert _call(s, "prune_stale_stubs")[0][2]["dry_run"] is True
+    out = capsys.readouterr().out
+    assert "Nothing was changed" in out or "No stale file stubs" in out
+
+
+def test_prune_stubs_apply_flag(cli):
+    s = cli("prune-stubs", "--apply")
+    assert _call(s, "prune_stale_stubs")[0][2]["dry_run"] is False
+
+
+def test_prune_stubs_rejects_the_root_db_selector(cli):
+    """--root picks a DATABASE; using it here would create a stray project.
+
+    Regression guard for a real mistake. Naming the prune scope --root meant a
+    typo opened (and bootstrapped) <typo>/.cognigraph/memory.db, so the command
+    answered "no stale stubs" while quietly creating a project -- and answered
+    that with SUCCESS for a root that does not exist. The scope flag must be
+    --prune-root, which is never used to open a database.
+    """
+    with pytest.raises(SystemExit):
+        cli("prune-stubs", "--root", ".")
+
+
+def test_prune_stubs_accepts_prune_root(cli):
+    s = cli("prune-stubs", "--prune-root", ".")
+    call = _call(s, "prune_stale_stubs")[0]
+    assert call[2]["dry_run"] is True
+    assert str(call[1][0]).endswith(".")
+
+
+def test_prune_stubs_bad_root_exits_nonzero(cli, capsys, tmp_path):
+    absent = tmp_path / "definitely" / "absent"
+    with pytest.raises(SystemExit) as e:
+        cli("prune-stubs", "--prune-root", str(absent))
+    assert e.value.code == 2
+    assert "not a directory" in capsys.readouterr().err
 
 
 def test_link_and_graph(cli, capsys):

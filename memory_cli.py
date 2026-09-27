@@ -171,6 +171,22 @@ def main():
     prune_p.add_argument("--apply", action="store_true", help="Actually prune (default is dry-run preview)")
     prune_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
 
+    # prune-stubs = the stub twin of `prune`: the same dry-run-by-default
+    # contract, but scoped to ONE project root and touching only whole-file
+    # 'Source file:' inventory facts.
+    pstub_p = subparsers.add_parser(
+        "prune-stubs",
+        help="Deprecate 'Source file:' stubs whose file no longer exists "
+             "(dry-run by default). Stubs only; curated facts are never touched.")
+    pstub_p.add_argument("--prune-root",
+                         help="Existing directory to resolve stub file_path values "
+                              "against (default: current directory). Deliberately "
+                              "not named --root: that flag selects the DATABASE "
+                              "and would create a stray project for a typo.")
+    pstub_p.add_argument("--apply", action="store_true",
+                         help="Actually prune (default is dry-run preview)")
+    pstub_p.add_argument("--db", default=argparse.SUPPRESS, help="Path to SQLite database file")
+
     # prepare-task
     prep_p = subparsers.add_parser("prepare-task", help="Pre-coding flight briefing for a task")
     prep_p.add_argument("intent", help="Short description of the task")
@@ -442,6 +458,32 @@ def main():
         elif args.command == "prune":
             res = store.prune_stale(days_inactive=max(1, args.days or 90), dry_run=not args.apply)
             print(json.dumps(res, indent=2))
+        elif args.command == "prune-stubs":
+            # NOTE: the scope flag is --prune-root, NOT the existing --root.
+            # --root is a *database selector* (see the db_path resolution above):
+            # passing it makes the CLI open <root>/.cognigraph/memory.db, creating
+            # a stray onboarded project if that path is a typo. Pruning an
+            # inventory you did not mean to open, and silently creating a project
+            # to do it, are both wrong. --prune-root only ever resolves paths
+            # against a directory that must already exist.
+            root = Path(args.prune_root) if args.prune_root else Path.cwd()
+            try:
+                res = store.prune_stale_stubs(root, dry_run=not args.apply)
+            except ValueError as e:
+                # A typo'd --prune-root must not read as "nothing to prune".
+                sys.stderr.write(f"prune-stubs: {e}\n")
+                sys.exit(2)
+            if res["candidate_count"] == 0:
+                print("No stale file stubs: every active 'Source file:' fact "
+                      "still has its file.")
+            else:
+                n = res["candidate_count"] if res["dry_run"] else res["pruned"]
+                print(f"{'Would prune' if res['dry_run'] else 'Pruned'} "
+                      f"{n} stale file stub(s) (scanned {res['scanned']}):")
+                for c in res["candidates"]:
+                    print(f"  #{c['id']} {c['file_path']}")
+            if res["dry_run"] and res["candidate_count"]:
+                print("\n  Nothing was changed. Re-run with --apply to remove them.")
         elif args.command == "prepare-task":
             print(store.prepare_task(args.intent, file_paths=args.files or None,
                                      limit=max(1, min(50, args.limit or 5))))

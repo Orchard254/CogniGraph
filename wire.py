@@ -265,6 +265,8 @@ KNOWN_AGENTS_TEMPLATE_HASHES = frozenset({
     "0c43220201f693281c4882481a93cdca88a47bbc1caf5c898522e5ed55f2824d",
     # docs(agents): memory_query fields= projection
     "9d4a5b903139ae0ea3a3fa4480b11e43e7ad55acfae5dbbe4d603e0b994626c9",
+    # docs(agents): memory_cli.py prune-stubs
+    "e6de0eaebea6d909d9f2ca932916c66ae3325b372eb6836bed54886162d095f7",
 })
 
 

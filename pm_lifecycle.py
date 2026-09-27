@@ -11,9 +11,9 @@ from pm_common import (
     tokenize_text,
     _vec_to_blob, _get_embed_model,
     _EMBED_MODEL_NAME, _SEMANTIC_AVAILABLE, np,
-    _blob_to_vec,
+    _blob_to_vec, logger,
 )
-from corpus_hygiene import STUB_PREFIXES
+from corpus_hygiene import STUB_PREFIXES, _stub_where, _stub_params
 
 
 def _run_git(root: Path, *args: str):
@@ -732,6 +732,91 @@ class LifecycleMixin:
             "pollution": findings,
             "note": ("Report only. Reconcile with memory_deprecate; a human "
                      "decides whether a flagged fact still matters."),
+        }
+
+    def prune_stale_stubs(self, root, dry_run: bool = True) -> Dict[str, Any]:
+        """
+        Deprecate active whole-file template stubs whose file no longer exists.
+
+        The missing half of bootstrap. scan_file_tree only ever WRITES stubs for
+        files that are present, so nothing could ever remove one: on the live
+        corpus 29 active 'Source file:' stubs pointed at deleted scratch files,
+        and stats().active_stubs reported 115 when roughly 86 were real. They
+        were inert (excluded from the audit, the structural lane, and the
+        curated count) but unbounded, and the next scratch-file burst recreates
+        the condition.
+
+        Deliberately narrow. Stubs are INVENTORY -- auto-generated facts that
+        assert a file exists, so a file that is gone makes them false. A curated
+        fact carrying a file_path is KNOWLEDGE, and a dangling anchor on one is
+        a different problem with a different answer: null the column and keep
+        the fact (see fact #804). Only stubs are touched here.
+
+        Also skipped, because they are not scan_file_tree's relative-path
+        convention and therefore not ours to judge: absolute paths, paths with a
+        drive letter, and anything containing '..'.
+
+        `memory` has no repo_id column, so a stub is identified only by
+        file_path. Under the per-project layout (.cognigraph/memory.db per root)
+        that is unambiguous, but if one database ever held two roots, pruning
+        from the wrong root would delete the other root's inventory. Hence
+        opt-in, and dry_run=True by default: this names each candidate before
+        removing anything.
+        """
+        try:
+            root_path = Path(root).resolve()
+        except Exception as e:
+            raise ValueError(f"bad prune root {root!r}: {e}")
+        if not root_path.is_dir():
+            # Refusing matters: pruning against a non-existent root would
+            # resolve every relative path to "missing" and wipe the inventory.
+            raise ValueError(f"prune root is not a directory: {root_path}")
+
+        # OR, never AND. corpus_hygiene._stub_where() is the single source of
+        # truth for this form: hand-rolling it as AND requires a row to match
+        # every prefix simultaneously, which silently matches nothing.
+        rows = self.conn.execute(
+            f"SELECT id, file_path, content FROM memory "
+            f"WHERE deprecated_at IS NULL AND file_path IS NOT NULL "
+            f"AND file_path != '' AND ({_stub_where()})",
+            _stub_params()).fetchall()
+
+        candidates: List[Dict[str, Any]] = []
+        for r in rows:
+            fp = (r["file_path"] or "").strip()
+            if not fp:
+                continue
+            norm = fp.replace("\\", "/")
+            if norm.startswith("/") or ":" in norm.split("/")[0]:
+                continue                       # absolute or drive-lettered
+            if ".." in Path(norm).parts:
+                continue                       # escapes the root
+            if (root_path / norm).exists():
+                continue
+            candidates.append({"id": r["id"], "file_path": norm,
+                               "content": (r["content"] or "")[:120]})
+
+        pruned = 0
+        if not dry_run:
+            for c in candidates:
+                try:
+                    self.deprecate(c["id"], reason=(
+                        "bootstrap prune: the file this 'Source file:' stub "
+                        "asserted no longer exists under the scanned root"))
+                    pruned += 1
+                except Exception as e:
+                    logger.debug("stub prune failed for id %s: %r", c["id"], e)
+
+        return {
+            "root": str(root_path),
+            "dry_run": bool(dry_run),
+            "candidates": candidates,
+            "scanned": len(rows),
+            "candidate_count": len(candidates),
+            "pruned": pruned,
+            "note": ("Whole-file 'Source file:' stubs only. Curated facts with a "
+                     "dangling file_path are untouched -- null the anchor instead "
+                     "(memory_supersede with file_path=''), see fact #804."),
         }
 
     def prune_stale(self, days_inactive: int = 90, dry_run: bool = True,
