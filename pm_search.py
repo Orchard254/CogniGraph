@@ -37,6 +37,26 @@ def pinned_now() -> Optional[datetime.datetime]:
     return _parse_iso_instant(os.environ.get(PINNED_NOW_ENV))
 
 
+# Per-agent lane weight tuning: different LLM consumers benefit from different
+# retrieval-lane emphasis (e.g. cursor leans on structural). Resolved before
+# Lane 4 so a zero-weighted structural lane can skip its scan entirely.
+#
+# `struct: 0.0` for "default" is DELIBERATE and measured, not an oversight: the
+# stub-excluded sweep found w=0.1 bit-identical to baseline and w>=0.2 lost
+# recall@5, so the lane is switched off for the default agent rather than left
+# to add noise. Every other agent type carries a non-zero struct weight, and
+# their lane output is stub-excluded in _structural_scores. Facts #525, #537 and
+# #498 record the change; #498 also carries a standing do-not-touch rule for
+# this lane. Re-enabling it requires re-running the eval gate, not just a test
+# update. Pinned by test_lane_health.py.
+AGENT_LANE_WEIGHTS = {
+    "default":  {"fts": 1.0,  "tok": 0.85, "sem": 1.2, "struct": 0.0,  "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
+    "cursor":   {"fts": 1.0,  "tok": 0.85, "sem": 1.3, "struct": 1.2,  "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
+    "claude":   {"fts": 1.1,  "tok": 0.85, "sem": 1.3, "struct": 1.0,  "epi_fts": 1.1,  "epi_tok": 0.85, "epi_sem": 1.3},
+    "opencode": {"fts": 1.0,  "tok": 0.9,  "sem": 1.2, "struct": 1.1,  "epi_fts": 1.0,  "epi_tok": 0.9,  "epi_sem": 1.2},
+    "zed":      {"fts": 1.05, "tok": 0.85, "sem": 1.2, "struct": 1.15, "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
+}
+
 class SearchMixin:
     def _semantic_scores(self, query_vec, session_id: Optional[str] = None) -> Dict[int, float]:
         """
@@ -719,18 +739,6 @@ class SearchMixin:
         except Exception as e:
             logger.warning("episodic semantic lane failed for query %r: %r", text[:80], e)
 
-        # Lane weights are resolved before Lane 4 so a zero-weighted
-        # structural lane can skip its scan entirely (see below).
-        # Per-agent lane weight tuning: different LLM consumers benefit from
-        # different retrieval-lane emphasis (e.g. cursor leans on structural).
-        AGENT_LANE_WEIGHTS = {
-            "default":  {"fts": 1.0,  "tok": 0.85, "sem": 1.2, "struct": 0.0,  "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
-            "cursor":   {"fts": 1.0,  "tok": 0.85, "sem": 1.3, "struct": 1.2,  "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
-
-            "claude":   {"fts": 1.1,  "tok": 0.85, "sem": 1.3, "struct": 1.0,  "epi_fts": 1.1,  "epi_tok": 0.85, "epi_sem": 1.3},
-            "opencode": {"fts": 1.0,  "tok": 0.9,  "sem": 1.2, "struct": 1.1,  "epi_fts": 1.0,  "epi_tok": 0.9,  "epi_sem": 1.2},
-            "zed":      {"fts": 1.05, "tok": 0.85, "sem": 1.2, "struct": 1.15, "epi_fts": 1.0,  "epi_tok": 0.85, "epi_sem": 1.2},
-        }
 
         lane_w = AGENT_LANE_WEIGHTS.get(agent_type, AGENT_LANE_WEIGHTS["default"])
 
