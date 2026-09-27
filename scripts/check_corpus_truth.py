@@ -39,6 +39,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Single source of truth for what counts as a whole-file template stub, shared
+# with corpus_hygiene / pm_structural / pm_lifecycle / pm_search.
+from corpus_hygiene import STUB_PREFIXES  # noqa: E402
+
 # Claims of the form "N tools" / "N-tool catalog" / "N MCP tools".
 _TOOL_COUNT_RE = re.compile(
     r"\b(\d{1,3})\s*(?:-\s*tool|MCP\s+tools|tools\b)", re.IGNORECASE)
@@ -46,11 +50,118 @@ _TOOL_COUNT_RE = re.compile(
 # "41-tool catalog" style records are not flagged as contradictions.
 _MIN_PLAUSIBLE_TOOL_COUNT = 5
 
+# Identifiers a fact may legitimately name that are NOT MCP tools: CLI
+# subcommands, repo modules, and DB tables all share the `memory_` prefix.
+# Measured before building this: a naive "unknown memory_* identifier" check
+# flagged 73 of 463 active facts, almost all of them `memory_cli` (a script),
+# `memory_store` (a module) and `memory_edges`/`memory_embeddings`/
+# `memory_dependencies` (tables). The union collapses that to 5.
+_IDENTIFIER_RE = re.compile(r"\b(memory_[a-z_]{3,})\b")
+
+# A fact only MISLEADS if it tells an agent to call something. A `state` fact
+# narrating "ran a simulation using memory_query_hybrid" is accurate history; a
+# `constraint` fact reading "1. Call `memory_get_state`" is a broken
+# instruction. This is the difference between the two.
+_PRESCRIPTIVE_RE = re.compile(
+    r"(call\s+`?memory_|^\s*\d+\.\s*call\b|must call\b|should call\b"
+    r"|at the start of (?:every )?session|^\s*self-prompt)",
+    re.IGNORECASE | re.MULTILINE)
+
+# ...unless the fact is explicitly recording the absence.
+_NEGATIVE_RE = re.compile(
+    r"(instead of|not a tool|does not exist|doesn't exist|no longer|retired"
+    r"|was not added|never added|rather than adding|deliberately did not"
+    r"|rather than a new tool)",
+    re.IGNORECASE)
+
+
+def known_identifiers(tools=None, extra=None) -> set:
+    """Every `memory_*` name a fact may legitimately reference.
+
+    Union of the live MCP registry, memory_cli subcommands, repo module stems,
+    DB tables, and caller-supplied extras. Cheap to compute and the difference
+    between a check with signal and one that cries wolf.
+    """
+    if tools is None:
+        tools = live_tool_names()
+    known = set(tools)
+    if extra:
+        known |= set(extra)
+    try:
+        cli_src = (ROOT / "memory_cli.py").read_text(encoding="utf-8")
+        known |= set(re.findall(r'add_parser\(\s*["\']([a-z][a-z-]*)["\']', cli_src))
+    except OSError:
+        pass
+    for pattern in ("*.py", "eval/*.py", "scripts/*.py", "*.js"):
+        for p in ROOT.glob(pattern):
+            if "node_modules" in str(p) or ".cognigraph" in str(p):
+                continue
+            known.add(p.stem)
+    try:
+        import sqlite3 as _s
+        conn = _s.connect(f"file:{(ROOT / '.cognigraph' / 'memory.db').as_posix()}?mode=ro",
+                          uri=True)
+        try:
+            known |= {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    known |= {"memory_db", "memory_graph", "memory_ui", "memory_embeddings"}
+    return known
+
+
+def live_tool_names() -> set:
+    """Names the server registers right now."""
+    import server  # verified side-effect free by scripts/gen_tool_table.py
+    return set(server.mcp._tool_manager._tools)
+
+
+def check_tool_references(db_path, tools=None, extra=None) -> list:
+    """Active facts that PRESCRIBE calling an identifier that does not exist.
+
+    Deliberately narrow: the identifier must be unknown to the union of tools,
+    CLI commands, modules and tables, AND the fact must be instructing rather
+    than narrating. Requiring both is what keeps this at 2 findings across a
+    463-fact corpus instead of 73.
+    """
+    known = known_identifiers(tools, extra)
+    conn = sqlite3.connect(f"file:{Path(db_path).as_posix()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        stub_sql = " AND ".join("content NOT LIKE ?" for _ in STUB_PREFIXES)
+        rows = conn.execute(
+            f"SELECT id, category, content FROM memory "
+            f"WHERE deprecated_at IS NULL AND content IS NOT NULL AND {stub_sql}",
+            tuple(f"{p}%" for p in STUB_PREFIXES)).fetchall()
+    finally:
+        conn.close()
+
+    violations = []
+    for r in rows:
+        text = r["content"]
+        unknown = sorted(set(_IDENTIFIER_RE.findall(text)) - known)
+        if not unknown:
+            continue
+        if _NEGATIVE_RE.search(text):
+            continue          # accurately recording an absence
+        if not _PRESCRIPTIVE_RE.search(text):
+            continue          # narrative history, not an instruction
+        violations.append({
+            "check": "tool_reference",
+            "id": r["id"],
+            "category": r["category"],
+            "unknown": unknown,
+            "prescriptive": True,
+            "content": text[:200],
+        })
+    return violations
+
 
 def live_tool_count() -> int:
     """Number of tools the server actually registers right now."""
-    import server  # verified side-effect free by scripts/gen_tool_table.py
-    return len(server.mcp._tool_manager._tools)
+    return len(live_tool_names())
 
 
 def _claimed_counts(text):
@@ -111,7 +222,13 @@ def check_tool_count(db_path, actual=None):
 def check_all(db_path, actual=None):
     if actual is None:
         actual = live_tool_count()
-    return {"tool_count": actual, "violations": check_tool_count(db_path, actual)}
+    tool_count = check_tool_count(db_path, actual)
+    for v in tool_count:
+        v["check"] = "tool_count"
+    return {
+        "tool_count": actual,
+        "violations": tool_count + check_tool_references(db_path),
+    }
 
 
 def main(argv=None) -> int:
@@ -131,14 +248,20 @@ def main(argv=None) -> int:
     print("=== Corpus Truth Check ===")
     print(f"Database            : {db_path}")
     print(f"Live tool registry  : {report['tool_count']}")
+    print(f"Checks              : tool_count, tool_reference")
     print(f"Violations          : {len(v)}")
     if v:
         print("\n  These active facts contradict the running system. Each is a")
         print("  fact being SERVED to agents that is factually wrong. Fix with")
         print("  memory_supersede (preferred) or memory_deprecate.\n")
         for item in v:
-            print(f"  #{item['id']} [{item['category']}] claims {item['claimed']}, "
-                  f"live is {item['actual']}")
+            kind = item.get("check", "?")
+            extra = ""
+            if kind == "tool_count":
+                extra = f"claims {item['claimed']}, live is {item['actual']}"
+            else:
+                extra = f"prescribes {', '.join(item['unknown'])}, which does not exist"
+            print(f"  #{item['id']} [{item['category']}] ({kind}) {extra}")
             print(f"    {item['content']}")
         return 1
     print("No machine-checkable contradictions found.")

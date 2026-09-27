@@ -15,7 +15,10 @@ import sqlite3
 
 import pytest
 
-from scripts.check_corpus_truth import check_all, check_tool_count, _claimed_counts
+from scripts.check_corpus_truth import (
+    check_all, check_tool_count, check_tool_references,
+    known_identifiers, _claimed_counts,
+)
 
 ACTUAL = 18
 
@@ -111,3 +114,89 @@ def test_ignores_facts_with_no_tool_claim(db):
 ])
 def test_claimed_counts(text, expected):
     assert sorted(set(_claimed_counts(text))) == expected
+
+
+# --- check 2: prescriptive facts citing a retired identifier -----------
+#
+# Measured before implementing: a naive "does this fact name an unknown
+# memory_* thing" check flagged 73 facts, because `memory_cli` is a SCRIPT,
+# `memory_store` a MODULE, and `memory_edges`/`memory_embeddings`/
+# `memory_dependencies` are TABLES. Checking against the union of every valid
+# identifier collapsed that to 5, and requiring PRESCRIPTIVE phrasing (a
+# protocol telling an agent to call it) rather than a narrative mention left 2
+# real defects out of 463 active facts.
+#
+# The distinction matters: a `state` fact narrating "ran a simulation using
+# memory_query_hybrid" is accurate history, while a `constraint` fact reading
+# "1. Call `memory_get_state`" is an instruction to call a tool that no longer
+# exists.
+
+TOOLS = {"memory_stats", "memory_query", "memory_prepare_task"}
+
+
+def test_known_identifiers_include_tools_and_non_tools():
+    known = known_identifiers(tools=TOOLS, extra={"memory_cli", "memory_edges",
+                                                   "memory_store", "scratch_probe"})
+    assert TOOLS <= known
+    assert {"memory_cli", "memory_edges", "memory_store"} <= known
+
+
+def test_flags_prescriptive_reference_to_a_retired_tool(db):
+    _add(db, "Mandatory Protocol\nAt the start of every session:\n"
+             "1. Call `memory_get_state` or `memory_stats` to load context.",
+         category="constraint")
+    v = check_tool_references(db, TOOLS)
+    assert len(v) == 1
+    assert v[0]["unknown"] == ["memory_get_state"]
+    assert v[0]["prescriptive"] is True
+
+
+def test_ignores_narrative_mention_of_a_retired_tool(db):
+    """A `state` fact describing a past simulation is accurate history."""
+    _add(db, "Ran an end-to-end agent-priming simulation (AGENTS.md protocol: "
+             "memory_stats, memory_query_hybrid) and it passed.",
+         category="state")
+    assert check_tool_references(db, TOOLS) == []
+
+
+def test_ignores_fact_that_correctly_says_a_tool_was_not_added(db):
+    """Regression guard: negative knowledge names a non-existent tool on purpose."""
+    _add(db, "Widened memory_deprecate instead of adding memory_deprecate_batch. "
+             "The single-id return shape is preserved.",
+         category="decision")
+    assert check_tool_references(db, TOOLS) == []
+
+
+def test_ignores_non_tool_identifiers(db):
+    """memory_cli is a script, memory_store a module, memory_edges a table."""
+    _add(db, "At the start of every session: 1. Call `memory_stats`, then run "
+             "memory_cli.py wire; memory_edges links facts and memory_store "
+             "holds the write path.",
+         category="constraint")
+    assert check_tool_references(
+        db, TOOLS, extra={"memory_cli", "memory_edges", "memory_store"}) == []
+
+
+def test_ignores_prescriptive_reference_to_a_live_tool(db):
+    _add(db, "Mandatory Protocol\nAt the start of every session:\n"
+             "1. Call `memory_stats` to load context.", category="constraint")
+    assert check_tool_references(db, TOOLS) == []
+
+
+def test_ignores_deprecated_facts(db):
+    _add(db, "At the start of every session:\n1. Call `memory_get_state`.",
+         category="constraint", deprecated_at="2026-01-01T00:00:00+00:00")
+    assert check_tool_references(db, TOOLS) == []
+
+
+def test_ignores_template_stubs(db):
+    _add(db, "Source file: wire.py (python, 761 lines, hash b855f304)")
+    assert check_tool_references(db, TOOLS) == []
+
+
+def test_tool_reference_violation_shape(db):
+    _add(db, "Protocol: 1. Call `memory_get_state` first.", category="constraint")
+    item = check_tool_references(db, TOOLS)[0]
+    for key in ("id", "content", "category", "unknown", "prescriptive", "check"):
+        assert key in item
+    assert item["check"] == "tool_reference"
