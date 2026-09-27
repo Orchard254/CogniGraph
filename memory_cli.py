@@ -30,6 +30,11 @@ def main():
                          help="Cosine cutoff for embedded fact pairs (default 0.80)")
     audit_p.add_argument("--lexical-threshold", type=float, default=argparse.SUPPRESS,
                          help="Jaccard cutoff for facts with no embedding (default 0.65)")
+    # SUPPRESS so an unsupplied flag is absent from the namespace and the store
+    # call stays audit() with no kwargs -- callers that stub audit() keep working.
+    audit_p.add_argument("--disagreements-only", action="store_true",
+                         default=argparse.SUPPRESS,
+                         help="show only pairs whose facts CONTRADICT each other")
 
     pollution_p = subparsers.add_parser(
         "pollution", help="Report throwaway test/stress artifacts (read-only)")
@@ -230,12 +235,16 @@ def main():
 
         elif args.command == "audit":
             audit_kwargs = {}
-            for opt in ("semantic_threshold", "lexical_threshold"):
+            for opt in ("semantic_threshold", "lexical_threshold", "disagreements_only"):
                 if hasattr(args, opt):
                     audit_kwargs[opt] = getattr(args, opt)
             res = store.audit(**audit_kwargs)
             print("=== CogniGraph Audit ===")
             print(f"Total Active Checked : {res['total_active_checked']}")
+            if res.get("pair_verdicts"):
+                v = res["pair_verdicts"]
+                print(f"Pairs Examined       : {res['pairs_examined']}  (disagree "
+                      f"{v['disagree']}, agree {v['agree']}, unclear {v['unclear']})")
             print(f"Potential Duplicates : {res['potential_duplicates_count']}")
             if res.get("thresholds"):
                 th = res["thresholds"]
@@ -247,7 +256,11 @@ def main():
                 for item in res["potential_duplicates"]:
                     cross = "  CROSS-CATEGORY" if item.get("cross_category") else ""
                     print(f"\nSimilarity: {item['similarity']} [{item['category']}]"
-                          f" via {item.get('method', '?')}{cross}")
+                          f" via {item.get('method', '?')}"
+                          f"  VERDICT={item.get('verdict', '?')}{cross}")
+                    for c in item.get("conflicts", []):
+                        print(f"  !! CONFLICT {c['unit']}: {c['a_value']} vs {c['b_value']}"
+                              f"  ({c['kind']})")
                     for n in (1, 2):
                         print(f"  ID {item[f'fact{n}_id']} [{item.get(f'fact{n}_category', '?')}]"
                               f" {item.get(f'fact{n}_file_path') or '-'}: {item[f'fact{n}_content']}")

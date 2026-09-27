@@ -39,6 +39,130 @@ def _run_git(root: Path, *args: str):
     return proc.stdout, None
 
 
+# Units whose numeric value is load-bearing: two facts stating DIFFERENT values
+# for the same unit are contradicting each other, not elaborating. Kept narrow
+# on purpose -- a classifier that cries wolf gets ignored, which is worse than
+# no classifier at all.
+_COUNT_UNITS = ("tools", "tool", "tests", "test files", "scripts", "lines",
+                "files", "facts", "edges", "pairs", "functions", "classes",
+                "endpoints", "chars", "ms", "seconds")
+_COUNT_RE = re.compile(
+    r"\b(\d{1,4})\s+(?:-\s*tool\s+)?(" + "|".join(_COUNT_UNITS) + r")\b",
+    re.IGNORECASE)
+# Spelled-out numbers, which is how the "six vs seven scripts" defect appeared.
+_WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                 "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+                 "twelve": 12}
+_WORD_COUNT_RE = re.compile(
+    r"\b(" + "|".join(_WORD_NUMBERS) + r")\s+(?:\w+[\s-]+){0,3}?(" +
+    "|".join(_COUNT_UNITS) + r")\b", re.IGNORECASE)
+# "17-tool" / "14 tools" as a single token
+_HYPHEN_COUNT_RE = re.compile(r"\b(\d{1,4})-tool\b", re.IGNORECASE)
+
+
+def _asserted_counts(text: str) -> Dict[str, Dict[int, str]]:
+    """Map unit -> {value: how it was written}.
+
+    Units are normalized to singular so "18 tools" and "18 tool" unify. The
+    origin is kept because a spelled-out number ("all seven scripts") reads
+    differently in a report than a digit.
+    """
+    out: Dict[str, Dict[int, str]] = {}
+
+    def add(unit, value, origin):
+        unit = unit.lower()
+        unit = "test" if unit == "tests" else (unit[:-1] if unit.endswith("s") else unit)
+        out.setdefault(unit, {})[value] = origin
+
+    for m in _COUNT_RE.finditer(text or ""):
+        add(m.group(2), int(m.group(1)), "digit")
+    for m in _WORD_COUNT_RE.finditer(text or ""):
+        add(m.group(2), _WORD_NUMBERS[m.group(1).lower()], "word_number")
+    for m in _HYPHEN_COUNT_RE.finditer(text or ""):
+        add("tool", int(m.group(1)), "digit")
+    return out
+
+
+# Text signalling that THIS fact's number was true at a point and has since
+# moved, rather than a claim about the present. Two such facts disagreeing is a
+# timeline, not a conflict: "baseline is now 141 (was 107)" then "now 156".
+#
+# Kept NARROW on purpose. An earlier version included "no longer" and bare
+# "since", which over-fired badly: fact #172 read "rewrote all seven scripts ...
+# [an earlier script] no longer [exists]" and the unrelated "no longer"
+# suppressed a genuine six-vs-seven contradiction.
+_PROGRESSION_RE = re.compile(
+    r"(\bis now\b|\bwas now\b|\bwas \d{1,4}\b|after adding|\bgrew\b|moved from"
+    r"|\bhas since\b|currently at)",
+    re.IGNORECASE)
+
+
+def classify_pair(fact_a: Dict[str, Any], fact_b: Dict[str, Any]) -> Dict[str, Any]:
+    """Do two similar facts AGREE, DISAGREE, or is it unclear?
+
+    The audit sweeper answers "these N facts are similar", which is not the
+    question a maintainer has. Reading all 26 candidate pairs on 2026-09-27,
+    most were benign co-topic pairs -- "added X" beside "committed and pushed X"
+    are two true things -- while every real defect was a pair that CONTRADICTED:
+    14 vs 18 tools, "six" vs "seven" scripts.
+
+    Only load-bearing numeric contradictions count, and a pair that reads as a
+    timeline is excluded. Absence of a comparable assertion is "unclear", never
+    a guess: an over-eager classifier gets ignored, which is worse than none.
+
+    KNOWN LIMITATION: contradictions that need phrase semantics rather than
+    numbers are reported "unclear", not detected. The 2026-07 pair
+    "npm test runs a glob" vs "node --test uses an explicit file path" is a
+    real defect this returns "unclear" for. It still reaches a human; it just
+    does not get prioritised.
+    """
+    a_text = (fact_a or {}).get("content") or ""
+    b_text = (fact_b or {}).get("content") or ""
+    a_counts = _asserted_counts(a_text)
+    b_counts = _asserted_counts(b_text)
+
+    a_progresses = bool(_PROGRESSION_RE.search(a_text))
+    b_progresses = bool(_PROGRESSION_RE.search(b_text))
+
+    conflicts = []
+    for unit in sorted(set(a_counts) & set(b_counts)):
+        a_vals, b_vals = set(a_counts[unit]), set(b_counts[unit])
+        if not a_vals or not b_vals:
+            continue
+        if a_vals & b_vals:
+            # They share a value. One may additionally mention another as
+            # history -- "#635 was regenerated to 15 tools ... as of 09-15 the
+            # tree registers 18" AGREES with "#634 verified at 18 tools".
+            # Flagging that is noise, so only disjoint sets are conflicts.
+            continue
+        if a_progresses or b_progresses:
+            # "baseline is now 141 (was 107)" then "now 156 (was 141)" is a
+            # timeline, not a contradiction.
+            continue
+        origins = set(a_counts[unit].values()) | set(b_counts[unit].values())
+        conflicts.append({
+            "kind": "word_number" if "word_number" in origins else "count",
+            "unit": unit,
+            "a_value": sorted(a_vals)[0] if len(a_vals) == 1 else sorted(a_vals),
+            "b_value": sorted(b_vals)[0] if len(b_vals) == 1 else sorted(b_vals),
+        })
+
+    if conflicts:
+        verdict, reason = "disagree", "conflicting values for the same unit"
+    elif a_text.strip() == b_text.strip():
+        verdict, reason = "agree", "identical content"
+    else:
+        verdict, reason = "unclear", "no comparable load-bearing assertion"
+
+    return {
+        "a_id": (fact_a or {}).get("id"),
+        "b_id": (fact_b or {}).get("id"),
+        "verdict": verdict,
+        "reason": reason,
+        "conflicts": conflicts,
+    }
+
+
 class LifecycleMixin:
     # Audit sweep thresholds. The semantic default sits just under the
     # write-time dedup threshold in write() (0.88) on purpose: dedup only ever
@@ -811,7 +935,8 @@ class LifecycleMixin:
 
     def audit(self, semantic_threshold: Optional[float] = None,
               lexical_threshold: Optional[float] = None,
-              block: int = 512) -> Dict[str, Any]:
+              block: int = 512,
+              disagreements_only: bool = False) -> Dict[str, Any]:
         """Read-only sweep for stale / contradictory ACTIVE fact pairs.
 
         Reports pairs that a human should reconcile with memory_supersede.
@@ -914,9 +1039,19 @@ class LifecycleMixin:
                         })
 
         # --- assemble, keeping the original return shape backward compatible ---
+        # Classify each pair as agree / disagree / unclear so a maintainer sees
+        # the contradictions rather than reading every near-duplicate. See
+        # classify_pair() for why "unclear" is a first-class answer.
         duplicates = []
+        verdicts = {"agree": 0, "disagree": 0, "unclear": 0}
         for (lo, hi), meta in sorted(pairs.items(), key=lambda kv: -kv[1]["similarity"]):
             f1, f2 = facts[lo], facts[hi]
+            verdict = classify_pair(
+                {"id": lo, "content": f1["content"]},
+                {"id": hi, "content": f2["content"]})
+            verdicts[verdict["verdict"]] += 1
+            if disagreements_only and verdict["verdict"] != "disagree":
+                continue
             duplicates.append({
                 "fact1_id": lo,
                 "fact1_content": f1["content"],
@@ -932,6 +1067,9 @@ class LifecycleMixin:
                 "method": meta["method"],
                 "category": f1["category"],
                 "cross_category": f1["category"] != f2["category"],
+                "verdict": verdict["verdict"],
+                "verdict_reason": verdict["reason"],
+                "conflicts": verdict["conflicts"],
             })
 
         return {
@@ -943,6 +1081,10 @@ class LifecycleMixin:
             "stubs_excluded": True,
             "read_only": True,
             "thresholds": {"semantic": semantic_threshold, "lexical": lexical_threshold},
+            "pairs_examined": sum(verdicts.values()),
+            "pair_verdicts": verdicts,
+            "disagreement_count": verdicts["disagree"],
+            "disagreements_only": disagreements_only,
         }
 
     def export_markdown(self, category: Optional[str] = None) -> str:

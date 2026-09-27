@@ -259,6 +259,8 @@ KNOWN_AGENTS_TEMPLATE_HASHES = frozenset({
     "741022d3c57c541eb14b2a558424a78f31a4aedf28a013e501d659662e1e8da9",
     # docs(agents): supersede provenance inheritance + memory_cli.py locate
     "37c48b70521ce0efc59d1d407b2e725ccbfd4c295397421717f7f0d491980703",
+    # docs(agents): tool_reference truth check + audit --disagreements-only
+    "8958b7b913e32e73eabd2cafb316608fce9e201485a77323f4562da0276779ee",
 })
 
 

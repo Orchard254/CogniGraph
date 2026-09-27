@@ -33,7 +33,8 @@ At the end of every session:
 
 Maintenance (weekly or when drift is suspected) runs via CLI/background, not MCP:
 - `backup`, `scan-provenance`, `audit`, `pollution`, `prune`, `optimize`, `backfill`, `export`, `bootstrap`, `branch` via `memory_cli.py`; auto-maintenance also runs on server startup and takes a timestamped full-DB backup first (keep 8). Migration scripts snapshot automatically before mutating.
-- `python scripts/check_corpus_truth.py` — exits non-zero when an active fact contradicts the running system (currently: claims an MCP tool count the live registry disagrees with). Run it after any change to the tool surface, and before concluding a corpus cleanup is finished. `.cognigraph/` is gitignored so this cannot be a CI job; run it locally.
+- `python scripts/check_corpus_truth.py` — exits non-zero when an active fact contradicts the running system. Two checks: `tool_count` (a fact claims an MCP tool count the live registry disagrees with) and `tool_reference` (a fact *prescribes calling* a `memory_*` identifier that is not a tool, CLI command, module, or table). Run it after any change to the tool surface, and before concluding a corpus cleanup is finished. `.cognigraph/` is gitignored so this cannot be a CI job; run it locally.
+- `python memory_cli.py audit --disagreements-only` — near-duplicate pairs whose facts *contradict* each other, skipping the benign co-topic ones. Plain `audit` classifies every pair `agree` / `disagree` / `unclear`; "unclear" means no load-bearing assertion could be compared, not that the pair is fine.
 
 Structural layer (tree-sitter, Python/JS/TS/TSX):
 - `structural_extract.py:extract_structures(file_path)` — parse file into function/class/method/import nodes
@@ -49,4 +50,4 @@ Code graph (one-hop queries — ask these mid-reasoning instead of re-reading fi
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.
 - If `memory_cli.py wire` reports `WIRED_WITH_ERRORS`, fix `config_errors` first - the listed config was not written (wire.py:207-222).
-<!-- cognigraph-template sha256:37c48b70521ce0efc59d1d407b2e725ccbfd4c295397421717f7f0d491980703 -->
+<!-- cognigraph-template sha256:8958b7b913e32e73eabd2cafb316608fce9e201485a77323f4562da0276779ee -->
