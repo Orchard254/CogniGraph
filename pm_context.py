@@ -203,7 +203,16 @@ class ContextMixin:
             query: The search query or task description
             limit: Maximum number of primary facts to return
             repo_id: Repository ID for episodic filtering
-            max_chars: Maximum character budget for output
+            max_chars: Character budget for the fact body. The returned string
+                can exceed it by roughly 150 characters, because the
+                truncation notice and the intent tip are appended AFTER the
+                cut -- deliberately, since both are things the reader needs in
+                order to trust the output. Measured 2026-09-28: at the default
+                8000 the real output is ~3200-3600 chars (37-44% of budget), so
+                this only matters for small budgets. Also measured: long facts
+                do NOT crowd out short ones here -- only 3 of 495 curated
+                facts exceed 1500 characters, and a limit of 5 returns 5/5 at
+                every budget from 1200 up.
             intent: Optional explicit intent (overrides automatic detection)
             
         Returns:
