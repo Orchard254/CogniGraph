@@ -351,7 +351,15 @@ class TestStructuralBriefing:
         lines = temp_store._structural_briefing_lines('no_structure.py')
         assert lines == []
 
-    def test_file_context_includes_structure_when_available(self, temp_store):
+    def test_file_context_includes_structure_when_available(self, temp_store, tmp_path, monkeypatch):
+        # chdir into tmp_path so the scratch file never lands in the repo root.
+        # It used to: a test-created .py in the project root is picked up by the
+        # background file watcher, which writes a 'Source file:' stub into the
+        # LIVE corpus -- the temp_store assertions were unaffected, but the live
+        # DB picked up an orphan stub (it was fact #843, found later by
+        # prune-stubs and not by any test or gate). Relative paths below stay
+        # relative, so the sync/get_file_context contract is unchanged.
+        monkeypatch.chdir(tmp_path)
         test_file = Path('test_struct_temp.py')
         test_file.write_text(
             'def hello():\n'

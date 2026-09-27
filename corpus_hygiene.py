@@ -43,11 +43,29 @@ CLOBBER_REASON = "corpus_hygiene_clobbered_curated"
 
 
 def _stub_where() -> str:
+    """Bound-parameter form of the stub predicate. OR, never AND."""
     return " OR ".join("content LIKE ?" for _ in STUB_PREFIXES)
 
 
 def _stub_params() -> tuple:
     return tuple(f"{p}%" for p in STUB_PREFIXES)
+
+
+def _stub_where_inline() -> str:
+    """Literal form of the same predicate, for DDL.
+
+    SQLite refuses bound parameters in a partial index WHERE clause
+    ("parameters prohibited in partial index WHERE clauses"), so a unique
+    index over the stub prefixes has to inline the patterns. STUB_PREFIXES
+    are module constants rather than user input, and every single quote is
+    doubled, so this is safe -- "Directory '" becomes "Directory ''%".
+
+    Kept beside _stub_where() so there is still exactly one definition of the
+    predicate's shape, rather than a second hand-rolled copy that can drift.
+    test_stub_dedup.py asserts the two forms agree.
+    """
+    return " OR ".join(
+        "content LIKE '" + p.replace("'", "''") + "%'" for p in STUB_PREFIXES)
 
 
 def corpus_hygiene(db_path: str | Path, apply: bool = False) -> Dict[str, Any]:

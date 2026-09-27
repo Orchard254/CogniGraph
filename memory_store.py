@@ -37,7 +37,8 @@ from pm_structural import StructuralMixin
 # corpus_hygiene is stdlib-only at module top level, so this is cycle-free
 # (same import the mixins already do). Used by stats() to split the active
 # total into stubs vs curated so audit()'s "checked" figure is derivable.
-from corpus_hygiene import _stub_where, _stub_params
+from corpus_hygiene import (STUB_PREFIXES, _stub_where, _stub_params,
+                             _stub_where_inline)
 
 __all__ = [
     "MemoryStore",
@@ -476,27 +477,58 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         # (file_path, content). Check-then-write in watcher/bootstrap cannot
         # close cross-process races (two watchers syncing the same new file),
         # so the database enforces it; write() maps violations back to the
-        # standard near-duplicate sentinel. Scoped to the 'Source file:'
-        # template only — curated facts are never constrained by this index.
-        # Databases that still hold pre-fix duplicates create no index until
-        # the backfill lands; every open retries, so it self-heals afterwards.
+        # standard near-duplicate sentinel.
+        #
+        # Scope widened 2026-09-28 from 'Source file:' alone to ALL THREE
+        # STUB_PREFIXES. The other two are equally auto-generated inventory
+        # ('Key file:' and "Directory '") and were equally unconstrained, so
+        # the original index left a half-done guarantee: the live corpus had
+        # already grown a duplicate pair (#247/#248, identical 'Key file:
+        # README.md') that nothing could have prevented. Curated facts are
+        # still never constrained.
+        #
+        # The prefix join comes from corpus_hygiene._stub_where(), which is the
+        # OR form. Hand-rolling it as AND requires a row to match every
+        # prefix at once and silently matches nothing — a trap that has already
+        # been fallen into once in this codebase (prune_stale_stubs).
+        #
+        # Databases holding pre-fix duplicates create no index until the
+        # backfill lands; every open retries, so it self-heals afterwards.
         try:
-            dupes = self.conn.execute("""
-                SELECT COUNT(*) c FROM (
-                    SELECT 1 FROM memory
-                    WHERE deprecated_at IS NULL AND content LIKE 'Source file:%'
-                    GROUP BY file_path, content HAVING COUNT(*) > 1)
-            """).fetchone()["c"]
+            dupes = self.conn.execute(
+                "SELECT COUNT(*) c FROM ("
+                "    SELECT 1 FROM memory WHERE deprecated_at IS NULL"
+                f"    AND ({_stub_where()})"
+                "    GROUP BY file_path, content HAVING COUNT(*) > 1)",
+                _stub_params(),
+            ).fetchone()["c"]
             if dupes:
                 logger.warning(
                     "ux_stub_once deferred: %s duplicate stub cohorts present; "
                     "run the #530 backfill, then reopen", dupes)
             else:
-                self.conn.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS ux_stub_once
-                ON memory(file_path, content)
-                WHERE content LIKE 'Source file:%' AND deprecated_at IS NULL
-                """)
+                # CREATE INDEX IF NOT EXISTS will NOT upgrade a stale definition:
+                # the name matches, so the old narrower index silently survives.
+                # That is how a widened guard can look applied and enforce nothing
+                # extra. Compare the stored SQL against what this build wants and
+                # rebuild when they differ. Cheap (one sqlite_master read) and it
+                # is the only way a schema widening actually reaches an existing
+                # database.
+                row = self.conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='index' "
+                    "AND name='ux_stub_once'").fetchone()
+                existing = (row["sql"] if row else "") or ""
+                covered = sum(1 for p in STUB_PREFIXES
+                              if p.replace("'", "''") in existing)
+                if row is not None and covered != len(STUB_PREFIXES):
+                    logger.info(
+                        "ux_stub_once widening: existing index covers %d of %d "
+                        "stub prefixes; rebuilding", covered, len(STUB_PREFIXES))
+                    self.conn.execute("DROP INDEX IF EXISTS ux_stub_once")
+                self.conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_stub_once "
+                    "ON memory(file_path, content) "
+                    f"WHERE ({_stub_where_inline()}) AND deprecated_at IS NULL")
         except Exception as e:
             logger.warning("ux_stub_once migration failed: %r", e)
 
@@ -650,8 +682,16 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             # active row exists do we return its sentinel; otherwise the
             # original error propagates unchanged, so no other IntegrityError
             # case changes behavior.
+            #
+            # The prefix test covers ALL THREE STUB_PREFIXES, matching the index.
+            # It used to test only "Source file:", which was consistent while the
+            # index also covered only that prefix -- so the gap was invisible.
+            # Widening the index alone turned a duplicate 'Key file:' or
+            # "Directory '" stub into an unhandled IntegrityError escaping
+            # write(), which is worse than the duplicate it prevented. The two
+            # must move together; STUB_PREFIXES keeps them tied.
             stripped = content.strip() if content else ""
-            if norm_file_path and stripped.startswith("Source file:"):
+            if norm_file_path and stripped.startswith(STUB_PREFIXES):
                 row = self.conn.execute(
                     "SELECT id FROM memory WHERE file_path=? AND content=? "
                     "AND deprecated_at IS NULL",
