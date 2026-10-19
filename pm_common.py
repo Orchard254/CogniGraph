@@ -53,7 +53,39 @@ def _get_embed_model():
         except Exception:
             _SEMANTIC_AVAILABLE = False
             return None
+        _align_tokenizer_truncation(_EMBED_MODEL)
     return _EMBED_MODEL
+
+
+def _align_tokenizer_truncation(model) -> None:
+    """Force truncation max_length down to the tokenizer's fixed padding length.
+
+    fastembed's bundled MiniLM tokenizer is configured with padding
+    length=128 but truncation max_length=256. The `tokenizers` library only
+    pads sequences SHORTER than the padding target, so any document
+    tokenizing to 129..256 tokens is left at its natural length. onnx_embed
+    then does np.array([e.ids for e in encoded]) over that ragged batch and
+    raises ValueError("...inhomogeneous shape after 1 dimensions"), which
+    silently aborted batched embedding (bootstrap, backfill) leaving facts
+    unembedded. Truncating to the padding length makes every sequence
+    exactly 128 tokens, so batches are always rectangular.
+
+    No-op unless the model exposes a tokenizer with a fixed padding length.
+    """
+    try:
+        tokenizer = getattr(getattr(model, "model", None), "tokenizer", None)
+        if tokenizer is None:
+            return
+        padding = getattr(tokenizer, "padding", None) or {}
+        truncation = getattr(tokenizer, "truncation", None) or {}
+        pad_len = padding.get("length")
+        max_len = truncation.get("max_length")
+        if isinstance(pad_len, int) and isinstance(max_len, int) and max_len > pad_len:
+            tokenizer.enable_truncation(max_length=pad_len)
+    except Exception:
+        # Never let tokenizer tuning break model loading: a ragged batch is
+        # recoverable per-fact, an unavailable model is not.
+        pass
 
 
 def _encode(text: str):

@@ -18,7 +18,7 @@ from typing import Dict, Any, List, Tuple
 
 from memory_store import MemoryStore, bump_background_failure
 from structural_extract import extract_structures
-from wire import sync_agents_md
+from wire import sync_agents_md, _python_exe
 
 logger = logging.getLogger(__name__)
 
@@ -383,7 +383,30 @@ def install_git_hook(root: Path) -> str:
     src = Path(__file__).resolve().parent / "hooks" / "git_hook.py"
     if not src.exists():
         return "skipped_hook_source_missing"
-    target.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    text = src.read_text(encoding="utf-8")
+    # The shipped template resolves imports relative to the hook file, i.e.
+    # <repo>/.git/hooks -> <repo>/.git, which never contains memory_store — so
+    # an unsubstituted hook always died at `from memory_store import
+    # MemoryStore` with "hook disabled (import failed)" and silently captured
+    # nothing. Substitute the CogniGraph install root (the directory that
+    # actually holds memory_store.py) at install time. The DB path needs no
+    # substitution: default_db_path() resolves .cognigraph/memory.db upwards
+    # from CWD, and git runs hooks with the repo root as CWD.
+    text = text.replace(
+        "sys.path.insert(0, str(Path(__file__).resolve().parent.parent))",
+        "sys.path.insert(0, %r)" % str(src.parent.parent),
+        1,
+    )
+    # substitution: git for Windows resolves the shebang through PATH, where
+    # `python3` is often only the Microsoft Store execution-alias stub — the
+    # hook then prints "Python was not found" and captures nothing. Pin the
+    # absolute interpreter (same one wire.py hands the MCP server).
+    text = text.replace(
+        "#!/usr/bin/env python3",
+        "#!%s" % _python_exe(src.parent.parent).replace("\\", "/"),
+        1,
+    )
+    target.write_text(text, encoding="utf-8")
     try:
         # Git only fires hooks with the executable bit set. On Windows this
         # is a harmless no-op-ish call; on POSIX without it the installed

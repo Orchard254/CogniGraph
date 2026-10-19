@@ -934,7 +934,24 @@ def test_install_git_hook_states(tmp_path):
     assert bootstrap.install_git_hook(tmp_path) == "installed"
     target = hooks_dir / "post-commit"
     src = Path(bootstrap.__file__).resolve().parent / "hooks" / "git_hook.py"
-    assert target.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
+    installed = target.read_text(encoding="utf-8")
+    template = src.read_text(encoding="utf-8")
+    # The hook is a DERIVED copy, not a verbatim one: install_git_hook pins the
+    # shebang to the real interpreter and points sys.path at the CogniGraph
+    # install root. A verbatim copy resolves imports from <repo>/.git, where
+    # memory_store does not exist, so the hook dies on import and captures
+    # nothing.
+    install_root = str(src.parent.parent)
+    assert "#!/usr/bin/env python3" not in installed, "shebang must be pinned"
+    # %r writes the repr form, so backslashes are escaped in the file text.
+    assert repr(install_root) in installed, "sys.path must target the install root"
+    assert (
+        "sys.path.insert(0, str(Path(__file__).resolve().parent.parent))"
+        not in installed
+    )
+    # Everything else stays identical to the shipped template.
+    assert installed.count("def main()") == template.count("def main()") == 1
+    assert "[cognigraph]" in installed
     if sys.platform != "win32":
         # Git only fires hooks with the executable bit set (POSIX); Windows
         # has no exec bit, so this assertion is POSIX-only by design.
