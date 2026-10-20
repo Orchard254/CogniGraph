@@ -159,6 +159,10 @@ jobs:
           fi
         shell: bash
 
+      - name: Verify npm package runtime contents
+        run: node scripts/check_npm_package.js
+        shell: bash
+
       - name: Run Node.js tests
         run: npm test
 
