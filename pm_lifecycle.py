@@ -472,8 +472,6 @@ class LifecycleMixin:
                 continue
             if not structural_index_freshness_verified:
                 continue
-            if not structural_index_freshness_verified and any("content hash mismatch" in kl for kl in known_limitations):
-                continue
             try:
                 dt = datetime.datetime.fromisoformat(str(ts_raw))
                 if dt.tzinfo is None:
