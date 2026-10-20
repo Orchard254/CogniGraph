@@ -159,12 +159,4 @@ def _prune_backups(directory: Path, db_name: str, keep: int = DEFAULT_KEEP):
                     except OSError:
                         pass
                 break
-                parent = directory / stray.name[: -len(suffix)]
-                if not parent.exists():
-                    try:
-                        stray.unlink()
-                        removed.append(stray)
-                    except OSError:
-                        pass
-                break
     return keepers, removed
