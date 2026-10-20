@@ -30,7 +30,7 @@ const PYTHON_CANDIDATES = [
 
 // Must mirror the package.json "files" list (python sources, schemas, hooks).
 const REQUIRED_FILES = [
-  'server.py', 'memory_store.py', 'pm_common.py', 'pm_search.py',
+  'server.py', 'memory_store.py', 'corpus_hygiene.py', 'pm_backup.py', 'pm_common.py', 'pm_search.py',
   'pm_context.py', 'pm_lifecycle.py', 'pm_structural.py', 'bootstrap.py',
   'structural_extract.py', 'branch_promotion.py', 'genesis_migrate.py',
   'watcher.py', 'wire.py', 'memory_cli.py', '__init__.py',
