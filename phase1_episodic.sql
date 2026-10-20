@@ -13,7 +13,7 @@
 -- promotion (later slice). Two genuinely different memories may share an
 -- anchor and similar content.
 
-CREATE TABLE episodic_memories (
+CREATE TABLE IF NOT EXISTS episodic_memories (
     memory_id              INTEGER PRIMARY KEY AUTOINCREMENT,
     repo_id                INTEGER NOT NULL REFERENCES repositories(repo_id),
     branch_id              INTEGER NOT NULL REFERENCES memory_branches(branch_id),
@@ -34,11 +34,11 @@ CREATE TABLE episodic_memories (
     -- only permits ACTIVE -> SUPERSEDED/INVALIDATED).
 );
 
-CREATE INDEX idx_episodic_repo_status ON episodic_memories(repo_id, status);
-CREATE INDEX idx_episodic_created_revision ON episodic_memories(created_revision);
+CREATE INDEX IF NOT EXISTS idx_episodic_repo_status ON episodic_memories(repo_id, status);
+CREATE INDEX IF NOT EXISTS idx_episodic_created_revision ON episodic_memories(created_revision);
 
 -- INSERT: full revision-protocol stamp check, mirrors trg_observations_insert_revision.
-CREATE TRIGGER trg_episodic_insert_revision
+CREATE TRIGGER IF NOT EXISTS trg_episodic_insert_revision
 BEFORE INSERT ON episodic_memories
 BEGIN
     SELECT CASE
@@ -55,7 +55,7 @@ END;
 
 -- Repository isolation: branch and (when present) anchor must belong to the
 -- same repository as the memory itself.
-CREATE TRIGGER trg_episodic_repo_isolation
+CREATE TRIGGER IF NOT EXISTS trg_episodic_repo_isolation
 BEFORE INSERT ON episodic_memories
 BEGIN
     SELECT CASE
@@ -73,7 +73,7 @@ END;
 -- UPDATE: the ONLY legal transition is ACTIVE -> SUPERSEDED | INVALIDATED,
 -- performed atomically with closure. All identity/provenance fields are
 -- immutable. Once closed_revision is set the row is fully immutable.
-CREATE TRIGGER trg_episodic_update_revision
+CREATE TRIGGER IF NOT EXISTS trg_episodic_update_revision
 BEFORE UPDATE ON episodic_memories
 BEGIN
     SELECT CASE
@@ -107,7 +107,7 @@ END;
 
 -- Dependency graph between episodic memories. New vocabulary; memory_edges is
 -- untouched (migration is a later slice).
-CREATE TABLE memory_dependencies (
+CREATE TABLE IF NOT EXISTS memory_dependencies (
     dependency_id     INTEGER PRIMARY KEY AUTOINCREMENT,
     repo_id           INTEGER NOT NULL REFERENCES repositories(repo_id),
     source_memory_id  INTEGER NOT NULL REFERENCES episodic_memories(memory_id),
@@ -117,10 +117,10 @@ CREATE TABLE memory_dependencies (
     UNIQUE(source_memory_id, target_memory_id, relation_type)
 );
 
-CREATE INDEX idx_dependencies_source ON memory_dependencies(source_memory_id);
-CREATE INDEX idx_dependencies_target ON memory_dependencies(target_memory_id);
+CREATE INDEX IF NOT EXISTS idx_dependencies_source ON memory_dependencies(source_memory_id);
+CREATE INDEX IF NOT EXISTS idx_dependencies_target ON memory_dependencies(target_memory_id);
 
-CREATE TRIGGER trg_dependencies_insert_revision
+CREATE TRIGGER IF NOT EXISTS trg_dependencies_insert_revision
 BEFORE INSERT ON memory_dependencies
 BEGIN
     SELECT CASE
@@ -131,7 +131,7 @@ BEGIN
     END;
 END;
 
-CREATE TRIGGER trg_dependencies_repo_isolation
+CREATE TRIGGER IF NOT EXISTS trg_dependencies_repo_isolation
 BEFORE INSERT ON memory_dependencies
 BEGIN
     SELECT CASE
