@@ -1,0 +1,6 @@
+include phase0_schema.sql
+include phase1_episodic.sql
+include phase1_episodic_embeddings.sql
+include phase2_branch_admin.sql
+include episodic_fts.sql
+include legacy_provenance.sql
