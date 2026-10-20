@@ -611,11 +611,14 @@ class LifecycleMixin:
         # Test-aware projection for likely_relevant_tests: merge direct
         # external candidates with transitive affected tests.
         _merged = sorted(set(external_test_candidates) | {a["test_file"] for a in affected_tests})
-        _seen3=set(); _uniq3=[]
+        _seen3 = set()
+        _uniq3 = []
         for _p in _merged:
-            _c=_canonical_path(_p)
-            if _c in _seen3: continue
-            _seen3.add(_c); _uniq3.append(_p)
+            _c = _canonical_path(_p)
+            if _c in _seen3:
+                continue
+            _seen3.add(_c)
+            _uniq3.append(_p)
         external_test_candidates = sorted(_uniq3)
 
         # Stored constraints surfaced as a validation checklist (section F slice)
