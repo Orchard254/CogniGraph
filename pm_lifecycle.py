@@ -183,7 +183,9 @@ class LifecycleMixin:
         value. Prefer supersede() when the corrected content is known.
         """
         if any(looks_like_secret(value) for value in (note, flag_type, flagged_by) if value):
-            raise ValueError("refused: this looks like it contains a credential or secret in the flag metadata.")
+            raise ValueError(
+                "refused: this looks like it contains a credential or secret in the flag metadata."
+            )
         row = self.conn.execute("SELECT id FROM memory WHERE id = ?", (fact_id,)).fetchone()
         if not row:
             raise ValueError(f"no fact with id {fact_id}")
