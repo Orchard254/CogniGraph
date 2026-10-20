@@ -209,7 +209,6 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         """
         scripts = _canonical_schema_scripts()
         expected = set().union(*(objects for _, _, objects in scripts))
-        expected.difference_update(_CANONICAL_OPTIONAL_FTS_OBJECTS)
         if not self._vec_available:
             expected.difference_update(_CANONICAL_VECTOR_OBJECTS)
 
@@ -218,6 +217,11 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                 "SELECT name FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')"
             ).fetchall()
         }
+        # If this SQLite build cannot provide FTS5, FTS table + triggers are an
+        # optional lane. If its virtual table exists, however, its maintenance
+        # triggers are required and will be repaired when absent.
+        if "episodic_fts" not in present:
+            expected.difference_update(_CANONICAL_OPTIONAL_FTS_OBJECTS)
         if expected.issubset(present):
             return
 
@@ -274,6 +278,10 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                 "SELECT name FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')"
             ).fetchall()
         }
+        if "episodic_fts" in present:
+            expected.update(_CANONICAL_OPTIONAL_FTS_OBJECTS)
+        else:
+            expected.difference_update(_CANONICAL_OPTIONAL_FTS_OBJECTS)
         missing = sorted(expected - present)
         if missing:
             raise RuntimeError(
