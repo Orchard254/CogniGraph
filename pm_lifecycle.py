@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
 from pm_common import (
-    tokenize_text,
+    tokenize_text, looks_like_secret,
     _vec_to_blob, _get_embed_model,
     _EMBED_MODEL_NAME, _SEMANTIC_AVAILABLE, np,
     _blob_to_vec, logger,
@@ -182,6 +182,10 @@ class LifecycleMixin:
         warning at priming time instead of re-consuming the bad fact at face
         value. Prefer supersede() when the corrected content is known.
         """
+        if any(looks_like_secret(value) for value in (note, flag_type, flagged_by) if value):
+            raise ValueError(
+                "refused: this looks like it contains a credential or secret in the flag metadata."
+            )
         row = self.conn.execute("SELECT id FROM memory WHERE id = ?", (fact_id,)).fetchone()
         if not row:
             raise ValueError(f"no fact with id {fact_id}")
