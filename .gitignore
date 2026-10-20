@@ -64,3 +64,4 @@ _refactor_split.py
 memory_store.PRISTINE.bak.py
 memory_store_corrupted_backup.py
 memory_store_reconstructed.py
+.zcode/plans/
