@@ -146,7 +146,8 @@ def test_schema_repair_replaces_existing_null_unsafe_trigger_bodies(tmp_path, mo
     # Simulate an older install whose same-named triggers used != on nullable
     # fields. The partial database also lacks new Phase 2/provenance guardrails,
     # which should cause startup repair to run.
-    with sqlite3.connect(db_path) as conn:
+    conn = sqlite3.connect(db_path)
+    try:
         conn.execute("DROP TRIGGER trg_observations_update_revision")
         conn.execute(
             """
@@ -169,6 +170,8 @@ def test_schema_repair_replaces_existing_null_unsafe_trigger_bodies(tmp_path, mo
             END
             """
         )
+    finally:
+        conn.close()
 
     store = MemoryStore(str(db_path))
     try:
