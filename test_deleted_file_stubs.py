@@ -1,8 +1,4 @@
 """Deleting a source file must retire its generated stub but preserve curated facts."""
-from pathlib import Path
-
-import pytest
-
 import watcher
 from memory_store import MemoryStore
 
