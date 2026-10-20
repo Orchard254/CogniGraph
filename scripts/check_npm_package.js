@@ -59,6 +59,7 @@ function main() {
     'index.js',
     'lib.js',
     'postinstall.js',
+    'LICENSE',
     ...lib.getRequiredFiles(),
   ];
   const missing = [...new Set(required)].filter((file) => !packedPaths.has(file));
