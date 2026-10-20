@@ -151,3 +151,64 @@ def test_no_false_match_a_py_vs_a_pyx(tmp_path):
         assert out["structural_dependencies_count"] == 0
     finally:
         s.close()
+
+
+def test_affected_direct_dependent(tmp_path):
+    s = _mk(tmp_path)
+    try:
+        mod = _node(s, "function", "f", "src/mod.py", 1)
+        test = _node(s, "function", "test_f", "tests/test_mod.py", 1)
+        _edge(s, test, mod, "imports")
+        out = s.check_safety(["src/mod.py"])
+        affected = out["affected_tests"]
+        paths = [a["test_file"] for a in affected]
+        assert "tests/test_mod.py" in paths
+        entry = next(a for a in affected if a["test_file"] == "tests/test_mod.py")
+        assert entry["depth"] == 1
+        assert entry["direct"] is True
+    finally:
+        s.close()
+
+
+def test_affected_indirect_dependent(tmp_path):
+    s = _mk(tmp_path)
+    try:
+        mod = _node(s, "function", "f", "src/mod.py", 1)
+        mid = _node(s, "function", "mid", "src/mid.py", 1)
+        test = _node(s, "function", "test_f", "tests/test_mod.py", 1)
+        _edge(s, mid, mod, "calls")
+        _edge(s, test, mid, "imports")
+        out = s.check_safety(["src/mod.py"])
+        affected = out["affected_tests"]
+        paths = [a["test_file"] for a in affected]
+        assert "tests/test_mod.py" in paths
+        entry = next(a for a in affected if a["test_file"] == "tests/test_mod.py")
+        assert entry["depth"] == 2
+        assert entry["direct"] is False
+    finally:
+        s.close()
+
+
+def test_affected_direct_batch_test(tmp_path):
+    s = _mk(tmp_path)
+    try:
+        out = s.check_safety(["tests/test_mod.py"])
+        affected = out["affected_tests"]
+        entry = next(a for a in affected if a["test_file"] == "tests/test_mod.py")
+        assert entry["depth"] == 0
+        assert entry["direct"] is True
+    finally:
+        s.close()
+
+
+def test_affected_cycle_terminates(tmp_path):
+    s = _mk(tmp_path)
+    try:
+        a = _node(s, "function", "a", "src/a.py", 1)
+        b = _node(s, "function", "b", "src/b.py", 1)
+        _edge(s, a, b, "calls")
+        _edge(s, b, a, "calls")
+        out = s.check_safety(["src/a.py"])
+        assert out["status"] == "CHECKED"
+    finally:
+        s.close()
