@@ -100,6 +100,14 @@ _CANONICAL_VECTOR_OBJECTS = frozenset({
     "vec_episodic_memory", "vec_episodic_ei", "vec_episodic_ed", "vec_episodic_eu",
 })
 
+# These trigger definitions changed after an earlier schema had already installed
+# the same names. CREATE TRIGGER IF NOT EXISTS would keep the old, weaker SQL;
+# explicitly replace them whenever canonical-schema repair is running.
+_CANONICAL_REPLACEABLE_TRIGGERS = (
+    "trg_observations_update_revision",
+    "trg_episodic_update_revision",
+)
+
 
 @lru_cache(maxsize=1)
 def _canonical_schema_scripts():
@@ -224,6 +232,13 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             expected.difference_update(_CANONICAL_OPTIONAL_FTS_OBJECTS)
         if expected.issubset(present):
             return
+
+        # Schema scripts use IF NOT EXISTS to stay replayable, but that also
+        # preserves old SQL bodies when a trigger definition itself changes.
+        # Missing guardrails are what bring existing databases into this repair
+        # path, so refresh changed triggers before replaying their DDL.
+        for trigger_name in _CANONICAL_REPLACEABLE_TRIGGERS:
+            self.conn.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
 
         for filename, source, _ in scripts:
             if filename == "phase1_episodic_embeddings.sql" and not self._vec_available:

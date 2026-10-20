@@ -79,14 +79,16 @@ BEGIN
     SELECT CASE
         WHEN OLD.closed_revision IS NOT NULL THEN
             RAISE(ABORT, 'immutable: record already closed, no further updates permitted')
-        WHEN NEW.repo_id != OLD.repo_id
-          OR NEW.branch_id != OLD.branch_id
-          OR NEW.anchor_id != OLD.anchor_id
-          OR NEW.content != OLD.content
-          OR NEW.category != OLD.category
-          OR NEW.confidence != OLD.confidence
-          OR NEW.created_revision != OLD.created_revision
-          OR NEW.created_at != OLD.created_at THEN
+        WHEN NEW.repo_id IS NOT OLD.repo_id
+          OR NEW.branch_id IS NOT OLD.branch_id
+          OR NEW.anchor_id IS NOT OLD.anchor_id
+          OR NEW.content IS NOT OLD.content
+          OR NEW.category IS NOT OLD.category
+          OR NEW.confidence IS NOT OLD.confidence
+          OR NEW.created_revision IS NOT OLD.created_revision
+          OR NEW.created_at IS NOT OLD.created_at
+          OR NEW.importance IS NOT OLD.importance
+          OR NEW.tags IS NOT OLD.tags THEN
             RAISE(ABORT, 'immutable-field mutation: identity/provenance fields cannot change')
         WHEN OLD.status != 'ACTIVE' THEN
             RAISE(ABORT, 'invalid update: only ACTIVE memories may transition')
@@ -103,6 +105,12 @@ BEGIN
         WHEN NEW.closed_revision <= NEW.created_revision THEN
             RAISE(ABORT, 'invalid closure: closed_revision must exceed created_revision')
     END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_episodic_immutable_delete
+BEFORE DELETE ON episodic_memories
+BEGIN
+    SELECT RAISE(ABORT, 'episodic history is immutable: deletion is never permitted');
 END;
 
 -- Dependency graph between episodic memories. New vocabulary; memory_edges is
@@ -140,4 +148,19 @@ BEGIN
         WHEN (SELECT repo_id FROM episodic_memories WHERE memory_id = NEW.target_memory_id) != NEW.repo_id THEN
             RAISE(ABORT, 'repository isolation violation: target memory belongs to a different repository')
     END;
+END;
+
+-- The current dependency slice has no lifecycle/status columns yet. Until the
+-- revisioned invalidation/supersession protocol is implemented, do not permit
+-- direct rewrites or hard deletion of these historical relationships.
+CREATE TRIGGER IF NOT EXISTS trg_dependencies_immutable_update
+BEFORE UPDATE ON memory_dependencies
+BEGIN
+    SELECT RAISE(ABORT, 'dependency history is immutable: direct updates are not permitted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_dependencies_immutable_delete
+BEFORE DELETE ON memory_dependencies
+BEGIN
+    SELECT RAISE(ABORT, 'dependency history is immutable: deletion is never permitted');
 END;
