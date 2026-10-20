@@ -11,6 +11,7 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 const lib = require('../lib');
 
@@ -55,6 +56,52 @@ function main() {
   }
 
   const packedPaths = new Set(files.map((file) => String(file.path)));
+
+  // pyproject.toml is the source of truth for setuptools' top-level runtime
+  // modules. Compare it independently with BOTH the wrapper's required-file
+  // inventory and npm's actual packed manifest. Otherwise the same omission
+  // can be repeated in package.json and lib.getRequiredFiles() and escape CI.
+  let pyproject;
+  try {
+    pyproject = fs.readFileSync(path.join(ROOT, 'pyproject.toml'), 'utf8');
+  } catch (error) {
+    console.error(`Could not read pyproject.toml: ${error.message}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const moduleBlock = pyproject.match(/py-modules\\s*=\\s*\\[([\\s\\S]*?)\\]/m);
+  if (!moduleBlock) {
+    console.error('Could not find the py-modules list in pyproject.toml.');
+    process.exitCode = 1;
+    return;
+  }
+
+  const pythonModules = [...moduleBlock[1].matchAll(/["']([^"']+)["']/g)]
+    .map((match) => `${match[1]}.py`);
+  if (pythonModules.length === 0) {
+    console.error('The py-modules list in pyproject.toml is empty or unparseable.');
+    process.exitCode = 1;
+    return;
+  }
+
+  const requiredFiles = new Set(lib.getRequiredFiles());
+  const omittedFromRequired = pythonModules.filter((file) => !requiredFiles.has(file));
+  if (omittedFromRequired.length > 0) {
+    console.error('Python runtime modules are missing from lib.getRequiredFiles():');
+    for (const file of omittedFromRequired) console.error(`  - ${file}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const omittedFromPackage = pythonModules.filter((file) => !packedPaths.has(file));
+  if (omittedFromPackage.length > 0) {
+    console.error('Python runtime modules declared in pyproject.toml are missing from the npm package:');
+    for (const file of omittedFromPackage) console.error(`  - ${file}`);
+    process.exitCode = 1;
+    return;
+  }
+
   const required = [
     'index.js',
     'lib.js',
