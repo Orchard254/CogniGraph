@@ -3,6 +3,8 @@
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 import memory_store
 from memory_store import MemoryStore
 
@@ -229,8 +231,10 @@ def test_anchor_entity_must_belong_to_declared_repository(tmp_path, monkeypatch)
 
         # But using the entity from repo A with repo B's declared ID must fail
         # at the database boundary, before an observation can reference it.
-        import pytest
-        with pytest.raises(sqlite3.IntegrityError, match="anchor entity belongs to a different repository"):
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="anchor entity belongs to a different repository",
+        ):
             store.conn.execute(
                 "INSERT INTO anchors (entity_id, repo_id, created_at) VALUES (?, ?, ?)",
                 (entity_a, repo_b, now),
