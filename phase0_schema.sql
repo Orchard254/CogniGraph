@@ -72,6 +72,12 @@ BEGIN
     SELECT RAISE(ABORT, 'anchors are immutable: no UPDATE is ever permitted');
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_anchors_immutable_delete
+BEFORE DELETE ON anchors
+BEGIN
+    SELECT RAISE(ABORT, 'anchors are immutable: deletion is never permitted');
+END;
+
 CREATE TABLE IF NOT EXISTS observations (
     observation_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     anchor_id        INTEGER NOT NULL REFERENCES anchors(anchor_id),
@@ -117,14 +123,15 @@ BEGIN
     SELECT CASE
         WHEN OLD.closed_revision IS NOT NULL THEN
             RAISE(ABORT, 'immutable: record already closed, closed_revision cannot change')
-        WHEN NEW.anchor_id != OLD.anchor_id
-          OR NEW.branch_id != OLD.branch_id
-          OR NEW.repo_id != OLD.repo_id
-          OR NEW.file_path != OLD.file_path
-          OR NEW.content_hash != OLD.content_hash
-          OR NEW.recorded_at != OLD.recorded_at
-          OR NEW.valid_from != OLD.valid_from
-          OR NEW.created_revision != OLD.created_revision THEN
+        WHEN NEW.anchor_id IS NOT OLD.anchor_id
+          OR NEW.branch_id IS NOT OLD.branch_id
+          OR NEW.repo_id IS NOT OLD.repo_id
+          OR NEW.file_path IS NOT OLD.file_path
+          OR NEW.ast_symbol IS NOT OLD.ast_symbol
+          OR NEW.content_hash IS NOT OLD.content_hash
+          OR NEW.recorded_at IS NOT OLD.recorded_at
+          OR NEW.valid_from IS NOT OLD.valid_from
+          OR NEW.created_revision IS NOT OLD.created_revision THEN
             RAISE(ABORT, 'immutable-field mutation: identity/provenance fields cannot change')
         WHEN NEW.closed_revision IS NULL THEN
             RAISE(ABORT, 'invalid update: only a closure transition (NULL -> current_revision) is permitted')
@@ -133,6 +140,12 @@ BEGIN
         WHEN NEW.closed_revision <= NEW.created_revision THEN
             RAISE(ABORT, 'invalid closure: closed_revision must exceed created_revision')
     END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_observations_immutable_delete
+BEFORE DELETE ON observations
+BEGIN
+    SELECT RAISE(ABORT, 'observation history is immutable: deletion is never permitted');
 END;
 
 -- Repository isolation (Section 27): anchor and branch referenced by an
