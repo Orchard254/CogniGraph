@@ -32,6 +32,7 @@ _REQUIRED_GUARDRAILS = {
     "trg_observations_update_revision",
     "trg_observations_repo_isolation",
     "trg_anchors_repo_isolation",
+    "trg_anchors_immutable",
     "trg_anchors_immutable_delete",
     "trg_observations_immutable_delete",
     "trg_episodic_insert_revision",
