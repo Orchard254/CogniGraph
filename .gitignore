@@ -45,6 +45,8 @@ opencode.json
 # (e.g. a .example/template file).
 .zed/settings.json
 .zcode/config.json
+# Local dev-orchestrator run state (branches/state/reviews; never commit)
+.orchestra/
 
 # Coverage artifacts
 .coverage
