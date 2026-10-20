@@ -1,9 +1,8 @@
--- Phase 0 Foundational Layer (draft, sandbox-verified, NOT yet integrated
--- into the real codebase). Scope: repositories, revision protocol, entities,
--- anchors (Section 9 revised — single generation only), observations.
--- Branches/tombstones/promotions/lineage/episodic_memories/dependencies are
--- a later increment — deferred here so this slice can be honestly tested
--- end-to-end rather than left half-verified.
+-- Phase 0 foundational layer. Loaded by MemoryStore's canonical-schema
+-- initializer for fresh databases and to repair incomplete prior initialization.
+-- Scope: repositories, revision protocol, entities, anchors (single generation),
+-- and observations. This file defines the root-branch substrate; episodic memory
+-- and dependency tables are added by Phase 1, branch administration by Phase 2.
 
 PRAGMA foreign_keys = ON;
 
