@@ -35,6 +35,7 @@ _REQUIRED_GUARDRAILS = {
     "trg_dependencies_insert_revision",
     "trg_dependencies_repo_isolation",
     "trg_branches_single_level",
+    "trg_branches_identity_immutable",
     "trg_branches_promotion_requires_ledger",
     "trg_branches_discard_requires_tombstone",
     "trg_promotions_branch_roles",

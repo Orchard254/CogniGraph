@@ -126,6 +126,22 @@ BEGIN
     SELECT RAISE(ABORT, 'root branch status is immutable: canonical root never transitions');
 END;
 
+-- Branch identity and fork snapshot are immutable after creation. Allow only
+-- lifecycle status changes; otherwise a direct SQL UPDATE could move an
+-- experimental branch to another repository/root or rewrite its base revision.
+CREATE TRIGGER IF NOT EXISTS trg_branches_identity_immutable
+BEFORE UPDATE OF repo_id, parent_branch_id, is_root, base_revision, base_timestamp, created_at
+ON memory_branches
+WHEN NEW.repo_id IS NOT OLD.repo_id
+  OR NEW.parent_branch_id IS NOT OLD.parent_branch_id
+  OR NEW.is_root IS NOT OLD.is_root
+  OR NEW.base_revision IS NOT OLD.base_revision
+  OR NEW.base_timestamp IS NOT OLD.base_timestamp
+  OR NEW.created_at IS NOT OLD.created_at
+BEGIN
+    SELECT RAISE(ABORT, 'branch identity is immutable: repository, parent, root role, and fork snapshot cannot change');
+END;
+
 -- ============================================================
 -- 4. Terminal branches are permanently immutable (any column)
 -- Once PROMOTED or DISCARDED, no further UPDATE of any kind is permitted.

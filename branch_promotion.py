@@ -229,6 +229,7 @@ def discard_branch(
     db_path: str | Path,
     source_branch_id: int,
     reason: str | None = None,
+    inject_failure_after: int | None = None,
 ) -> Dict:
     """
     Discard an experimental branch — the terminal alternative to promotion.
@@ -285,6 +286,8 @@ def discard_branch(
             except sqlite3.IntegrityError as e:
                 raise ValueError(str(e)) from e
             tombstone_id = cur.lastrowid
+            if inject_failure_after is not None and inject_failure_after <= 1:
+                raise RuntimeError("injected failure after tombstone insert")
 
             # 2. DISCARDED lineage event
             try:
@@ -295,6 +298,8 @@ def discard_branch(
             except sqlite3.IntegrityError as e:
                 raise ValueError(str(e)) from e
             event_id = cur2.lastrowid
+            if inject_failure_after is not None and inject_failure_after <= 2:
+                raise RuntimeError("injected failure after discarded lineage insert")
 
             # 3. mark branch DISCARDED — trigger enforces tombstone existence + revision match
             try:
