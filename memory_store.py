@@ -1369,11 +1369,20 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             raise ValueError(f"no memory row with id {keep_id}")
         if not d_row:
             raise ValueError(f"no memory row with id {deprecate_id}")
+        if keep_id == deprecate_id:
+            raise ValueError("keep_id and deprecate_id must be different")
         reason = f"conflict resolved; kept #{keep_id}"
         if rationale:
             reason = f"{reason}: {rationale}"
-        self.deprecate(deprecate_id, reason)
-        edge_id = self.link_facts(keep_id, deprecate_id, "conflicts_with")
+        # Atomic: both operations or neither.
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            self.deprecate(deprecate_id, reason)
+            edge_id = self.link_facts(keep_id, deprecate_id, "conflicts_with")
+            self.conn.execute("COMMIT")
+        except Exception:
+            self.conn.execute("ROLLBACK")
+            raise
         return {"status": "resolved", "keep_id": keep_id, "deprecated_id": deprecate_id, "edge_id": edge_id}
 
     def revision_transaction(self, repo_id: int) -> "RevisionTransaction":

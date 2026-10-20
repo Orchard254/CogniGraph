@@ -22,8 +22,6 @@ from pm_common import (
     KNOWN_RESULT_FIELDS,
     ProjectFieldError,
     parse_fields,
-    _epistemic_status,
-    _is_test_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -700,6 +698,15 @@ def memory_resolve_conflict(keep_id: int, deprecate_id: int, rationale: str = ""
     _ensure_first_time_setup()
     with _store() as _s:
         return _s.resolve_conflict(keep_id, deprecate_id, rationale or None)
+
+
+@mcp.tool()
+def memory_audit_disagreements(disagreements_only: bool = True) -> dict:
+    """Run the cross-fact disagreement audit and return pairs that conflict so
+    agents can resolve them with memory_resolve_conflict. Read-only."""
+    _ensure_first_time_setup()
+    with _store() as _s:
+        return _s.audit(disagreements_only=disagreements_only)
 
 
 @mcp.tool()

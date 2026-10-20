@@ -384,16 +384,21 @@ class LifecycleMixin:
                     })
         except Exception:
             constraint_checks = []
-        verdict = "REVIEW_REQUIRED" if constraint_checks else "PASS"
-
-        safe = len(cross_dependencies) == 0 and len(structural_dependencies) == 0
-        if safe:
-            reason = "No cross-file dependencies detected across the batch; safe to continue."
+        safe = (len(cross_dependencies) == 0 and len(structural_dependencies) == 0
+                and len(constraint_checks) == 0)
+        if constraint_checks and not cross_dependencies and not structural_dependencies:
+            reason = (
+                f"{len(constraint_checks)} stored constraint(s) require review before proceeding."
+            )
+        elif safe:
+            reason = "No cross-file dependencies or constraints detected across the batch; safe to continue."
         else:
             reason = (
-                f"Cross-file dependencies detected ({len(cross_dependencies)} memory, "
-                f"{len(structural_dependencies)} structural); review before proceeding."
+                f"Review before proceeding: cross_dependencies={len(cross_dependencies)}, "
+                f"structural_dependencies={len(structural_dependencies)}, "
+                f"constraint_checks={len(constraint_checks)}."
             )
+        verdict = "PASS" if safe else "REVIEW_REQUIRED"
         return {
             "status": "CHECKED",
             "files_analyzed": len(clean_paths),

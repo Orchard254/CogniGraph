@@ -673,15 +673,16 @@ def _epistemic_status(fact, scan_result=None):
         return "unverified"
     if confidence in ("uncertain", "low", "possibly_outdated"):
         return "partially_known"
-    # scan_result None but fact already has provenance -> treat as known
-    return "known"
+    # Without an actual verification scan, provenance is not evidence that
+    # the current file still matches. Do not upgrade to "known" merely because
+    # a code_hash or path exists.
+    return "unverified"
 
 
 def _is_test_file(file_path):
     """Classify a file path as a test file based on common naming patterns."""
     if not file_path:
         return False
-    import os
     p = str(file_path).replace("\\", "/").lower()
     base = p.rsplit("/", 1)[-1]
     # directory-based
