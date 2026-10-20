@@ -62,7 +62,8 @@ def _assert_canonical_schema_complete(store):
 
 def _seed_previously_partial_schema(db_path):
     """Reproduce the on-disk state left by a startup that stopped at vec0 DDL."""
-    with sqlite3.connect(db_path) as conn:
+    conn = sqlite3.connect(db_path)
+    try:
         conn.execute("PRAGMA foreign_keys=ON")
         for filename in ("phase0_schema.sql", "phase1_episodic.sql"):
             conn.executescript((ROOT / filename).read_text(encoding="utf-8"))
@@ -79,6 +80,8 @@ def _seed_previously_partial_schema(db_path):
             )
             """
         )
+    finally:
+        conn.close()
 
 
 def test_fresh_install_without_sqlite_vec_creates_the_complete_core_schema(
