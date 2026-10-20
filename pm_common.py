@@ -220,10 +220,16 @@ _SECRET_PATTERNS = [
     re.compile(r"-----BEGIN (RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY(?: BLOCK)?-----"),
     # Match common environment-variable names such as OPENAI_API_KEY and
     # SERVICE_SECRET_TOKEN, not just labels that stand alone in prose.
-    re.compile(r"(?i)\b(?:[a-z0-9]+[_-])*(?:api[_-]?key|secret|password|passwd|token)\b\s*[:=]\s*['\"]?[A-Za-z0-9_./+=:-]{12,}"),
+    re.compile(
+        r"(?i)\b(?:[a-z0-9]+[_-])*(?:api[_-]?key|private[_-]?key|"
+        r"secret(?:[_-][a-z0-9]+)*|password|passwd|token(?:[_-][a-z0-9]+)*)"
+        r"\b\s*[:=]\s*['\"]?[A-Za-z0-9_./+=:-]{12,}"
+    ),
     re.compile(r"(?i)://[^/\s:]+:[^/\s@]+@"),                     # user:pass@ embedded in a URL
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),                # GitHub classic tokens
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),              # GitHub fine-grained tokens
+    re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),                  # GitLab personal access tokens
+    re.compile(r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,}\b"),    # Stripe secret/restricted keys
     re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),                    # Google API keys
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),              # Slack tokens
     re.compile(r"\bnpm_[A-Za-z0-9]{36,}\b"),                     # npm access tokens
