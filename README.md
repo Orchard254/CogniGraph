@@ -121,7 +121,7 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 25 tools.
+The server registers 26 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -134,6 +134,7 @@ The server registers 25 tools.
 | `memory_check_security` | `file_paths` | Heuristic security scan: flag sensitive/PII/dangerous patterns (password, secret, token, eval, exec, shell, SQL interpolation) with file:line, plus cross-file impact. |
 | `memory_acquire_lock` | `resource`, `locked_by`, `ttl_seconds?` | Acquire a named lock on a resource for multi-agent coordination. Returns success boolean. |
 | `memory_release_lock` | `resource`, `locked_by` | Release a named lock previously acquired by locked_by. |
+| `memory_lock_status` | `resource` | Return the active lease on a resource, if any (lock_status). |
 | `memory_validate_constraints` | `file_paths` | Validate stored constraints against the files about to be edited; returns constraint_checks and verdict. |
 | `memory_check_hygiene` | `project_root?`, `ci_status?` | Commit/push-discipline status for the working tree: cleanliness, ahead/behind, stale branches. Local git only, read-only; optional ci_status records external CI result. |
 | `memory_supersede` | `old_id`, `new_content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `expected_version?`, `inherit_provenance?`, `line_start?`, `line_end?`, `code_hash?`, `git_commit_sha?` | Replace an outdated fact with corrected content. Use when you discover memory that is wrong. |
