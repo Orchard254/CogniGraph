@@ -5,6 +5,7 @@ import sqlite3
 
 import pytest
 
+import memory_store
 from memory_store import MemoryStore
 
 
@@ -12,7 +13,12 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _fixture(tmp_path):
+def _fixture(tmp_path, monkeypatch):
+    # Isolate canonical-row retention from optional vec0 extension triggers.
+    # The test uses raw sqlite3 connections, which intentionally do not load
+    # sqlite-vec; a production DB with vector tables requires that extension
+    # on every connection that executes its maintenance triggers.
+    monkeypatch.setattr(memory_store, "_SQLITE_VEC_PKG_AVAILABLE", False)
     db_path = tmp_path / "history.db"
     store = MemoryStore(str(db_path))
     now = _now()
@@ -102,8 +108,8 @@ def _connect(db_path):
     return conn
 
 
-def test_historical_rows_cannot_be_deleted_even_without_referencing_rows(tmp_path):
-    data = _fixture(tmp_path)
+def test_historical_rows_cannot_be_deleted_even_without_referencing_rows(tmp_path, monkeypatch):
+    data = _fixture(tmp_path, monkeypatch)
     attempts = [
         (
             "anchors",
@@ -139,8 +145,8 @@ def test_historical_rows_cannot_be_deleted_even_without_referencing_rows(tmp_pat
             conn.close()
 
 
-def test_dependency_relation_cannot_be_rewritten_directly(tmp_path):
-    data = _fixture(tmp_path)
+def test_dependency_relation_cannot_be_rewritten_directly(tmp_path, monkeypatch):
+    data = _fixture(tmp_path, monkeypatch)
     with _connect(data["path"]) as conn:
         with pytest.raises(
             sqlite3.IntegrityError,
@@ -152,8 +158,8 @@ def test_dependency_relation_cannot_be_rewritten_directly(tmp_path):
             )
 
 
-def test_observation_nullable_ast_symbol_is_immutable_during_closure(tmp_path):
-    data = _fixture(tmp_path)
+def test_observation_nullable_ast_symbol_is_immutable_during_closure(tmp_path, monkeypatch):
+    data = _fixture(tmp_path, monkeypatch)
     with _connect(data["path"]) as conn:
         conn.execute(
             "UPDATE repositories SET current_revision=2 WHERE repo_id=?",
@@ -167,8 +173,8 @@ def test_observation_nullable_ast_symbol_is_immutable_during_closure(tmp_path):
             )
 
 
-def test_episodic_nullable_anchor_cannot_change_during_closure(tmp_path):
-    data = _fixture(tmp_path)
+def test_episodic_nullable_anchor_cannot_change_during_closure(tmp_path, monkeypatch):
+    data = _fixture(tmp_path, monkeypatch)
     with _connect(data["path"]) as conn:
         conn.execute(
             "UPDATE repositories SET current_revision=2 WHERE repo_id=?",
@@ -189,8 +195,8 @@ def test_episodic_nullable_anchor_cannot_change_during_closure(tmp_path):
         ("importance", 5),
     ],
 )
-def test_episodic_metadata_cannot_be_rewritten_as_part_of_closure(tmp_path, column, value):
-    data = _fixture(tmp_path)
+def test_episodic_metadata_cannot_be_rewritten_as_part_of_closure(tmp_path, monkeypatch, column, value):
+    data = _fixture(tmp_path, monkeypatch)
     with _connect(data["path"]) as conn:
         conn.execute(
             "UPDATE repositories SET current_revision=2 WHERE repo_id=?",
