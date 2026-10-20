@@ -762,6 +762,10 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                 "refused: this looks like it contains a credential or secret in tags. "
                 "Store where the secret is configured instead of its value."
             )
+        if any(looks_like_secret(value) for value in (session_id, file_path, code_hash, git_commit_sha) if value):
+            raise ValueError(
+                "refused: this looks like it contains a credential or secret in the write metadata."
+            )
         if tags is None:
             tags = self._auto_tags(category, content, file_path)
 
@@ -1039,6 +1043,14 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             norm_line_end = line_end if line_end else None
             norm_code_hash = _prov_str(code_hash, None)
             norm_sha = _prov_str(git_commit_sha, None)
+        if any(
+            looks_like_secret(value)
+            for value in (session_id, norm_file_path, norm_code_hash, norm_sha)
+            if value
+        ):
+            raise ValueError(
+                "refused: this looks like it contains a credential or secret in the replacement metadata."
+            )
         try:
             self.conn.execute("BEGIN IMMEDIATE")
             cur = self.conn.execute(
