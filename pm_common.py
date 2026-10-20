@@ -217,15 +217,23 @@ def project_fields(results, fields, extra_keep=()):
 
 _SECRET_PATTERNS = [
     re.compile(r"AKIA[0-9A-Z]{16}"),                              # AWS access key id
-    re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-    re.compile(r"(?i)\b(api[_-]?key|secret|password|passwd|token)\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-/+]{12,}"),
+    re.compile(r"-----BEGIN (RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY(?: BLOCK)?-----"),
+    # Match common environment-variable names such as OPENAI_API_KEY and
+    # SERVICE_SECRET_TOKEN, not just labels that stand alone in prose.
+    re.compile(r"(?i)\b(?:[a-z0-9]+[_-])*(?:api[_-]?key|secret|password|passwd|token)\b\s*[:=]\s*['\"]?[A-Za-z0-9_./+=:-]{12,}"),
     re.compile(r"(?i)://[^/\s:]+:[^/\s@]+@"),                     # user:pass@ embedded in a URL
-    re.compile(r"ghp_[A-Za-z0-9]{36}"),                           # GitHub personal access token
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),                           # OpenAI/Anthropic-style secret key
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),                # GitHub classic tokens
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),              # GitHub fine-grained tokens
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),                    # Google API keys
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),              # Slack tokens
+    re.compile(r"\bnpm_[A-Za-z0-9]{36,}\b"),                     # npm access tokens
+    re.compile(r"\bpypi-[A-Za-z0-9_-]{30,}\b"),                  # PyPI tokens
+    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),                    # OpenAI/Anthropic-style secret keys
 ]
 
 
 def looks_like_secret(text: Optional[str]) -> bool:
+    """Best-effort secret detector for common key labels and token formats."""
     if not text:
         return False
     return any(p.search(text) for p in _SECRET_PATTERNS)
