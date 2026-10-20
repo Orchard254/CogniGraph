@@ -3,8 +3,41 @@ import datetime
 import hashlib
 import json
 import re
+import posixpath
 import subprocess
 from pathlib import Path
+
+
+def _canonical_path(value):
+    if value is None:
+        return ""
+    p = str(value).strip().replace("\\", "/")
+    if not p:
+        return ""
+    p = posixpath.normpath(p)
+    if p == ".":
+        p = ""
+    if len(p) > 1 and p.endswith("/"):
+        p = p.rstrip("/")
+    return p.lower()
+
+
+def _paths_compatible(a, b):
+    ca = _canonical_path(a)
+    cb = _canonical_path(b)
+    if not ca or not cb:
+        return False
+    if ca == cb:
+        return True
+    return ca.endswith("/" + cb) or cb.endswith("/" + ca)
+
+
+_canonicalize_path = _canonical_path
+_normalize_path = _canonical_path
+_paths_match = _paths_compatible
+_path_compatible = _paths_compatible
+_path_matches = _paths_compatible
+_compatible_paths = _paths_compatible
 from typing import Optional, List, Dict, Any, Tuple
 
 from pm_common import (
@@ -166,6 +199,14 @@ def classify_pair(fact_a: Dict[str, Any], fact_b: Dict[str, Any]) -> Dict[str, A
 class LifecycleMixin:
     _epistemic_status = staticmethod(_epistemic_status)
     _is_test_file = staticmethod(_is_test_file)
+    _canonical_path = staticmethod(_canonical_path)
+    _canonicalize_path = staticmethod(_canonical_path)
+    _normalize_path = staticmethod(_canonical_path)
+    _paths_compatible = staticmethod(_paths_compatible)
+    _path_compatible = staticmethod(_paths_compatible)
+    _paths_match = staticmethod(_paths_compatible)
+    _path_matches = staticmethod(_paths_compatible)
+    _compatible_paths = staticmethod(_paths_compatible)
     # Audit sweep thresholds. The semantic default sits just under the
     # write-time dedup threshold in write() (0.88) on purpose: dedup only ever
     # sees a pair at the instant of writing, and this corpus is re-embedded
@@ -295,21 +336,11 @@ class LifecycleMixin:
         Unified multi-file safety matrix before executing a multi-file refactor task.
         Analyzes cross-file dependencies, shared constraints, and breaking change risks.
         """
-        clean_paths = [fp.strip().replace("\\", "/").lower() for fp in file_paths if fp.strip()]
+        clean_paths = [_canonical_path(fp) for fp in file_paths if str(fp).strip()]
         if not clean_paths:
             return {"status": "NO_FILES_PROVIDED"}
-        def _path_compatible(a, b):
-            pa = (a or "").strip().replace("\\", "/").lower()
-            pb = (b or "").strip().replace("\\", "/").lower()
-            if not pa or not pb:
-                return False
-            if pa == pb:
-                return True
-            # Relative stored path must match the path suffix of an absolute/longer one.
-            return pa.endswith("/" + pb) or pb.endswith("/" + pa)
         def _path_in_batch(path):
-            p = (path or "").strip().replace("\\", "/").lower()
-            return any(_path_compatible(p, cp) for cp in clean_paths)
+            return any(_paths_compatible(path, cp) for cp in clean_paths)
 
         file_briefings = {}
         cross_dependencies = []
@@ -512,7 +543,16 @@ class LifecycleMixin:
                 seen_paths.add(key)
                 unique_ext_deps.append(d)
         external_dependencies = unique_ext_deps[:50]
-        external_test_candidates = sorted(set(external_test_candidates))
+        # Deduplicate by canonical path while preserving original stored paths.
+        _seen_tests = set()
+        _unique_tests = []
+        for _p in external_test_candidates:
+            _c = _canonical_path(_p)
+            if _c in _seen_tests:
+                continue
+            _seen_tests.add(_c)
+            _unique_tests.append(_p)
+        external_test_candidates = sorted(_unique_tests)
 
         # Stored constraints surfaced as a validation checklist (section F slice)
         constraint_checks = []
@@ -521,8 +561,14 @@ class LifecycleMixin:
                 "SELECT id, file_path, content, importance FROM memory "
                 "WHERE deprecated_at IS NULL AND category = 'constraint'"
             ).fetchall():
-                cfp = (cr["file_path"] or "").replace("\\", "/").lower()
-                applies = (not cfp) or any(cfp == cp or cfp.startswith(cp + "/") or cp.startswith(cfp + "/") for cp in clean_paths)
+                cfp = _canonical_path(cr["file_path"])
+                ccanon = _canonical_path(cfp)
+                applies = (not cfp) or any(
+                    _paths_compatible(cfp, cp)
+                    or (ccanon and cp.startswith(ccanon.rstrip('/') + '/'))
+                    or (ccanon and ccanon.startswith(cp + '/'))
+                    for cp in clean_paths
+                )
                 if applies:
                     constraint_checks.append({
                         "fact_id": cr["id"],
