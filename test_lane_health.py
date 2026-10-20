@@ -87,18 +87,21 @@ def test_only_the_default_agent_has_struct_switched_off():
 
 
 def test_structural_lane_can_match_but_is_not_fused():
-    """The lane WORKS. It contributes zero because its weight is zero.
-
-    Run against the live corpus, because the structural index is only populated
-    there. The distinction matters for anyone auditing lane health: a lane that
-    matches and is then not fused is switched off, whereas a lane that matches
-    nothing is broken. This one is the former.
-    """
+    """The lane WORKS in a bootstrapped corpus; CI's clean checkout has no corpus."""
+    from pathlib import Path
     import server
+
+    # This assertion intentionally exercises the project's existing indexed
+    # corpus, not a synthetic fixture. Do not create an empty DB and then
+    # misdiagnose its lack of indexed symbols as a broken retrieval lane.
+    db_path = Path(server.default_db_path())
+    if not db_path.is_file():
+        pytest.skip("requires a bootstrapped project memory database")
+
     with server._store() as store:
         hits = store._structural_scores("classify_pair")
         assert hits, (
-            "_structural_scores should match a node name on the live corpus; "
+            "_structural_scores should match a node name on the bootstrapped corpus; "
             "if it does not, the structural index is stale, which IS a bug")
         res = store.query_hybrid("classify_pair", limit=5, log_usage=False,
                                  explain=True)
