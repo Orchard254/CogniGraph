@@ -1750,6 +1750,12 @@ class TestBlastRadius:
         got = {(s['name'], s['depth']) for f in r['files'] for s in f['symbols']}
         assert got == {('mid', 1), ('leaf', 2)}
 
+    def test_affected_tests_projection(self, chain_store, tmp_path):
+        r = chain_store.blast_radius('leaf', project_root=str(tmp_path))
+        assert 'affected_tests' in r
+        assert isinstance(r['affected_tests'], list)
+        assert 'affected_tests_count' in r
+
     def test_composition_scoping_reused_fixture(self, temp_store, tmp_path):
         """CompA/CompB one-hop: the blast of SiblingA.helper must reach
         CallerAlpha.run (composition-resolved edge) but not CallerBeta.run."""

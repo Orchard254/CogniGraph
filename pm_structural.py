@@ -663,7 +663,7 @@ class StructuralMixin:
         """
         symbol = (symbol or "").strip()
         if not symbol:
-            return {"symbol": symbol, "found": False, "definitions": [], "callers": [], "importers": []}
+            return {"symbol": symbol, "found": False, "definitions": [], "callers": [], "importers": [], "test_callers": [], "test_importers": [], "affected_tests": []}
         if "." in symbol:
             cls, name = symbol.split(".", 1)
             targets = self.conn.execute(
@@ -679,7 +679,7 @@ class StructuralMixin:
             ).fetchall()
         targets = [t for t in targets if t["node_type"] != "module_ref"]
         if not targets:
-            return {"symbol": symbol, "found": False, "definitions": [], "callers": [], "importers": []}
+            return {"symbol": symbol, "found": False, "definitions": [], "callers": [], "importers": [], "test_callers": [], "test_importers": [], "affected_tests": []}
 
         target_ids = [t["id"] for t in targets]
         ph = ",".join("?" * len(target_ids))
@@ -751,6 +751,9 @@ class StructuralMixin:
             "definitions": defs_out,
             "callers": [dict(r) for r in callers],
             "importers": importers,
+            "test_callers": [dict(r) for r in callers if _is_test_file(r.get("file_path"))],
+            "test_importers": [f for f in importers if _is_test_file(f)],
+            "affected_tests": sorted({r.get("file_path") for r in callers if _is_test_file(r.get("file_path"))}),
         }
 
     def who_inherits(self, symbol: str, max_depth: int = 5) -> Dict[str, Any]:
@@ -922,7 +925,8 @@ class StructuralMixin:
 
         if not symbol:
             return {"symbol": symbol, "found": False,
-                    "known_limitations": known_limitations}
+                    "known_limitations": known_limitations,
+                    "affected_tests": [], "affected_tests_count": 0}
 
         if "." in symbol and not scope_cls:
             cls, name = symbol.split(".", 1)
@@ -950,7 +954,8 @@ class StructuralMixin:
             targets = [t for t in targets if t["file_path"] == scope_file]
         if not targets:
             return {"symbol": symbol, "found": False,
-                    "known_limitations": known_limitations}
+                    "known_limitations": known_limitations,
+                    "affected_tests": [], "affected_tests_count": 0}
 
         seed_ids = [t["id"] for t in targets]
         seed_set = set(seed_ids)
@@ -1136,6 +1141,22 @@ class StructuralMixin:
         for entries in by_file.values():
             entries.sort(key=lambda e: (e["depth"], e["line_start"]))
 
+        # Test-aware projection: among the affected cone, which files are
+        # tests? Exposes a Symbol -> affected-tests verification map directly,
+        # complementing check_safety's affected_tests for edit-level input.
+        affected_tests: List[Dict[str, Any]] = []
+        for fp in sorted(by_file):
+            entries = by_file[fp]
+            if not _is_test_file(fp):
+                continue
+            min_depth = min(e["depth"] for e in entries)
+            affected_tests.append({
+                "test_file": fp,
+                "depth": min_depth,
+                "direct": min_depth <= 1,
+                "symbols": sorted({e["name"] for e in entries}),
+            })
+
         files: List[Dict[str, Any]] = []
         if file_detail:
             entries = by_file.get(file_detail, [])
@@ -1181,6 +1202,8 @@ class StructuralMixin:
             "total_edges": total_edges,
             "depth_counts": depth_counts,
             "files": files,
+            "affected_tests": affected_tests,
+            "affected_tests_count": len(affected_tests),
             "unresolved_estimate": unresolved,
             "unresolved_note": (
                 "Sum over traversed function/method nodes of "
