@@ -466,6 +466,29 @@ def _is_require_call(node) -> tuple[bool, str | None]:
     return False, None
 
 
+def _collect_decorators(node) -> list:
+    """Collect raw decorator texts attached to a JS/TS/TSX definition node.
+
+    Decorators may be direct children (class_declaration) or consecutive
+    preceding named siblings (method/function), including when a parser wraps
+    a leading decorator in an ERROR node. Returns [] when none."""
+    decs = [ch for ch in getattr(node, "children", []) if getattr(ch, "type", None) == "decorator"]
+    if decs:
+        return [_node_text(c) for c in decs]
+    # Preceding siblings (possibly wrapped in an ERROR node).
+    out = []
+    cur = getattr(node, "prev_named_sibling", None)
+    if cur is not None and cur.type == "ERROR":
+        out.extend(_node_text(c) for c in cur.children if c.type == "decorator")
+        if out:
+            return out
+    cur = getattr(node, "prev_named_sibling", None)
+    while cur is not None and cur.type == "decorator":
+        out.insert(0, _node_text(cur))
+        cur = cur.prev_named_sibling
+    return out
+
+
 def _extract_js(file_path: Path):
     parser = _js_parser()
     source = file_path.read_bytes()
@@ -512,6 +535,9 @@ def _extract_js(file_path: Path):
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
             }
+            decorators = _collect_decorators(node)
+            if decorators:
+                item["decorators"] = decorators
             if current_class:
                 item["class_name"] = current_class
             items.append(item)
@@ -537,6 +563,9 @@ def _extract_js(file_path: Path):
                         "line_start": _line_1(node),
                         "line_end": _line_end_1(node),
                     }
+                    decorators = _collect_decorators(node)
+                    if decorators:
+                        item["decorators"] = decorators
                     items.append(item)
                     for ch in c.children:
                         walk(ch, current_class=None, scope_item=item)
@@ -561,6 +590,9 @@ def _extract_js(file_path: Path):
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
             }
+            decorators = _collect_decorators(node)
+            if decorators:
+                item["decorators"] = decorators
             if current_class:
                 item["class_name"] = current_class
             items.append(item)
@@ -577,14 +609,18 @@ def _extract_js(file_path: Path):
                     name_node = c
                     break
             class_name = _node_text(name_node) if name_node else "unknown>"
-            items.append({
+            citem = {
                 "type": "class",
                 "name": class_name,
                 "file_path": str(file_path),
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
                 "bases": _js_heritage_bases(node),
-            })
+            }
+            decorators = _collect_decorators(node)
+            if decorators:
+                citem["decorators"] = decorators
+            items.append(citem)
             for ch in node.children:
                 walk(ch, current_class=class_name, scope_item=scope_item)
             return
@@ -684,6 +720,9 @@ def _extract_ts(file_path: Path):
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
             }
+            decorators = _collect_decorators(node)
+            if decorators:
+                item["decorators"] = decorators
             if current_class:
                 item["class_name"] = current_class
             items.append(item)
@@ -711,6 +750,9 @@ def _extract_ts(file_path: Path):
                         "line_start": _line_1(node),
                         "line_end": _line_end_1(node),
                     }
+                    decorators = _collect_decorators(node)
+                    if decorators:
+                        item["decorators"] = decorators
                     items.append(item)
                     # Recurse into arrow function body
                     for ch in c.children:
@@ -735,6 +777,9 @@ def _extract_ts(file_path: Path):
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
             }
+            decorators = _collect_decorators(node)
+            if decorators:
+                item["decorators"] = decorators
             if current_class:
                 item["class_name"] = current_class
             items.append(item)
@@ -757,14 +802,18 @@ def _extract_ts(file_path: Path):
                         name_node = c
                         break
             class_name = _node_text(name_node) if name_node else "unknown>"
-            items.append({
+            citem = {
                 "type": "class",
                 "name": class_name,
                 "file_path": str(file_path),
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
                 "bases": _js_heritage_bases(node),
-            })
+            }
+            decorators = _collect_decorators(node)
+            if decorators:
+                citem["decorators"] = decorators
+            items.append(citem)
             for ch in node.children:
                 walk(ch, current_class=class_name, scope_item=scope_item)
             return
@@ -777,13 +826,17 @@ def _extract_ts(file_path: Path):
                     name_node = c
                     break
             iface_name = _node_text(name_node) if name_node else "unknown>"
-            items.append({
+            citem = {
                 "type": "class",  # treat interfaces as classes for structural purposes
                 "name": iface_name,
                 "file_path": str(file_path),
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
-            })
+            }
+            decorators = _collect_decorators(node)
+            if decorators:
+                citem["decorators"] = decorators
+            items.append(citem)
             for ch in node.children:
                 walk(ch, current_class=None, scope_item=scope_item)
             return
@@ -796,13 +849,17 @@ def _extract_ts(file_path: Path):
                     name_node = c
                     break
             type_name = _node_text(name_node) if name_node else "unknown>"
-            items.append({
+            citem = {
                 "type": "class",  # treat type aliases as classes for structural purposes
                 "name": type_name,
                 "file_path": str(file_path),
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
-            })
+            }
+            decorators = _collect_decorators(node)
+            if decorators:
+                citem["decorators"] = decorators
+            items.append(citem)
             for ch in node.children:
                 walk(ch, current_class=None, scope_item=scope_item)
             return
@@ -896,6 +953,9 @@ def _extract_tsx(file_path: Path):
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
             }
+            decorators = _collect_decorators(node)
+            if decorators:
+                item["decorators"] = decorators
             if current_class:
                 item["class_name"] = current_class
             items.append(item)
@@ -920,6 +980,9 @@ def _extract_tsx(file_path: Path):
                         "line_start": _line_1(node),
                         "line_end": _line_end_1(node),
                     }
+                    decorators = _collect_decorators(node)
+                    if decorators:
+                        item["decorators"] = decorators
                     items.append(item)
                     for ch in c.children:
                         walk(ch, current_class=None, scope_item=item)
@@ -943,6 +1006,9 @@ def _extract_tsx(file_path: Path):
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
             }
+            decorators = _collect_decorators(node)
+            if decorators:
+                item["decorators"] = decorators
             if current_class:
                 item["class_name"] = current_class
             items.append(item)
@@ -963,14 +1029,18 @@ def _extract_tsx(file_path: Path):
                         name_node = c
                         break
             class_name = _node_text(name_node) if name_node else "unknown>"
-            items.append({
+            citem = {
                 "type": "class",
                 "name": class_name,
                 "file_path": str(file_path),
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
                 "bases": _js_heritage_bases(node),
-            })
+            }
+            decorators = _collect_decorators(node)
+            if decorators:
+                citem["decorators"] = decorators
+            items.append(citem)
             for ch in node.children:
                 walk(ch, current_class=class_name, scope_item=scope_item)
             return
