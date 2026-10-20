@@ -332,6 +332,7 @@ class LifecycleMixin:
         known_limitations = []
         structural_scan_failed = False
         constraint_query_failed = False
+        structural_index_freshness_verified = False
         try:
             struct_rows = self.conn.execute(
                 "SELECT e.edge_type, "
@@ -362,6 +363,7 @@ class LifecycleMixin:
                     "callee_symbol": r["callee_symbol"],
                     "callee_class": r["callee_class"],
                 })
+        known_limitations.append("structural index freshness not independently verified; safety result is review-required")
         if not known_limitations:
             known_limitations.append(
                 "structural_edges reflect last watcher sync; may be stale; "
@@ -390,6 +392,7 @@ class LifecycleMixin:
             constraint_query_failed = True
             known_limitations.append("constraint query failed; constraint analysis SKIPPED - analysis incomplete")
         analysis_complete = (not structural_scan_failed) and (not constraint_query_failed)
+        analysis_complete = analysis_complete and structural_index_freshness_verified
         safe = (analysis_complete and len(cross_dependencies) == 0
                 and len(structural_dependencies) == 0 and len(constraint_checks) == 0)
         if not analysis_complete:
@@ -422,6 +425,7 @@ class LifecycleMixin:
             "structural_dependencies_count": len(structural_dependencies),
             "structural_dependencies": structural_dependencies,
             "known_limitations": known_limitations,
+            "structural_index_freshness": "not_verified",
             "analysis_complete": analysis_complete,
             "safe_to_continue": safe,
             "safe_to_continue_reason": reason,

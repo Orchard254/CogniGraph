@@ -121,7 +121,7 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 24 tools.
+The server registers 25 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -139,6 +139,7 @@ The server registers 24 tools.
 | `memory_supersede` | `old_id`, `new_content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `expected_version?`, `inherit_provenance?`, `line_start?`, `line_end?`, `code_hash?`, `git_commit_sha?` | Replace an outdated fact with corrected content. Use when you discover memory that is wrong. |
 | `memory_deprecate` | `id`, `reason?` | Mark one fact (or a batch of ids) obsolete without replacement. |
 | `memory_resolve_conflict` | `keep_id`, `deprecate_id`, `rationale?` | Resolve a conflict between two facts: deprecate the losing fact and |
+| `memory_audit_disagreements` | `disagreements_only?` | Run the cross-fact disagreement audit and return pairs that conflict so |
 | `memory_stats` | — | Memory health: active/deprecated counts, category breakdown, edges. Call at session start per AGENTS.md. |
 | `memory_prepare_task` | `intent`, `file_paths?`, `limit?` | REQUIRED before writing or modifying any code in this repository. Returns the task briefing: relevant decisions, constraints, component facts, file-level impacts, cross-file dependency risks, and the current verified test baseline. |
 | `memory_checkpoint_task` | `summary`, `components?`, `decisions?`, `test_baseline?`, `failures?`, `unfinished?`, `blockers?`, `acceptance_criteria?`, `verified?`, `evidence_type?`, `source_ref?` | Call immediately after a task is verified complete (tests green). Records new components, decisions, the test baseline, and failed approaches as durable memory for future sessions. |
