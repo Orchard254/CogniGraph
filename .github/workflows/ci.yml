@@ -90,7 +90,7 @@ jobs:
           else
             PYTHON=venv/bin/python
           fi
-          "$PYTHON" -m pip wheel --no-deps --no-build-isolation . --wheel-dir "$RUNNER_TEMP/cognigraph-wheel"
+          "$PYTHON" -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/cognigraph-wheel"
           "$PYTHON" - <<'PY'
           from pathlib import Path
           from zipfile import ZipFile
