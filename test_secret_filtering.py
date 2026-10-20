@@ -15,6 +15,11 @@ from pm_common import looks_like_secret
         "AIza" + "A" * 35,
         "npm_" + "A" * 40,
         "pypi-" + "A" * 40,
+        "AWS_SECRET_ACCESS_KEY=" + "A" * 40,
+        "private_key=" + "A" * 50,
+        "sk_live_" + "A" * 32,
+        "rk_test_" + "A" * 32,
+        "glpat-" + "A" * 40,
     ],
 )
 def test_detects_common_credentials_and_prefixed_environment_keys(candidate):
