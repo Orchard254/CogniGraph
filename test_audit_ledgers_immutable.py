@@ -110,7 +110,13 @@ def test_branch_and_provenance_ledgers_reject_update_and_delete(tmp_path, monkey
         store.close()
 
     tombstone_id = discard_result["tombstone_id"]
-    promotion_id = promote_result["promotion_id"]
+    # Promotion's public summary intentionally omits the internal ledger row ID;
+    # locate that audit row by the unique source branch ID instead.
+    promotion_id = _rows(
+        db_path,
+        "SELECT promotion_id FROM branch_promotions WHERE source_branch_id=?",
+        (promote_branch_id,),
+    )[0]["promotion_id"]
     created_event_id = _rows(
         db_path,
         "SELECT event_id FROM memory_lineage_events WHERE branch_id=? AND event_type='CREATED'",
