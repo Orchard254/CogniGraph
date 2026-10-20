@@ -266,3 +266,71 @@ describe('launchMCPServer spawn options (injected fake spawn)', () => {
     assert.strictEqual(opts.env.MEMORY_DB_PATH, '/data/memory.db');
   });
 });
+
+describe('launchMCPServer exit status propagation', () => {
+  async function launchWithFakeChild(exitFn) {
+    const handlers = {};
+    const child = {
+      handlers,
+      on(event, fn) { handlers[event] = fn; },
+      kill() {},
+    };
+    const origError = console.error;
+    console.error = () => {};
+    try {
+      await lib.launchMCPServer(
+        { python: '/fake/python', serverScript: '/fake/server.py' },
+        '/data/memory.db',
+        {
+          spawnFn: () => child,
+          runCommandFn: async () => ({ stdout: '', stderr: '' }),
+          onSignal: () => {},
+          exitFn,
+        }
+      );
+    } finally {
+      console.error = origError;
+    }
+    return child;
+  }
+
+  function emitExit(child, code, signal) {
+    const origError = console.error;
+    console.error = () => {};
+    try {
+      child.handlers.exit(code, signal);
+    } finally {
+      console.error = origError;
+    }
+  }
+
+  it('preserves a clean server exit instead of converting zero to failure', async () => {
+    const exitCodes = [];
+    const child = await launchWithFakeChild((code) => exitCodes.push(code));
+    emitExit(child, 0, null);
+    assert.deepStrictEqual(exitCodes, [0]);
+  });
+
+  it('preserves a non-zero server exit code', async () => {
+    const exitCodes = [];
+    const child = await launchWithFakeChild((code) => exitCodes.push(code));
+    emitExit(child, 7, null);
+    assert.deepStrictEqual(exitCodes, [7]);
+  });
+
+  it('maps forwarded SIGINT and SIGTERM termination to conventional exit statuses', async () => {
+    const exitCodes = [];
+    const child = await launchWithFakeChild((code) => exitCodes.push(code));
+    emitExit(child, null, 'SIGINT');
+    emitExit(child, null, 'SIGTERM');
+    assert.deepStrictEqual(exitCodes, [130, 143]);
+  });
+
+  it('fails closed when a child exit has neither a code nor a recognized signal', async () => {
+    const exitCodes = [];
+    const child = await launchWithFakeChild((code) => exitCodes.push(code));
+    emitExit(child, null, null);
+    assert.deepStrictEqual(exitCodes, [1]);
+  });
+});
+

@@ -248,6 +248,7 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
   const spawnFn = deps.spawnFn || spawn;
   const runCommandFn = deps.runCommandFn || runCommand;
   const onSignal = deps.onSignal || ((event, handler) => process.on(event, handler));
+  const exitFn = deps.exitFn || ((code) => process.exit(code));
 
   const env = {
     ...process.env,
@@ -264,7 +265,7 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
     await runCommandFn(pythonSetup.python, ['-m', 'py_compile', pythonSetup.serverScript], { stdio: 'pipe' });
   } catch (error) {
     console.error(`[cognigraph] Server script failed to compile: ${error.message}`);
-    process.exit(1);
+    exitFn(1);
   }
 
   // Launch the Python MCP server
@@ -276,7 +277,7 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
     });
   } catch (error) {
     console.error('[cognigraph] Failed to spawn server process:', error.message);
-    process.exit(1);
+    exitFn(1);
   }
 
   // Startup watchdog: exit within the grace window means crash-loop, not ready.
@@ -285,7 +286,7 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
 
   serverProcess.on('error', (error) => {
     console.error('[cognigraph] Failed to start server process:', error);
-    process.exit(1);
+    exitFn(1);
   });
 
   serverProcess.on('exit', (code, signal) => {
@@ -297,7 +298,13 @@ async function launchMCPServer(pythonSetup, dbPath, deps = {}) {
     } else {
       console.error(`[cognigraph] Server exited with code ${code}, signal ${signal}`);
     }
-    process.exit(code || 1);
+    // Preserve an intentional clean shutdown. A signal-terminated child has
+    // no numeric exit code, so map it to the conventional shell status 128+n.
+    const signalNumber = signal ? os.constants.signals?.[signal] : null;
+    const exitCode = code !== null
+      ? code
+      : (Number.isInteger(signalNumber) ? 128 + signalNumber : 1);
+    exitFn(exitCode);
   });
 
   // Forward signals to the server process
