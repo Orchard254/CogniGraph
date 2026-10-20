@@ -108,7 +108,7 @@ describe('getRequiredFiles', () => {
   it('is a non-empty list with the key entries', () => {
     const files = lib.getRequiredFiles();
     assert.ok(Array.isArray(files) && files.length > 0);
-    for (const expected of ['server.py', 'requirements.txt', 'hooks/git_hook.py', '__init__.py']) {
+    for (const expected of ['server.py', 'corpus_hygiene.py', 'pm_backup.py', 'requirements.txt', 'hooks/git_hook.py', '__init__.py']) {
       assert.ok(files.includes(expected), `missing ${expected}`);
     }
   });
