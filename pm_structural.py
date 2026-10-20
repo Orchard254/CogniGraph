@@ -113,6 +113,7 @@ class StructuralMixin:
             _sn_cols = [c["name"] for c in
                         self.conn.execute("PRAGMA table_info(structural_nodes)").fetchall()]
             has_bases_col = "base_classes" in _sn_cols
+            has_decorators_col = "decorators" in _sn_cols
         except Exception:
             has_bases_col = False
 
@@ -147,8 +148,35 @@ class StructuralMixin:
                     except (TypeError, ValueError):
                         base_classes = "[]"
 
+                decorators = None
+                if has_decorators_col:
+                    try:
+                        decs = node.get("decorators")
+                        if decs:
+                            decorators = json.dumps(list(decs))
+                    except (TypeError, ValueError):
+                        decorators = None
+
                 # UPSERT by natural key
-                if has_bases_col:
+                if has_bases_col and has_decorators_col:
+                    self.conn.execute(
+                        """
+                        INSERT INTO structural_nodes (node_type, name, class_name, file_path, line_start, line_end,
+                                                      language, code_hash, base_classes, decorators, created_at, last_seen_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(file_path, node_type, name, class_name) DO UPDATE SET
+                            line_start = excluded.line_start,
+                            line_end = excluded.line_end,
+                            code_hash = excluded.code_hash,
+                            base_classes = excluded.base_classes,
+                            decorators = excluded.decorators,
+                            last_seen_at = excluded.last_seen_at,
+                            language = excluded.language
+                        """,
+                        (node_type, name, class_name, clean_path, line_start, line_end,
+                         language, code_hash, base_classes, decorators, scan_ts, scan_ts),
+                    )
+                elif has_bases_col:
                     self.conn.execute(
                         """
                         INSERT INTO structural_nodes (node_type, name, class_name, file_path, line_start, line_end,
@@ -164,6 +192,23 @@ class StructuralMixin:
                         """,
                         (node_type, name, class_name, clean_path, line_start, line_end,
                          language, code_hash, base_classes, scan_ts, scan_ts),
+                    )
+                elif has_decorators_col:
+                    self.conn.execute(
+                        """
+                        INSERT INTO structural_nodes (node_type, name, class_name, file_path, line_start, line_end,
+                                                      language, code_hash, decorators, created_at, last_seen_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(file_path, node_type, name, class_name) DO UPDATE SET
+                            line_start = excluded.line_start,
+                            line_end = excluded.line_end,
+                            code_hash = excluded.code_hash,
+                            decorators = excluded.decorators,
+                            last_seen_at = excluded.last_seen_at,
+                            language = excluded.language
+                        """,
+                        (node_type, name, class_name, clean_path, line_start, line_end,
+                         language, code_hash, decorators, scan_ts, scan_ts),
                     )
                 else:
                     self.conn.execute(
@@ -622,13 +667,13 @@ class StructuralMixin:
         if "." in symbol:
             cls, name = symbol.split(".", 1)
             targets = self.conn.execute(
-                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes, decorators "
                 "FROM structural_nodes WHERE name = ? AND class_name = ?",
                 (name, cls),
             ).fetchall()
         else:
             targets = self.conn.execute(
-                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes, decorators "
                 "FROM structural_nodes WHERE name = ?",
                 (symbol,),
             ).fetchall()
@@ -691,6 +736,14 @@ class StructuralMixin:
                     d["base_classes"] = []
             elif raw is None and d.get("node_type") == "class":
                 d["base_classes"] = []
+            raw_dec = d.get("decorators")
+            if isinstance(raw_dec, str):
+                try:
+                    d["decorators"] = json.loads(raw_dec)
+                except Exception:
+                    d["decorators"] = []
+            elif raw_dec is None and d.get("node_type") in ("function", "method", "class"):
+                d["decorators"] = []
             defs_out.append(d)
         return {
             "symbol": symbol,
@@ -718,7 +771,7 @@ class StructuralMixin:
         # Definitions: class nodes named symbol
         try:
             targets = self.conn.execute(
-                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes, decorators "
                 "FROM structural_nodes WHERE name = ? AND node_type = 'class'",
                 (symbol,),
             ).fetchall()
@@ -874,7 +927,7 @@ class StructuralMixin:
         if "." in symbol and not scope_cls:
             cls, name = symbol.split(".", 1)
             targets = self.conn.execute(
-                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes "
+                "SELECT id, node_type, name, class_name, file_path, line_start, line_end, base_classes, decorators "
                 "FROM structural_nodes WHERE name = ? AND class_name = ?",
                 (name, cls),
             ).fetchall()

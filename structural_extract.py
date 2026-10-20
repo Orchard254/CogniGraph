@@ -331,7 +331,7 @@ def _extract_python(file_path: Path):
 
     # Stack holds (node, current_class_name_or_None)
     def walk(node, current_class: str | None = None, scope_item: dict | None = None,
-             aliases: tuple = ()):
+             aliases: tuple = (), decorators: tuple = ()):
         # Capture calls into the innermost enclosing definition so call edges
         # can be derived later without a second AST pass.
         if node.type == "call" and scope_item is not None:
@@ -368,6 +368,17 @@ def _extract_python(file_path: Path):
                 "line_end": _line_end_1(node),
             })
 
+        # --- Decorated definitions: capture decorators, then handle body def ---
+        elif node.type == "decorated_definition":
+            decs = []
+            for ch in node.children:
+                if ch.type == "decorator":
+                    decs.append(_node_text(ch))
+            for ch in (c for c in node.children if c.type in ("function_definition", "class_definition")):
+                walk(ch, current_class=current_class, scope_item=scope_item,
+                     aliases=aliases, decorators=decs)
+            return
+
         # --- Functions ---
         elif node.type == "function_definition":
             name_node = node.child_by_field_name("name")
@@ -379,13 +390,15 @@ def _extract_python(file_path: Path):
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
             }
+            if decorators:
+                item["decorators"] = list(decorators)
             if current_class:
                 item["class_name"] = current_class
             items.append(item)
             # Recurse into function body with current_class=None (closure/local)
             # and no aliases: bindings never cross function boundaries.
             for ch in node.children:
-                walk(ch, current_class=None, scope_item=item, aliases=())
+                walk(ch, current_class=None, scope_item=item, aliases=(), decorators=())
             return
 
         # --- With-blocks: extend aliases for the body only ---
@@ -394,36 +407,39 @@ def _extract_python(file_path: Path):
             for ch in node.children:
                 if ch.type == "block":
                     walk(ch, current_class=current_class, scope_item=scope_item,
-                         aliases=aliases + bound)
+                         aliases=aliases + bound, decorators=decorators)
                 else:
                     # with_clause (context expressions evaluate in the outer
                     # scope) and punctuation: outer aliases.
                     walk(ch, current_class=current_class, scope_item=scope_item,
-                         aliases=aliases)
+                         aliases=aliases, decorators=decorators)
             return
 
         # --- Classes ---
         elif node.type == "class_definition":
             name_node = node.child_by_field_name("name")
             class_name = _node_text(name_node) if name_node else "unknown>"
-            items.append({
+            citem = {
                 "type": "class",
                 "name": class_name,
                 "file_path": str(file_path),
                 "line_start": _line_1(node),
                 "line_end": _line_end_1(node),
                 "bases": _python_bases(node),
-            })
+            }
+            if decorators:
+                citem["decorators"] = list(decorators)
+            items.append(citem)
             # Walk children with this class in scope; nested functions become methods
             for ch in node.children:
-                walk(ch, current_class=class_name, scope_item=scope_item, aliases=aliases)
+                walk(ch, current_class=class_name, scope_item=scope_item, aliases=aliases, decorators=())
             return  # children already walked with class scope; don't double-walk
 
         # --- General recursive descent for anything else ---
         for ch in node.children:
-            walk(ch, current_class=current_class, scope_item=scope_item, aliases=aliases)
+            walk(ch, current_class=current_class, scope_item=scope_item, aliases=aliases, decorators=decorators)
 
-    walk(root)
+    walk(root, decorators=())
     return items
 
 

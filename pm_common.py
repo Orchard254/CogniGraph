@@ -349,6 +349,7 @@ CREATE TABLE IF NOT EXISTS structural_nodes (
     language TEXT,
     code_hash TEXT,
     base_classes TEXT,
+    decorators TEXT,
     created_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     UNIQUE(file_path, node_type, name, class_name)
