@@ -70,7 +70,7 @@ function main() {
     return;
   }
 
-  const moduleBlock = pyproject.match(/py-modules\\s*=\\s*\\[([\\s\\S]*?)\\]/m);
+  const moduleBlock = pyproject.match(/py-modules\s*=\s*\[([\s\S]*?)\]/m);
   if (!moduleBlock) {
     console.error('Could not find the py-modules list in pyproject.toml.');
     process.exitCode = 1;
