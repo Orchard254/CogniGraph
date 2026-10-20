@@ -332,7 +332,6 @@ class LifecycleMixin:
         known_limitations = []
         structural_scan_failed = False
         constraint_query_failed = False
-        structural_index_freshness_verified = False
         try:
             struct_rows = self.conn.execute(
                 "SELECT e.edge_type, "
@@ -363,7 +362,56 @@ class LifecycleMixin:
                     "callee_symbol": r["callee_symbol"],
                     "callee_class": r["callee_class"],
                 })
-        known_limitations.append("structural index freshness not independently verified; safety result is review-required")
+        # Real freshness verification: for each requested file, compare the maximum
+        # indexed last_seen_at with the current file modification time.
+        structural_index_freshness_verified = True
+        for cp in clean_paths:
+            disk = None
+            for cand in (Path(cp), Path.cwd() / cp):
+                try:
+                    if cand.is_file():
+                        disk = cand
+                        break
+                except Exception:
+                    continue
+            if disk is None:
+                structural_index_freshness_verified = False
+                known_limitations.append(f"freshness unverifiable: cannot resolve path {cp}")
+                continue
+            try:
+                row = self.conn.execute(
+                    "SELECT MAX(last_seen_at) AS ts FROM structural_nodes WHERE file_path = ?",
+                    (cp,),
+                ).fetchone()
+            except Exception:
+                row = None
+            ts_raw = row["ts"] if row else None
+            if ts_raw is None:
+                structural_index_freshness_verified = False
+                known_limitations.append(f"freshness unverifiable: {cp} is not indexed")
+                continue
+            try:
+                dt = datetime.datetime.fromisoformat(str(ts_raw))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                ts = dt.timestamp()
+            except Exception:
+                ts = None
+            if ts is None:
+                structural_index_freshness_verified = False
+                known_limitations.append(f"freshness unverifiable: unreadable index timestamp for {cp}")
+                continue
+            try:
+                mtime = disk.stat().st_mtime
+            except OSError:
+                structural_index_freshness_verified = False
+                known_limitations.append(f"freshness unverifiable: cannot stat {cp}")
+                continue
+            if mtime > ts + 2.0:
+                structural_index_freshness_verified = False
+                known_limitations.append(f"index stale: {cp} modified after last sync")
+        if not structural_index_freshness_verified and not any("freshness" in kl for kl in known_limitations):
+            known_limitations.append("structural index freshness not independently verified; safety result is review-required")
         if not known_limitations:
             known_limitations.append(
                 "structural_edges reflect last watcher sync; may be stale; "
