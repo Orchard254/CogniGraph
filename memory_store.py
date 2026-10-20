@@ -1084,7 +1084,9 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
 
     def deprecate(self, id: int, reason: Optional[str] = None) -> None:
         if looks_like_secret(reason):
-            raise ValueError("refused: this looks like it contains a credential or secret in the deprecation reason.")
+            raise ValueError(
+                "refused: this looks like it contains a credential or secret in the deprecation reason."
+            )
         row = self.conn.execute("SELECT id FROM memory WHERE id = ?", (id,)).fetchone()
         if row is None:
             raise ValueError(f"no memory row with id {id}")
