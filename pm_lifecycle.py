@@ -298,9 +298,18 @@ class LifecycleMixin:
         clean_paths = [fp.strip().replace("\\", "/").lower() for fp in file_paths if fp.strip()]
         if not clean_paths:
             return {"status": "NO_FILES_PROVIDED"}
+        def _path_compatible(a, b):
+            pa = (a or "").strip().replace("\\", "/").lower()
+            pb = (b or "").strip().replace("\\", "/").lower()
+            if not pa or not pb:
+                return False
+            if pa == pb:
+                return True
+            # Relative stored path must match the path suffix of an absolute/longer one.
+            return pa.endswith("/" + pb) or pb.endswith("/" + pa)
         def _path_in_batch(path):
             p = (path or "").strip().replace("\\", "/").lower()
-            return any(p == cp or p.startswith(cp + "/") for cp in clean_paths)
+            return any(_path_compatible(p, cp) for cp in clean_paths)
 
         file_briefings = {}
         cross_dependencies = []
@@ -406,27 +415,32 @@ class LifecycleMixin:
                 structural_index_freshness_verified = False
                 known_limitations.append(f"freshness unverifiable: {cp} has no indexed code nodes")
                 continue
-            # Content-hash verification: each indexed structural node's code_hash
-            # must still match the live source snippet. This prevents a stale
-            # module_ref timestamp (or an out-of-band edit that preserves mtime
-            # precision) from passing the gate.
+            hashed_nodes = [n for n in code_nodes if n["code_hash"]]
             try:
                 lines = disk.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
             except OSError:
                 structural_index_freshness_verified = False
                 known_limitations.append(f"freshness unverifiable: cannot read {cp}")
                 continue
-            for n in code_nodes:
-                if not n["code_hash"]:
-                    continue
+            if not hashed_nodes:
+                structural_index_freshness_verified = False
+                known_limitations.append(f"freshness unverifiable: {cp} has no verified content hashes")
+                continue
+            hash_mismatch = False
+            for n in hashed_nodes:
                 ls = max(0, (n["line_start"] or 1) - 1)
                 le = min(len(lines), n["line_end"] or len(lines))
                 snippet = "".join(lines[ls:le])
                 actual = hashlib.sha256(snippet.encode("utf-8")).hexdigest()
                 if actual != n["code_hash"]:
                     structural_index_freshness_verified = False
+                    hash_mismatch = True
                     known_limitations.append(f"index stale: {cp} content hash mismatch for {n['node_type']} {n['name']}")
                     break
+            if hash_mismatch:
+                continue
+            if not structural_index_freshness_verified:
+                continue
             if not structural_index_freshness_verified and any("content hash mismatch" in kl for kl in known_limitations):
                 continue
             try:
