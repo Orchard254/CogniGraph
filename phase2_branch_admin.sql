@@ -15,7 +15,7 @@
 -- One tombstone per discarded branch (UNIQUE branch_id). The blueprint's
 -- per-record (branch_id, target_record_type, target_record_id) tombstone
 -- is deferred as a future per-record refinement.
-CREATE TABLE branch_tombstones (
+CREATE TABLE IF NOT EXISTS branch_tombstones (
     tombstone_id       INTEGER PRIMARY KEY AUTOINCREMENT,
     repo_id            INTEGER NOT NULL REFERENCES repositories(repo_id),
     branch_id          INTEGER NOT NULL REFERENCES memory_branches(branch_id),
@@ -30,7 +30,7 @@ CREATE TABLE branch_tombstones (
 -- the experimental branch is not transferred (promotion-as-copy-with-new-IDs
 -- per blueprint Section 21). Target is always the canonical root in Phase 0
 -- (Section 21). Source may be promoted at most once (UNIQUE source).
-CREATE TABLE branch_promotions (
+CREATE TABLE IF NOT EXISTS branch_promotions (
     promotion_id       INTEGER PRIMARY KEY AUTOINCREMENT,
     repo_id            INTEGER NOT NULL REFERENCES repositories(repo_id),
     source_branch_id   INTEGER NOT NULL REFERENCES memory_branches(branch_id),
@@ -45,7 +45,7 @@ CREATE TABLE branch_promotions (
 -- CREATED/PROMOTED/DISCARDED in this slice (not the memory-evolution
 -- SUPERSEDES/EVOLVES_FROM/CORRECTS of Section 15 — that lineage is a later
 -- slice). Related promotion/tombstone FKs are required per event_type.
-CREATE TABLE memory_lineage_events (
+CREATE TABLE IF NOT EXISTS memory_lineage_events (
     event_id             INTEGER PRIMARY KEY AUTOINCREMENT,
     repo_id              INTEGER NOT NULL REFERENCES repositories(repo_id),
     branch_id            INTEGER NOT NULL REFERENCES memory_branches(branch_id),
@@ -61,19 +61,19 @@ CREATE TABLE memory_lineage_events (
     )
 );
 
-CREATE INDEX idx_tombstones_branch ON branch_tombstones(branch_id);
-CREATE INDEX idx_promotions_source ON branch_promotions(source_branch_id);
-CREATE INDEX idx_promotions_target ON branch_promotions(target_branch_id);
-CREATE INDEX idx_lineage_branch ON memory_lineage_events(branch_id);
-CREATE INDEX idx_lineage_promotion ON memory_lineage_events(related_promotion_id);
-CREATE INDEX idx_lineage_tombstone ON memory_lineage_events(related_tombstone_id);
+CREATE INDEX IF NOT EXISTS idx_tombstones_branch ON branch_tombstones(branch_id);
+CREATE INDEX IF NOT EXISTS idx_promotions_source ON branch_promotions(source_branch_id);
+CREATE INDEX IF NOT EXISTS idx_promotions_target ON branch_promotions(target_branch_id);
+CREATE INDEX IF NOT EXISTS idx_lineage_branch ON memory_lineage_events(branch_id);
+CREATE INDEX IF NOT EXISTS idx_lineage_promotion ON memory_lineage_events(related_promotion_id);
+CREATE INDEX IF NOT EXISTS idx_lineage_tombstone ON memory_lineage_events(related_tombstone_id);
 
 -- ============================================================
 -- 1. Branch creation: single-level enforcement
 -- Non-root branches must fork directly from a root branch in the same repo.
 -- Root branches must not have a parent.
 -- ============================================================
-CREATE TRIGGER trg_branches_single_level
+CREATE TRIGGER IF NOT EXISTS trg_branches_single_level
 BEFORE INSERT ON memory_branches
 BEGIN
     SELECT CASE
@@ -98,7 +98,7 @@ END;
 -- Single-hop only; memory_lineage_events has no further INSERT triggers
 -- that chain, so recursive_triggers=OFF is respected.
 -- ============================================================
-CREATE TRIGGER trg_branches_created_lineage
+CREATE TRIGGER IF NOT EXISTS trg_branches_created_lineage
 AFTER INSERT ON memory_branches
 WHEN NEW.is_root = 0
 BEGIN
@@ -119,7 +119,7 @@ END;
 -- ============================================================
 -- 3. Root branch status is immutable (canonical root never transitions)
 -- ============================================================
-CREATE TRIGGER trg_branches_root_status_immutable
+CREATE TRIGGER IF NOT EXISTS trg_branches_root_status_immutable
 BEFORE UPDATE OF status ON memory_branches
 WHEN OLD.is_root = 1 AND NEW.status != OLD.status
 BEGIN
@@ -132,7 +132,7 @@ END;
 -- This covers re-promotion, discard-after-promotion, reactivation, and
 -- any other field mutation on a terminal branch — single enforcement point.
 -- ============================================================
-CREATE TRIGGER trg_branches_terminal_immutable
+CREATE TRIGGER IF NOT EXISTS trg_branches_terminal_immutable
 BEFORE UPDATE ON memory_branches
 WHEN OLD.status IN ('PROMOTED','DISCARDED')
 BEGIN
@@ -142,7 +142,7 @@ END;
 -- ============================================================
 -- 5a. Promotion requires a ledger row at the same revision
 -- ============================================================
-CREATE TRIGGER trg_branches_promotion_requires_ledger
+CREATE TRIGGER IF NOT EXISTS trg_branches_promotion_requires_ledger
 BEFORE UPDATE OF status ON memory_branches
 WHEN NEW.status = 'PROMOTED' AND OLD.status = 'ACTIVE' AND OLD.is_root = 0
 BEGIN
@@ -163,7 +163,7 @@ BEGIN
 END;
 
 -- 5b. Discard requires a tombstone row at the same revision
-CREATE TRIGGER trg_branches_discard_requires_tombstone
+CREATE TRIGGER IF NOT EXISTS trg_branches_discard_requires_tombstone
 BEFORE UPDATE OF status ON memory_branches
 WHEN NEW.status = 'DISCARDED' AND OLD.status = 'ACTIVE' AND OLD.is_root = 0
 BEGIN
@@ -186,7 +186,7 @@ END;
 -- 6. branch_promotions: role and repo isolation
 -- target must be root, source must be non-root, both same repo as row
 -- ============================================================
-CREATE TRIGGER trg_promotions_branch_roles
+CREATE TRIGGER IF NOT EXISTS trg_promotions_branch_roles
 BEFORE INSERT ON branch_promotions
 BEGIN
     SELECT CASE
@@ -209,7 +209,7 @@ END;
 -- branch_tombstones.discarded_revision == current_revision
 -- memory_lineage_events.created_revision == current_revision
 -- ============================================================
-CREATE TRIGGER trg_promotions_revision
+CREATE TRIGGER IF NOT EXISTS trg_promotions_revision
 BEFORE INSERT ON branch_promotions
 BEGIN
     SELECT CASE
@@ -220,7 +220,7 @@ BEGIN
     END;
 END;
 
-CREATE TRIGGER trg_tombstones_revision
+CREATE TRIGGER IF NOT EXISTS trg_tombstones_revision
 BEFORE INSERT ON branch_tombstones
 BEGIN
     SELECT CASE
@@ -231,7 +231,7 @@ BEGIN
     END;
 END;
 
-CREATE TRIGGER trg_lineage_revision
+CREATE TRIGGER IF NOT EXISTS trg_lineage_revision
 BEFORE INSERT ON memory_lineage_events
 BEGIN
     SELECT CASE
@@ -256,7 +256,7 @@ END;
 -- 8. Repository isolation for tombstones and lineage events
 -- (promotions isolation already covered in #6)
 -- ============================================================
-CREATE TRIGGER trg_tombstones_repo_isolation
+CREATE TRIGGER IF NOT EXISTS trg_tombstones_repo_isolation
 BEFORE INSERT ON branch_tombstones
 BEGIN
     SELECT CASE
@@ -265,7 +265,7 @@ BEGIN
     END;
 END;
 
-CREATE TRIGGER trg_lineage_repo_isolation
+CREATE TRIGGER IF NOT EXISTS trg_lineage_repo_isolation
 BEFORE INSERT ON memory_lineage_events
 BEGIN
     SELECT CASE

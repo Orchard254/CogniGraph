@@ -13,6 +13,7 @@ keep working unchanged.
 import sqlite3
 import re
 import datetime
+from functools import lru_cache
 import subprocess
 import threading
 from pathlib import Path
@@ -76,6 +77,45 @@ __all__ = [
     "np",
     "logger",
 ]
+
+# Canonical schema scripts are deliberately additive and safe to replay. This
+# lets startup recover databases left partially initialized by older versions
+# without confusing "repositories exists" with "the whole schema exists".
+_CANONICAL_SCHEMA_FILES = (
+    "phase0_schema.sql",
+    "phase1_episodic.sql",
+    "phase1_episodic_embeddings.sql",
+    "phase2_branch_admin.sql",
+    "episodic_fts.sql",
+    "legacy_provenance.sql",
+)
+_CANONICAL_SCHEMA_OBJECT_RE = re.compile(
+    r"(?im)^[ \t]*CREATE\s+(?:VIRTUAL\s+TABLE|UNIQUE\s+INDEX|INDEX|TABLE|TRIGGER)"
+    r"\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)"
+)
+_CANONICAL_OPTIONAL_FTS_OBJECTS = frozenset({
+    "episodic_fts", "episodic_ai", "episodic_ad", "episodic_au",
+})
+_CANONICAL_VECTOR_OBJECTS = frozenset({
+    "vec_episodic_memory", "vec_episodic_ei", "vec_episodic_ed", "vec_episodic_eu",
+})
+
+
+@lru_cache(maxsize=1)
+def _canonical_schema_scripts():
+    """Read packaged schema DDL once; fail clearly if the distribution is incomplete."""
+    base = Path(__file__).resolve().parent
+    scripts = []
+    for filename in _CANONICAL_SCHEMA_FILES:
+        path = base / filename
+        if not path.is_file():
+            raise FileNotFoundError(f"Required CogniGraph schema resource is missing: {path}")
+        source = path.read_text(encoding="utf-8")
+        objects = frozenset(_CANONICAL_SCHEMA_OBJECT_RE.findall(source))
+        if not objects:
+            raise RuntimeError(f"Canonical schema script declares no SQL objects: {filename}")
+        scripts.append((filename, source, objects))
+    return tuple(scripts)
 
 
 # Process-wide counters for best-effort background work that must not crash its
@@ -154,38 +194,100 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         self._ensure_canonical_schema()
 
     def _ensure_canonical_schema(self):
-        """Ensure Phase 0/1/2 canonical tables + triggers exist for fresh installs.
+        """Ensure the complete Phase 0/1/2 schema exists, repairing partial installs.
 
-        Live DB is built incrementally from phase0_schema.sql etc, but a brand-new
-        temp DB via MemoryStore(temp_path) would otherwise lack repositories,
-        memory_branches, entities, anchors, observations, episodic_memories etc.
-        This method makes fresh installs self-contained while remaining idempotent
-        on the live DB (IF NOT EXISTS / try/except already exists).
+        The pre-vector implementation used "repositories" as its only
+        completion marker. If an optional sqlite-vec DDL statement failed after
+        Phase 0/1 tables had been created, that marker permanently hid the
+        missing branch, FTS, and provenance tables on every later startup.
+
+        Expected object names come from the DDL itself so additions to the
+        schema files do not require a second hand-maintained inventory here.
+        The scripts are idempotent; they are replayed only when required
+        objects are absent. Vector search and episodic FTS remain optional
+        capabilities, while their backing relational tables are not optional.
         """
+        scripts = _canonical_schema_scripts()
+        expected = set().union(*(objects for _, _, objects in scripts))
+        if not self._vec_available:
+            expected.difference_update(_CANONICAL_VECTOR_OBJECTS)
+
+        present = {
+            row["name"] for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')"
+            ).fetchall()
+        }
+        # If this SQLite build cannot provide FTS5, FTS table + triggers are an
+        # optional lane. If its virtual table exists, however, its maintenance
+        # triggers are required and will be repaired when absent.
+        if "episodic_fts" not in present:
+            expected.difference_update(_CANONICAL_OPTIONAL_FTS_OBJECTS)
+        if expected.issubset(present):
+            return
+
+        for filename, source, _ in scripts:
+            if filename == "phase1_episodic_embeddings.sql" and not self._vec_available:
+                # Keep the relational embedding store available even when the
+                # optional vec0 virtual-table extension cannot be loaded.
+                self.conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS episodic_embeddings (
+                        memory_id INTEGER PRIMARY KEY
+                            REFERENCES episodic_memories(memory_id) ON DELETE CASCADE,
+                        model TEXT NOT NULL,
+                        embedding BLOB NOT NULL
+                    )
+                    """
+                )
+                continue
+
+            try:
+                self.conn.executescript(source)
+            except sqlite3.Error as exc:
+                if filename == "episodic_fts.sql":
+                    # FTS5 is a retrieval accelerator. A SQLite build without
+                    # FTS5 may still use the non-FTS retrieval lanes; do not let
+                    # its absence prevent branch or migration schema creation.
+                    logger.warning("episodic FTS schema init failed: %r", exc)
+                    continue
+                raise RuntimeError(
+                    f"Canonical schema initialization failed in {filename}: {exc}"
+                ) from exc
+
+        # Best-effort FTS creation keeps the same graceful fallback used by
+        # existing databases, but does not hide failures in required tables.
         try:
-            exists = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='repositories'").fetchone()
-            if exists is None:
-                base = Path(__file__).resolve().parent
-                for fname in ["phase0_schema.sql", "phase1_episodic.sql", "phase1_episodic_embeddings.sql", "phase2_branch_admin.sql", "episodic_fts.sql", "legacy_provenance.sql"]:
-                    p = base / fname
-                    if p.exists():
-                        try:
-                            self.conn.executescript(p.read_text(encoding="utf-8"))
-                        except sqlite3.OperationalError as e:
-                            if "already exists" not in str(e):
-                                raise
-# Ensure episodic_fts exists even if episodic_fts.sql missing triggers
-                try:
-                    self.conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS episodic_fts USING fts5(content, tags, content='episodic_memories', content_rowid='memory_id')")
-                except Exception as e:
-                    logger.warning("episodic_fts ensure failed: %r", e)
-                # Ensure index on episodic_memories.created_revision for promotion queries
-                try:
-                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_created_revision ON episodic_memories(created_revision)")
-                except Exception as e:
-                    logger.warning("idx_episodic_created_revision ensure failed: %r", e)
-        except Exception as e:
-            logger.error("canonical schema init failed: %r", e)
+            self.conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS episodic_fts "
+                "USING fts5(content, tags, content='episodic_memories', content_rowid='memory_id')"
+            )
+        except sqlite3.Error as exc:
+            logger.warning("episodic_fts ensure failed: %r", exc)
+
+        # Retain the explicit index safeguard for promotion queries.
+        try:
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_episodic_created_revision "
+                "ON episodic_memories(created_revision)"
+            )
+        except sqlite3.Error as exc:
+            raise RuntimeError(f"Could not ensure episodic revision index: {exc}") from exc
+
+        present = {
+            row["name"] for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')"
+            ).fetchall()
+        }
+        if "episodic_fts" in present:
+            expected.update(_CANONICAL_OPTIONAL_FTS_OBJECTS)
+        else:
+            expected.difference_update(_CANONICAL_OPTIONAL_FTS_OBJECTS)
+        missing = sorted(expected - present)
+        if missing:
+            raise RuntimeError(
+                "Canonical schema remains incomplete after initialization: "
+                + ", ".join(missing)
+            )
 
     def _ensure_embedding_schema(self):
         """Ensure memory_embeddings table exists (safe to call multiple times)."""
