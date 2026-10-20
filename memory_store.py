@@ -757,6 +757,11 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             tags = tags.strip() or None
         else:
             tags = None
+        if looks_like_secret(tags):
+            raise ValueError(
+                "refused: this looks like it contains a credential or secret in tags. "
+                "Store where the secret is configured instead of its value."
+            )
         if tags is None:
             tags = self._auto_tags(category, content, file_path)
 
@@ -1007,7 +1012,9 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         confidence = confidence.lower().strip()
         if confidence not in VALID_CONFIDENCE:
             raise ValueError(f"confidence must be one of {sorted(VALID_CONFIDENCE)}, got {confidence!r}")
-        if looks_like_secret(new_content) or looks_like_secret(rationale):
+        effective_tags = tags.strip() if tags else row["tags"]
+        if (looks_like_secret(new_content) or looks_like_secret(rationale)
+                or looks_like_secret(effective_tags)):
             raise ValueError("refused: this looks like it contains a credential or secret.")
         
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -1041,7 +1048,7 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                 (row["category"], new_content.strip(), rationale, confidence, now, session_id,
                  new_version, row["importance"],
                  norm_file_path,
-                 tags.strip() if tags else row["tags"],
+                 effective_tags,
                  norm_line_start, norm_line_end, norm_code_hash, norm_sha),
             )
             new_id = cur.lastrowid
