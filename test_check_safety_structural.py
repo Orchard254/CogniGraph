@@ -82,3 +82,72 @@ def test_empty_and_compat(tmp_path):
         assert empty["status"] == "NO_FILES_PROVIDED"
     finally:
         s.close()
+
+
+def test_relative_vs_absolute_path_match(tmp_path):
+    s = _mk(tmp_path)
+    try:
+        a = _node(s, "function", "alpha", str(tmp_path / "src" / "a.py"), 10)
+        b = _node(s, "function", "beta", "src/b.py", 20)
+        _edge(s, a, b, "calls")
+        out = s.check_safety(["src/a.py", "src/b.py"])
+        assert out["structural_dependencies_count"] == 1
+    finally:
+        s.close()
+
+
+def test_absolute_batch_vs_relative_stored(tmp_path):
+    s = _mk(tmp_path)
+    try:
+        a = _node(s, "function", "alpha", "src/a.py", 10)
+        b = _node(s, "function", "beta", "src/b.py", 20)
+        _edge(s, a, b, "calls")
+        out = s.check_safety([str(tmp_path / "src" / "a.py").replace("\\\\", "/"),
+                              str(tmp_path / "src" / "b.py").replace("\\\\", "/")])
+        assert out["structural_dependencies_count"] == 1
+    finally:
+        s.close()
+
+
+def test_trailing_slash_normalization(tmp_path):
+    s = _mk(tmp_path)
+    try:
+        a = _node(s, "function", "alpha", "src/a.py", 10)
+        b = _node(s, "function", "beta", "src/b.py", 20)
+        _edge(s, a, b, "calls")
+        out = s.check_safety(["src/a.py/", "src/b.py/"])
+        assert out["structural_dependencies_count"] == 1
+        # constraints apply too
+        s.conn.execute(
+            "INSERT INTO memory (category, content, file_path, created_at, deprecated_at) "
+            "VALUES ('constraint', 'c', 'src/a.py/', datetime('now'), NULL)"
+        )
+        s.conn.commit()
+        out2 = s.check_safety(["src/a.py", "src/b.py"])
+        assert any(cc["file_path"] == "src/a.py/" for cc in out2["constraint_checks"])
+    finally:
+        s.close()
+
+
+def test_case_normalization(tmp_path):
+    s = _mk(tmp_path)
+    try:
+        a = _node(s, "function", "alpha", "SRC/A.PY", 10)
+        b = _node(s, "function", "beta", "src/b.py", 20)
+        _edge(s, a, b, "calls")
+        out = s.check_safety(["src/a.py", "SRC/B.PY"])
+        assert out["structural_dependencies_count"] == 1
+    finally:
+        s.close()
+
+
+def test_no_false_match_a_py_vs_a_pyx(tmp_path):
+    s = _mk(tmp_path)
+    try:
+        a = _node(s, "function", "alpha", "src/a.pyx", 10)
+        b = _node(s, "function", "beta", "src/b.py", 20)
+        _edge(s, a, b, "calls")
+        out = s.check_safety(["src/a.py", "src/b.py"])
+        assert out["structural_dependencies_count"] == 0
+    finally:
+        s.close()

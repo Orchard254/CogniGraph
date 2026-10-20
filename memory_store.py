@@ -1403,16 +1403,7 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
 
     def _paths_match(self, clean_path: str, fp: str) -> bool:
         """Match stored file_path against a query path without cross-directory false positives."""
-        if clean_path == fp:
-            return True
-        if clean_path in fp or fp in clean_path:
-            return True
-        # Bare-filename fallback ONLY when one side has no directory component
-
-        p1, p2 = Path(clean_path), Path(fp)
-        if p1.name == p2.name and (len(p1.parts) == 1 or len(p2.parts) == 1):
-            return True
-        return False
+        return self._paths_compatible(clean_path, fp)
 
     def get_by_id(self, fact_id: int) -> Optional[Dict[str, Any]]:
         """Retrieve a specific fact by its ID."""
