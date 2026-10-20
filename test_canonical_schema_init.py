@@ -28,10 +28,12 @@ _REQUIRED_TABLES = {
 }
 
 _REQUIRED_GUARDRAILS = {
+    "trg_repositories_revision_monotonic",
     "trg_observations_insert_revision",
     "trg_observations_update_revision",
     "trg_observations_repo_isolation",
-    "trg_repositories_revision_monotonic",
+    "trg_anchors_repo_isolation",
+    "trg_anchors_immutable",
     "trg_anchors_immutable_delete",
     "trg_observations_immutable_delete",
     "trg_episodic_insert_revision",
@@ -203,6 +205,63 @@ def test_schema_repair_replaces_existing_null_unsafe_trigger_bodies(tmp_path, mo
     finally:
         store.close()
 
+def test_anchor_entity_must_belong_to_declared_repository(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_store, "_SQLITE_VEC_PKG_AVAILABLE", False)
+    store = MemoryStore(str(tmp_path / "anchor-isolation.db"))
+    now = "2026-10-20T00:00:00+00:00"
+    try:
+        repo_a = store.conn.execute(
+            "INSERT INTO repositories (root_path, current_revision, created_at) VALUES (?, 1, ?)",
+            (str(tmp_path / "repo-a"), now),
+        ).lastrowid
+        repo_b = store.conn.execute(
+            "INSERT INTO repositories (root_path, current_revision, created_at) VALUES (?, 1, ?)",
+            (str(tmp_path / "repo-b"), now),
+        ).lastrowid
+        entity_a = store.conn.execute(
+            "INSERT INTO entities (repo_id, entity_type, file_path, qualified_name, class_name, created_at) "
+            "VALUES (?, 'FUNCTION', 'src/a.py', 'serve', '', ?)",
+            (repo_a, now),
+        ).lastrowid
+
+        # A same-repository anchor remains valid.
+        valid = store.conn.execute(
+            "INSERT INTO anchors (entity_id, repo_id, created_at) VALUES (?, ?, ?)",
+            (entity_a, repo_a, now),
+        ).lastrowid
+        assert valid > 0
+
+        # But using the entity from repo A with repo B's declared ID must fail
+        # at the database boundary, before an observation can reference it.
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="anchor entity belongs to a different repository",
+        ):
+            store.conn.execute(
+                "INSERT INTO anchors (entity_id, repo_id, created_at) VALUES (?, ?, ?)",
+                (entity_a, repo_b, now),
+            )
+    finally:
+        store.close()
+
+
+def test_startup_repairs_a_missing_anchor_repository_guard(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_store, "_SQLITE_VEC_PKG_AVAILABLE", False)
+    db_path = tmp_path / "missing-anchor-guard.db"
+    store = MemoryStore(str(db_path))
+    try:
+        assert "trg_anchors_repo_isolation" in _schema_objects(store)
+        store.conn.execute("DROP TRIGGER trg_anchors_repo_isolation")
+    finally:
+        store.close()
+
+    # A previously initialized DB must gain the new DDL, not only fresh installs.
+    repaired = MemoryStore(str(db_path))
+    try:
+        assert "trg_anchors_repo_isolation" in _schema_objects(repaired)
+    finally:
+        repaired.close()
+
 def test_repository_revision_must_advance_exactly_one_step(tmp_path, monkeypatch):
     monkeypatch.setattr(memory_store, "_SQLITE_VEC_PKG_AVAILABLE", False)
     store = MemoryStore(str(tmp_path / "revision-monotonicity.db"))
@@ -238,4 +297,3 @@ def test_repository_revision_must_advance_exactly_one_step(tmp_path, monkeypatch
         ).fetchone()[0] == 2
     finally:
         store.close()
-

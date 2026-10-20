@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS repositories (
     created_at      TEXT NOT NULL
 );
 
+-- Minimal branch table: only the auto-created canonical root branch exists
+-- in this increment. Full experimental-branch workflow (Sections 16-25) is
+-- deferred, but observations need a branch_id to point at per Section 10.
 -- The revision cursor is a monotonic sequence, not a user-settable label.
 -- Every legitimate RevisionTransaction (and genesis migration) advances exactly
 -- one step. Reject rollback, no-op writes, and unaccounted multi-step jumps.
@@ -23,9 +26,6 @@ BEGIN
     SELECT RAISE(ABORT, 'revision protocol violation: current_revision must advance by exactly one');
 END;
 
--- Minimal branch table: only the auto-created canonical root branch exists
--- in this increment. Full experimental-branch workflow (Sections 16-25) is
--- deferred, but observations need a branch_id to point at per Section 10.
 CREATE TABLE IF NOT EXISTS memory_branches (
     branch_id        INTEGER PRIMARY KEY AUTOINCREMENT,
     repo_id          INTEGER NOT NULL REFERENCES repositories(repo_id),
@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS anchors (
     repo_id    INTEGER NOT NULL REFERENCES repositories(repo_id),
     created_at TEXT NOT NULL
 );
+
+-- A cross-repository entity must not be smuggled into another repository
+-- by declaring a different repo_id on its otherwise-valid anchor.
+CREATE TRIGGER IF NOT EXISTS trg_anchors_repo_isolation
+BEFORE INSERT ON anchors
+BEGIN
+    SELECT CASE
+        WHEN (SELECT repo_id FROM entities WHERE entity_id = NEW.entity_id) IS NOT NEW.repo_id THEN
+            RAISE(ABORT, 'repository isolation violation: anchor entity belongs to a different repository')
+    END;
+END;
 
 -- Anchors are immutable (Section 9). Enforced at the DB level, not just by
 -- application convention, per the "correctness must hold even if the
