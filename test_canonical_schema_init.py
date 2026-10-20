@@ -41,6 +41,14 @@ _REQUIRED_GUARDRAILS = {
     "trg_promotions_branch_roles",
     "trg_tombstones_repo_isolation",
     "trg_lineage_repo_isolation",
+    "trg_tombstones_immutable_update",
+    "trg_tombstones_immutable_delete",
+    "trg_promotions_immutable_update",
+    "trg_promotions_immutable_delete",
+    "trg_lineage_immutable_update",
+    "trg_lineage_immutable_delete",
+    "trg_legacy_provenance_immutable_update",
+    "trg_legacy_provenance_immutable_delete",
 }
 
 
