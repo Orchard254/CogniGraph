@@ -554,6 +554,59 @@ class LifecycleMixin:
             _unique_tests.append(_p)
         external_test_candidates = sorted(_unique_tests)
 
+        # Affected-test plan: reverse (dependents) traversal over the structural
+        # call/import graph, so tests that indirectly exercise changed code are
+        # surfaced in addition to the one-hop candidates above. Cycle-safe and
+        # bounded; depth is reported honestly (dynamic calls are not captured).
+        from collections import defaultdict, deque
+        affected_test_map = {}  # canonical test path -> {depth, edge_types}
+        original_path_for = {}
+        dependents = defaultdict(lambda: defaultdict(set))  # callee canon -> caller canon -> edge types
+        for r in struct_rows:
+            caller_c = _canonical_path(r["caller_file"])
+            callee_c = _canonical_path(r["callee_file"])
+            if not caller_c or not callee_c or caller_c == callee_c:
+                continue
+            dependents[callee_c][caller_c].add(r["edge_type"] or "unknown")
+            original_path_for.setdefault(caller_c, r["caller_file"])
+            original_path_for.setdefault(callee_c, r["callee_file"])
+        for cp in clean_paths:
+            canonical_cp = _canonical_path(cp)
+            original_path_for.setdefault(canonical_cp, cp)
+        visited = set(_canonical_path(cp) for cp in clean_paths)
+        queue = deque()
+        for cp in clean_paths:
+            queue.append((_canonical_path(cp), 0))
+        while queue:
+            current, depth = queue.popleft()
+            if depth >= 6:
+                continue
+            for dependent, edge_types in dependents.get(current, {}).items():
+                if dependent in visited:
+                    continue
+                visited.add(dependent)
+                if _is_test_file(original_path_for.get(dependent, dependent)):
+                    prior = affected_test_map.get(dependent)
+                    ent = {"depth": depth + 1, "edge_types": sorted(edge_types)}
+                    if prior is None or depth + 1 < prior["depth"]:
+                        affected_test_map[dependent] = ent
+                queue.append((dependent, depth + 1))
+        # Tests supplied directly in the batch are depth 0.
+        for cp in clean_paths:
+            c = _canonical_path(cp)
+            if _is_test_file(cp):
+                affected_test_map.setdefault(c, {"depth": 0, "edge_types": []})
+                original_path_for.setdefault(c, cp)
+        affected_tests = []
+        for can, meta in affected_test_map.items():
+            affected_tests.append({
+                "test_file": original_path_for.get(can, can),
+                "depth": meta["depth"],
+                "direct": meta["depth"] <= 1,
+                "edge_types": meta["edge_types"],
+            })
+        affected_tests.sort(key=lambda x: (x["depth"], x["test_file"]))
+
         # Stored constraints surfaced as a validation checklist (section F slice)
         constraint_checks = []
         try:
@@ -621,6 +674,8 @@ class LifecycleMixin:
             "external_dependencies_count": len(external_dependencies),
             "external_dependencies": external_dependencies,
             "likely_relevant_tests": external_test_candidates,
+            "affected_tests": affected_tests,
+            "affected_tests_count": len(affected_tests),
             "impact_scope": ("incomplete" if external_dependency_scan_failed else ("batch_plus_external_callers" if external_dependencies else "batch_only")),
             "known_limitations": known_limitations,
             "structural_index_freshness": ("verified" if structural_index_freshness_verified else "not_verified"),
