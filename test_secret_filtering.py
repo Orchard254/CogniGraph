@@ -58,3 +58,39 @@ def test_supersede_rejects_secret_in_replacement_tags(tmp_path):
             )
     finally:
         store.close()
+
+def test_deprecate_rejects_secret_in_reason(tmp_path):
+    store = MemoryStore(db_path=str(tmp_path / "memory.db"))
+    try:
+        fact_id = store.write(
+            category="component",
+            content="Safe original deployment fact.",
+            force=True,
+            embed=False,
+        )
+        secret = "github_pat_" + "A" * 40
+        with pytest.raises(ValueError, match="secret"):
+            store.deprecate(fact_id, reason=f"obsolete; backup token={secret}")
+        with pytest.raises(ValueError, match="secret"):
+            store.deprecate_many([fact_id], reason=f"obsolete; token={secret}")
+    finally:
+        store.close()
+
+
+def test_flag_fact_rejects_secret_in_persisted_metadata(tmp_path):
+    store = MemoryStore(db_path=str(tmp_path / "memory.db"))
+    try:
+        fact_id = store.write(
+            category="component",
+            content="Safe original deployment fact.",
+            force=True,
+            embed=False,
+        )
+        secret = "xoxb-" + "A" * 40
+        with pytest.raises(ValueError, match="secret"):
+            store.flag_fact(fact_id, note=f"Credential was {secret}")
+        with pytest.raises(ValueError, match="secret"):
+            store.flag_fact(fact_id, flag_type=secret)
+    finally:
+        store.close()
+
