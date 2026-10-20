@@ -562,6 +562,7 @@ def memory_check_security(file_paths: List[str]) -> dict:
     ]
     hits = []
     limitations = []
+    scanned_files: list[str] = []
     for fp in paths:
         pth = Path(fp)
         if not pth.is_absolute():
@@ -571,6 +572,7 @@ def memory_check_security(file_paths: List[str]) -> dict:
             continue
         try:
             text = pth.read_text(encoding="utf-8", errors="replace")
+            scanned_files.append(str(fp))
         except Exception as e:
             limitations.append(f"could not read {fp}: {e}")
             continue
@@ -588,9 +590,19 @@ def memory_check_security(file_paths: List[str]) -> dict:
             impact = _s.check_safety(paths)
         except Exception as e:
             impact = {"error": str(e)}
+    if not paths:
+        status = "NO_FILES_REQUESTED"
+    elif len(scanned_files) == len(paths):
+        status = "COMPLETE"
+    elif not scanned_files:
+        status = "INCOMPLETE"
+    else:
+        status = "PARTIAL"
     return {
-        "status": "CHECKED",
-        "files_analyzed": len(paths),
+        "status": status,
+        "requested_files": len(paths),
+        "scanned_files": len(scanned_files),
+        "scanned_file_list": scanned_files,
         "hit_count": len(hits),
         "hits": hits,
         "cross_file_impact": impact,

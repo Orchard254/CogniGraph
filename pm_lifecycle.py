@@ -330,6 +330,8 @@ class LifecycleMixin:
         # call/import deps. Additive — old cross_* fields are untouched.
         structural_dependencies = []
         known_limitations = []
+        structural_scan_failed = False
+        constraint_query_failed = False
         try:
             struct_rows = self.conn.execute(
                 "SELECT e.edge_type, "
@@ -344,7 +346,8 @@ class LifecycleMixin:
             ).fetchall()
         except Exception:
             struct_rows = []
-            known_limitations.append("structural_edges unavailable; structural scan skipped")
+            structural_scan_failed = True
+            known_limitations.append("structural_edges unavailable; structural scan SKIPPED - analysis incomplete")
         for r in struct_rows:
             cf = (r["caller_file"] or "").replace("\\", "/").lower()
             tf = (r["callee_file"] or "").replace("\\", "/").lower()
@@ -384,9 +387,17 @@ class LifecycleMixin:
                     })
         except Exception:
             constraint_checks = []
-        safe = (len(cross_dependencies) == 0 and len(structural_dependencies) == 0
-                and len(constraint_checks) == 0)
-        if constraint_checks and not cross_dependencies and not structural_dependencies:
+            constraint_query_failed = True
+            known_limitations.append("constraint query failed; constraint analysis SKIPPED - analysis incomplete")
+        analysis_complete = (not structural_scan_failed) and (not constraint_query_failed)
+        safe = (analysis_complete and len(cross_dependencies) == 0
+                and len(structural_dependencies) == 0 and len(constraint_checks) == 0)
+        if not analysis_complete:
+            reason = (
+                f"Incomplete analysis: structural_scan_failed={structural_scan_failed}, "
+                f"constraint_query_failed={constraint_query_failed}; review before proceeding."
+            )
+        elif constraint_checks and not cross_dependencies and not structural_dependencies:
             reason = (
                 f"{len(constraint_checks)} stored constraint(s) require review before proceeding."
             )
@@ -399,6 +410,10 @@ class LifecycleMixin:
                 f"constraint_checks={len(constraint_checks)}."
             )
         verdict = "PASS" if safe else "REVIEW_REQUIRED"
+        # Partial analysis can never be PASS
+        if not analysis_complete:
+            verdict = "REVIEW_REQUIRED"
+            safe = False
         return {
             "status": "CHECKED",
             "files_analyzed": len(clean_paths),
@@ -407,6 +422,7 @@ class LifecycleMixin:
             "structural_dependencies_count": len(structural_dependencies),
             "structural_dependencies": structural_dependencies,
             "known_limitations": known_limitations,
+            "analysis_complete": analysis_complete,
             "safe_to_continue": safe,
             "safe_to_continue_reason": reason,
             "briefings": file_briefings,

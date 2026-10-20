@@ -1363,12 +1363,14 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         conflicts_with edge from the kept fact to the deprecated one."""
         if looks_like_secret(rationale):
             raise ValueError("refused: this looks like it contains a credential or secret in the conflict rationale.")
-        k_row = self.conn.execute("SELECT id FROM memory WHERE id = ?", (keep_id,)).fetchone()
+        k_row = self.conn.execute("SELECT id, deprecated_at FROM memory WHERE id = ?", (keep_id,)).fetchone()
         d_row = self.conn.execute("SELECT id FROM memory WHERE id = ?", (deprecate_id,)).fetchone()
         if not k_row:
             raise ValueError(f"no memory row with id {keep_id}")
-        if not d_row:
+        if d_row is None:
             raise ValueError(f"no memory row with id {deprecate_id}")
+        if k_row["deprecated_at"] is not None:
+            raise ValueError(f"keep fact {keep_id} is already deprecated; resolve against an active fact")
         if keep_id == deprecate_id:
             raise ValueError("keep_id and deprecate_id must be different")
         reason = f"conflict resolved; kept #{keep_id}"

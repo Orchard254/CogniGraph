@@ -115,8 +115,9 @@ def test_memory_check_security_returns_status_and_handles_missing_file(real_db, 
     missing = str(tmp_path / "definitely_missing_xyz.py")
     out = server.memory_check_security([missing])
     assert isinstance(out, dict)
-    assert out.get("status") == "CHECKED"
+    assert out.get("status") == "INCOMPLETE"
     assert out.get("hit_count", 0) == 0
+    assert out.get("scanned_files") == 0
     assert any("file not found" in str(lim) for lim in out.get("limitations", []))
 
 
@@ -124,5 +125,5 @@ def test_memory_check_security_detects_pattern(real_db, tmp_path):
     f = tmp_path / "scan_me.py"
     f.write_text("password = 'supersecret'\neval('1+1')\n", encoding="utf-8")
     out = server.memory_check_security([str(f)])
-    assert out.get("status") == "CHECKED"
+    assert out.get("status") == "COMPLETE"
     assert out.get("hit_count", 0) >= 1

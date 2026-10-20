@@ -283,6 +283,9 @@ class ContextMixin:
             _et = f.get("evidence_type")
             if _et and _et != "inferred":
                 prov.append(f"evidence: {_et}")
+            _sr = f.get("source_ref")
+            if _sr:
+                prov.append(f"source: {_sr}")
             
             # Enhanced importance highlighting
 
