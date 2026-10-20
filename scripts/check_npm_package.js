@@ -54,7 +54,7 @@ function main() {
     return;
   }
 
-  const packedPaths = new Set(files.map((file) => String(file.path).replace(/\\\\/g, '/')));
+  const packedPaths = new Set(files.map((file) => String(file.path)));
   const required = [
     'index.js',
     'lib.js',
