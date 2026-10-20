@@ -7,7 +7,7 @@
 
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE repositories (
+CREATE TABLE IF NOT EXISTS repositories (
     repo_id         INTEGER PRIMARY KEY AUTOINCREMENT,
     root_path       TEXT NOT NULL UNIQUE,
     current_revision INTEGER NOT NULL DEFAULT 1,
@@ -17,7 +17,7 @@ CREATE TABLE repositories (
 -- Minimal branch table: only the auto-created canonical root branch exists
 -- in this increment. Full experimental-branch workflow (Sections 16-25) is
 -- deferred, but observations need a branch_id to point at per Section 10.
-CREATE TABLE memory_branches (
+CREATE TABLE IF NOT EXISTS memory_branches (
     branch_id        INTEGER PRIMARY KEY AUTOINCREMENT,
     repo_id          INTEGER NOT NULL REFERENCES repositories(repo_id),
     parent_branch_id INTEGER REFERENCES memory_branches(branch_id),
@@ -29,10 +29,10 @@ CREATE TABLE memory_branches (
 );
 
 -- Exactly one root branch per repository (Section 7).
-CREATE UNIQUE INDEX idx_one_root_branch_per_repo
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_root_branch_per_repo
     ON memory_branches(repo_id) WHERE is_root = 1;
 
-CREATE TABLE entities (
+CREATE TABLE IF NOT EXISTS entities (
     entity_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     repo_id        INTEGER NOT NULL REFERENCES repositories(repo_id),
     entity_type    TEXT NOT NULL CHECK(entity_type IN ('FUNCTION','METHOD','CLASS','MODULE')),
@@ -57,7 +57,7 @@ CREATE TABLE entities (
 
 -- Section 9 (revised v2.3.0): Phase 0 anchors are single-generation only.
 -- No supersedes_anchor_id / supersession_confidence exists yet.
-CREATE TABLE anchors (
+CREATE TABLE IF NOT EXISTS anchors (
     anchor_id  INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_id  INTEGER NOT NULL REFERENCES entities(entity_id),
     repo_id    INTEGER NOT NULL REFERENCES repositories(repo_id),
@@ -67,13 +67,13 @@ CREATE TABLE anchors (
 -- Anchors are immutable (Section 9). Enforced at the DB level, not just by
 -- application convention, per the "correctness must hold even if the
 -- application wrapper is bypassed" principle (Section 29).
-CREATE TRIGGER trg_anchors_immutable
+CREATE TRIGGER IF NOT EXISTS trg_anchors_immutable
 BEFORE UPDATE ON anchors
 BEGIN
     SELECT RAISE(ABORT, 'anchors are immutable: no UPDATE is ever permitted');
 END;
 
-CREATE TABLE observations (
+CREATE TABLE IF NOT EXISTS observations (
     observation_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     anchor_id        INTEGER NOT NULL REFERENCES anchors(anchor_id),
     branch_id        INTEGER NOT NULL REFERENCES memory_branches(branch_id),
@@ -96,7 +96,7 @@ CREATE TABLE observations (
 -- INSERT: created_revision must equal the repo's current_revision at time
 -- of insert, and closed_revision must be NULL. Catches unstamped (NULL),
 -- stale (< current), and future (> current) inserts with one invariant.
-CREATE TRIGGER trg_observations_insert_revision
+CREATE TRIGGER IF NOT EXISTS trg_observations_insert_revision
 BEFORE INSERT ON observations
 BEGIN
     SELECT CASE
@@ -112,7 +112,7 @@ END;
 -- UPDATE: the only legal transition is closing an open record (closed_revision
 -- NULL -> current_revision). All identity/provenance fields must be unchanged.
 -- Once closed, closed_revision itself becomes immutable.
-CREATE TRIGGER trg_observations_update_revision
+CREATE TRIGGER IF NOT EXISTS trg_observations_update_revision
 BEFORE UPDATE ON observations
 BEGIN
     SELECT CASE
@@ -138,7 +138,7 @@ END;
 
 -- Repository isolation (Section 27): anchor and branch referenced by an
 -- observation must belong to the same repository as the observation itself.
-CREATE TRIGGER trg_observations_repo_isolation
+CREATE TRIGGER IF NOT EXISTS trg_observations_repo_isolation
 BEFORE INSERT ON observations
 BEGIN
     SELECT CASE
