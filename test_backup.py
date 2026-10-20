@@ -1,9 +1,12 @@
 """Tests for pm_backup timestamped DB backup + retention pruning."""
+import datetime as datetime_module
+import os
 import sqlite3
 from pathlib import Path
 
 import pytest
 
+import pm_backup
 from pm_backup import timestamped_backup
 
 
@@ -117,3 +120,53 @@ def test_corpus_hygiene_apply_backs_up_first(tmp_path):
     assert len(res["deprecate"]) == 1
     backup = Path(res["backup"]["backup_path"])
     assert backup.exists() and ".backup-pre-corpus-hygiene-" in backup.name
+
+def test_backup_same_timestamp_never_overwrites_recovery_point(tmp_path, monkeypatch):
+    db = tmp_path / "memory.db"
+    _make_db(db)
+
+    class FixedDateTime(datetime_module.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 20, 6, 0, 0, 123456, tzinfo=tz)
+
+    # Force identical timestamps so exclusive reservation, not clock precision,
+    # proves repeated snapshots cannot overwrite the earlier recovery point.
+    monkeypatch.setattr(
+        pm_backup,
+        "datetime",
+        type("FixedDatetimeModule", (), {"datetime": FixedDateTime}),
+    )
+
+    first = Path(timestamped_backup(db, tag="same", keep=8)["backup_path"])
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute("UPDATE memory SET content = 'new state'")
+        conn.commit()
+    second = Path(timestamped_backup(db, tag="same", keep=8)["backup_path"])
+
+    assert first != second
+    assert first.exists() and second.exists()
+    with sqlite3.connect(str(first)) as conn:
+        assert conn.execute("SELECT content FROM memory").fetchone()[0] == "keep me"
+    with sqlite3.connect(str(second)) as conn:
+        assert conn.execute("SELECT content FROM memory").fetchone()[0] == "new state"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permits URI/glob metacharacters in filenames")
+def test_backup_escapes_uri_chars_and_prunes_only_literal_database_prefix(tmp_path):
+    db = tmp_path / "memory?graph.db"
+    _make_db(db)
+
+    # This unrelated file matched the old glob pattern because '?' was treated
+    # as a wildcard. Its old mtime makes it a pruning target if matched.
+    decoy = tmp_path / "memoryXgraph.db.backup-unrelated-20260101-000000.bak"
+    decoy.write_bytes(b"must not be treated as a backup for memory?graph.db")
+    os.utime(decoy, (1000, 1000))
+
+    result = timestamped_backup(db, tag="uri", keep=1)
+    backup = Path(result["backup_path"])
+    assert backup.exists()
+    assert decoy.exists()
+    with sqlite3.connect(str(backup)) as conn:
+        assert conn.execute("SELECT content FROM memory").fetchone()[0] == "keep me"
+
