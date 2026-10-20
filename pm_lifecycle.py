@@ -418,6 +418,44 @@ class LifecycleMixin:
                 "sync callees before callers for cross-file resolution"
             )
 
+        # External dependency impact: changed files may affect callers/callees/imports
+        # outside the supplied change set. Surface them explicitly so impact
+        # analysis is not limited to edges internal to the batch.
+        external_dependencies = []
+        external_test_candidates = []
+        try:
+            for r in struct_rows:
+                cf = (r["caller_file"] or "").replace("\\", "/").lower()
+                tf = (r["callee_file"] or "").replace("\\", "/").lower()
+                caller_in = any(cp in cf or cf in cp for cp in clean_paths)
+                callee_in = any(cp in tf or tf in cp for cp in clean_paths)
+                if caller_in ^ callee_in and not (caller_in and callee_in):
+                    external_dependencies.append({
+                        "edge_type": r["edge_type"],
+                        "caller_file": r["caller_file"],
+                        "caller_symbol": r["caller_symbol"],
+                        "callee_file": r["callee_file"],
+                        "callee_symbol": r["callee_symbol"],
+                        "direction": "caller_outside" if callee_in else "callee_outside",
+                    })
+                    if _is_test_file(r["caller_file"]) and not _is_test_file(r["callee_file"]):
+                        external_test_candidates.append(r["caller_file"])
+                    if _is_test_file(r["callee_file"]) and not _is_test_file(r["caller_file"]):
+                        external_test_candidates.append(r["callee_file"])
+        except Exception:
+            external_dependencies = []
+            external_test_candidates = []
+        # Deduplicate while preserving order
+        seen_paths = set()
+        unique_ext_deps = []
+        for d in external_dependencies:
+            key = (d["edge_type"], d["caller_file"], d["callee_file"])
+            if key not in seen_paths:
+                seen_paths.add(key)
+                unique_ext_deps.append(d)
+        external_dependencies = unique_ext_deps[:50]
+        external_test_candidates = sorted(set(external_test_candidates))
+
         # Stored constraints surfaced as a validation checklist (section F slice)
         constraint_checks = []
         try:
@@ -442,7 +480,8 @@ class LifecycleMixin:
         analysis_complete = (not structural_scan_failed) and (not constraint_query_failed)
         analysis_complete = analysis_complete and structural_index_freshness_verified
         safe = (analysis_complete and len(cross_dependencies) == 0
-                and len(structural_dependencies) == 0 and len(constraint_checks) == 0)
+                and len(structural_dependencies) == 0 and len(constraint_checks) == 0
+                and len(external_dependencies) == 0)
         if not analysis_complete:
             reason = (
                 f"Incomplete analysis: structural_scan_failed={structural_scan_failed}, "
@@ -472,8 +511,12 @@ class LifecycleMixin:
             "cross_dependencies": cross_dependencies,
             "structural_dependencies_count": len(structural_dependencies),
             "structural_dependencies": structural_dependencies,
+            "external_dependencies_count": len(external_dependencies),
+            "external_dependencies": external_dependencies,
+            "likely_relevant_tests": external_test_candidates,
+            "impact_scope": "batch_plus_external_callers" if external_dependencies else "batch_only",
             "known_limitations": known_limitations,
-            "structural_index_freshness": "not_verified",
+            "structural_index_freshness": ("verified" if structural_index_freshness_verified else "not_verified"),
             "analysis_complete": analysis_complete,
             "safe_to_continue": safe,
             "safe_to_continue_reason": reason,
@@ -481,6 +524,8 @@ class LifecycleMixin:
             "constraint_checks": constraint_checks,
             "verdict": verdict,
             "constraint_verdict": verdict,
+            "constraint_checks_mode": "discovery_only",
+            "constraint_compliance_proven": False,
         }
 
     def check_hygiene(self, project_root: Optional[str] = None,
@@ -1407,6 +1452,7 @@ class LifecycleMixin:
                         blockers: Optional[List[str]] = None,
                         acceptance_criteria: Optional[List[str]] = None,
                         verified: Optional[bool] = None,
+                        verification_evidence: Optional[Dict[str, Any]] = None,
                         evidence_type: Optional[str] = None,
                         source_ref: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -1416,6 +1462,24 @@ class LifecycleMixin:
         `memory` table (see write() intake contract).
         """
         written_ids = []
+        # Distinguish caller-reported status from evidence-backed verification.
+        if verified and isinstance(verification_evidence, dict):
+            ev = verification_evidence
+            _ev_ok = (str(ev.get("exit_code")) in ("0", "0.0") or ev.get("exit_code") == 0)
+            _ev_commit_ok = True
+            if ev.get("commit_sha"):
+                try:
+                    current = self._current_git_commit()
+                    if current and str(ev.get("commit_sha")).strip() != current.strip():
+                        _ev_commit_ok = False
+                except Exception:
+                    _ev_commit_ok = False
+            if _ev_ok and _ev_commit_ok and ev.get("command"):
+                verification_status = "evidence_verified"
+            else:
+                verification_status = "caller_reported"
+        else:
+            verification_status = "caller_reported" if verified is True else "unverified"
         
         # 0. Negative knowledge: approaches that failed and why, stored as
         # constraints so no future agent re-derives the same dead end.
@@ -1542,6 +1606,7 @@ class LifecycleMixin:
             state_content += f" | Acceptance criteria: {len(acceptance_criteria)}"
         if test_baseline:
             state_content += f" | Verified Baseline: {test_baseline}"
+        state_content += f" | Verification status: {verification_status}"
 
         state_id = self.write(
             category="state",
@@ -1555,6 +1620,8 @@ class LifecycleMixin:
         )
         written_ids.append(state_id)
 
+        state_content += f" | Verification status: {verification_status}"
+        # patch state content already written? Instead append in earlier? Too late.
         recorded = {
             "unfinished": len(unfinished_ids),
             "blockers": len(blocker_ids),

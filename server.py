@@ -750,6 +750,7 @@ def memory_checkpoint_task(
     blockers: List[str] | None = None,
     acceptance_criteria: List[str] | None = None,
     verified: bool | None = None,
+    verification_evidence: dict | None = None,
     evidence_type: str = "",
     source_ref: str = "",
 ) -> dict:
@@ -766,6 +767,7 @@ def memory_checkpoint_task(
             blockers=blockers,
             acceptance_criteria=acceptance_criteria,
             verified=verified,
+            verification_evidence=verification_evidence or None,
             evidence_type=evidence_type or None,
             source_ref=source_ref or None,
         )
