@@ -63,6 +63,17 @@ CREATE TABLE IF NOT EXISTS anchors (
     created_at TEXT NOT NULL
 );
 
+-- A cross-repository entity must not be smuggled into another repository
+-- by declaring a different repo_id on its otherwise-valid anchor.
+CREATE TRIGGER IF NOT EXISTS trg_anchors_repo_isolation
+BEFORE INSERT ON anchors
+BEGIN
+    SELECT CASE
+        WHEN (SELECT repo_id FROM entities WHERE entity_id = NEW.entity_id) IS NOT NEW.repo_id THEN
+            RAISE(ABORT, 'repository isolation violation: anchor entity belongs to a different repository')
+    END;
+END;
+
 -- Anchors are immutable (Section 9). Enforced at the DB level, not just by
 -- application convention, per the "correctness must hold even if the
 -- application wrapper is bypassed" principle (Section 29).
