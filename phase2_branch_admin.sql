@@ -295,3 +295,41 @@ BEGIN
             RAISE(ABORT, 'repository isolation violation: tombstone belongs to different repository')
     END;
 END;
+
+-- The branch lifecycle tables are audit ledgers, not mutable current-state
+-- records. Enforce append-only semantics even for direct SQL callers.
+CREATE TRIGGER IF NOT EXISTS trg_tombstones_immutable_update
+BEFORE UPDATE ON branch_tombstones
+BEGIN
+    SELECT RAISE(ABORT, 'append-only audit ledger: branch_tombstones cannot be updated');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_tombstones_immutable_delete
+BEFORE DELETE ON branch_tombstones
+BEGIN
+    SELECT RAISE(ABORT, 'append-only audit ledger: branch_tombstones cannot be deleted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_promotions_immutable_update
+BEFORE UPDATE ON branch_promotions
+BEGIN
+    SELECT RAISE(ABORT, 'append-only audit ledger: branch_promotions cannot be updated');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_promotions_immutable_delete
+BEFORE DELETE ON branch_promotions
+BEGIN
+    SELECT RAISE(ABORT, 'append-only audit ledger: branch_promotions cannot be deleted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_lineage_immutable_update
+BEFORE UPDATE ON memory_lineage_events
+BEGIN
+    SELECT RAISE(ABORT, 'append-only audit ledger: memory_lineage_events cannot be updated');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_lineage_immutable_delete
+BEFORE DELETE ON memory_lineage_events
+BEGIN
+    SELECT RAISE(ABORT, 'append-only audit ledger: memory_lineage_events cannot be deleted');
+END;
