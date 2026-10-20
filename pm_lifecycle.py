@@ -423,6 +423,7 @@ class LifecycleMixin:
         # analysis is not limited to edges internal to the batch.
         external_dependencies = []
         external_test_candidates = []
+        external_dependency_scan_failed = False
         try:
             for r in struct_rows:
                 cf = (r["caller_file"] or "").replace("\\", "/").lower()
@@ -442,9 +443,13 @@ class LifecycleMixin:
                         external_test_candidates.append(r["caller_file"])
                     if _is_test_file(r["callee_file"]) and not _is_test_file(r["caller_file"]):
                         external_test_candidates.append(r["callee_file"])
-        except Exception:
+        except Exception as e:
             external_dependencies = []
             external_test_candidates = []
+            external_dependency_scan_failed = True
+            known_limitations.append(
+                f"external dependency scan failed; safety result is review-required: {e}"
+            )
         # Deduplicate while preserving order
         seen_paths = set()
         unique_ext_deps = []
@@ -479,6 +484,7 @@ class LifecycleMixin:
             known_limitations.append("constraint query failed; constraint analysis SKIPPED - analysis incomplete")
         analysis_complete = (not structural_scan_failed) and (not constraint_query_failed)
         analysis_complete = analysis_complete and structural_index_freshness_verified
+        analysis_complete = analysis_complete and (not external_dependency_scan_failed)
         safe = (analysis_complete and len(cross_dependencies) == 0
                 and len(structural_dependencies) == 0 and len(constraint_checks) == 0
                 and len(external_dependencies) == 0)
