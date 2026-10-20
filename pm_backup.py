@@ -22,44 +22,72 @@ DEFAULT_KEEP = 8
 _TAG_RE = re.compile(r"[^A-Za-z0-9_-]")
 
 
+def _readonly_sqlite_uri(path: str | Path) -> str:
+    """Build a read-only SQLite URI that safely encodes filesystem metacharacters."""
+    return f"{Path(path).resolve().as_uri()}?mode=ro"
+
+
+def _reserve_backup_path(directory: Path, db_name: str, tag: str, timestamp: str) -> Path:
+    """Atomically reserve a unique backup filename, including under concurrent calls."""
+    stem = f"{db_name}.backup-{tag}-{timestamp}"
+    suffix = 0
+    while True:
+        candidate_name = f"{stem}{f'-{suffix}' if suffix else ''}.bak"
+        candidate = directory / candidate_name
+        try:
+            # Exclusive creation avoids a check-then-create race between two
+            # maintenance/migration callers snapshotting the same DB together.
+            with candidate.open("xb"):
+                pass
+            return candidate
+        except FileExistsError:
+            suffix += 1
+
+
 def timestamped_backup(db_path: str | Path, tag: str = "",
                        keep: int = DEFAULT_KEEP) -> Dict[str, Any]:
-    """Snapshot db_path to <dir>/memory.db.backup-<tag>-<ts>.bak via the
-    SQLite backup API; verify the copy; prune old backups beyond `keep`.
+    """Snapshot db_path to a unique, timestamped <dir>/<db>.backup-<tag>-<ts>.bak.
 
-    Returns {"backup_path", "bytes", "kept", "pruned"}. Raises
-    ValueError if the source is missing/empty, or RuntimeError if the
-    backup or its integrity check fails (a failed snapshot is removed).
+    The SQLite backup API supplies a WAL-safe snapshot. A read-only URI avoids
+    accidentally opening a different file when the path contains URI-reserved
+    characters. The destination name includes microseconds and is reserved
+    exclusively, so concurrent or repeated same-tag calls cannot overwrite an
+    earlier recovery point. The copy is integrity-checked and old snapshots
+    beyond `keep` are pruned.
+
+    Returns {"backup_path", "bytes", "kept", "pruned"}. Raises ValueError if
+    the source is missing/empty; a failed snapshot or integrity check removes
+    only the newly reserved destination before raising.
     """
     src = Path(db_path)
     if not src.is_file() or src.stat().st_size == 0:
         raise ValueError(f"nothing to back up: {src} does not exist or is empty")
     tag_clean = _TAG_RE.sub("-", (tag or "routine").strip("-")) or "routine"
-    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_path = src.parent / f"{src.name}.backup-{tag_clean}-{ts}.bak"
-
-    src_conn = sqlite3.connect("file:" + src.as_posix() + "?mode=ro", uri=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    src_conn = sqlite3.connect(_readonly_sqlite_uri(src), uri=True)
+    backup_path = None
     try:
+        backup_path = _reserve_backup_path(src.parent, src.name, tag_clean, ts)
         dst = sqlite3.connect(str(backup_path))
         try:
             src_conn.backup(dst)
             dst.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         finally:
             dst.close()
+
+        check = sqlite3.connect(_readonly_sqlite_uri(backup_path), uri=True)
+        try:
+            row = check.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            check.close()
+        if not row or str(row[0]).lower() != "ok":
+            raise RuntimeError(f"backup integrity check failed for {backup_path}")
     except Exception:
-        backup_path.unlink(missing_ok=True)
+        if backup_path is not None:
+            backup_path.unlink(missing_ok=True)
         raise
     finally:
         src_conn.close()
-
-    check = sqlite3.connect("file:" + backup_path.as_posix() + "?mode=ro", uri=True)
-    try:
-        row = check.execute("PRAGMA integrity_check").fetchone()
-    finally:
-        check.close()
-    if not row or str(row[0]).lower() != "ok":
-        backup_path.unlink(missing_ok=True)
-        raise RuntimeError(f"backup integrity check failed for {backup_path}")
 
     # The snapshot is self-contained (copied via the backup API,
     # checkpointed, integrity-checked); drop any vestigial sidecars
@@ -108,17 +136,29 @@ def _prune_backups(directory: Path, db_name: str, keep: int = DEFAULT_KEEP):
     (legacy orphans from before sibling-aware pruning).
     Returns (kept_paths_newest_first, pruned_paths_oldest_first).
     """
-    pattern = f"{db_name}.backup-*"
-    backups = sorted(
-        (p for p in directory.glob(pattern) if p.name.endswith(".bak")),
-        key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
+    # Match names literally rather than via glob syntax: database filenames may
+    # legally contain wildcard characters such as '?' or '[' on POSIX.
+    prefix = f"{db_name}.backup-"
+    candidates = (p for p in directory.iterdir()
+                  if p.name.startswith(prefix) and p.name.endswith(".bak"))
+    backups = sorted(candidates, key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
     keepers = backups[:max(1, keep)]
     removed = []
     for old in backups[max(1, keep):]:
         removed.extend(_unlink_with_sidecars(old))
-    for stray in directory.glob(pattern):
-        for suffix in _SIDECAR_SUFFIXES:
-            if stray.name.endswith(".bak" + suffix):
+    for stray in directory.iterdir():
+        if stray.name.startswith(prefix):
+            for suffix in _SIDECAR_SUFFIXES:
+                if not stray.name.endswith(".bak" + suffix):
+                    continue
+                parent = directory / stray.name[: -len(suffix)]
+                if not parent.exists():
+                    try:
+                        stray.unlink()
+                        removed.append(stray)
+                    except OSError:
+                        pass
+                break
                 parent = directory / stray.name[: -len(suffix)]
                 if not parent.exists():
                     try:
