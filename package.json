@@ -58,6 +58,7 @@
     "legacy_provenance.sql",
     "hooks/git_hook.py",
     "requirements.txt",
+    "LICENSE",
     "README_NPM.md",
     "INSTALL.md",
     "AGENTS.md"
