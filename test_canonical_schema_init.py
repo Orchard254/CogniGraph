@@ -135,3 +135,65 @@ def test_startup_repairs_a_partial_schema_created_by_the_old_loader(
         _assert_canonical_schema_complete(reopened)
     finally:
         reopened.close()
+
+
+def test_schema_repair_replaces_existing_null_unsafe_trigger_bodies(tmp_path, monkeypatch):
+    """IF NOT EXISTS alone cannot upgrade an existing trigger's SQL body."""
+    monkeypatch.setattr(memory_store, "_SQLITE_VEC_PKG_AVAILABLE", False)
+    db_path = tmp_path / "old-trigger-definitions.db"
+    _seed_previously_partial_schema(db_path)
+
+    # Simulate an older install whose same-named triggers used != on nullable
+    # fields. The partial database also lacks new Phase 2/provenance guardrails,
+    # which should cause startup repair to run.
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TRIGGER trg_observations_update_revision")
+        conn.execute(
+            """
+            CREATE TRIGGER trg_observations_update_revision
+            BEFORE UPDATE ON observations
+            BEGIN
+                SELECT CASE WHEN NEW.ast_symbol != OLD.ast_symbol
+                    THEN RAISE(ABORT, 'old observation trigger') END;
+            END
+            """
+        )
+        conn.execute("DROP TRIGGER trg_episodic_update_revision")
+        conn.execute(
+            """
+            CREATE TRIGGER trg_episodic_update_revision
+            BEFORE UPDATE ON episodic_memories
+            BEGIN
+                SELECT CASE WHEN NEW.anchor_id != OLD.anchor_id
+                    THEN RAISE(ABORT, 'old episodic trigger') END;
+            END
+            """
+        )
+
+    store = MemoryStore(str(db_path))
+    try:
+        objects = {
+            row["name"]: row["sql"]
+            for row in store.conn.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type='trigger'"
+            ).fetchall()
+        }
+        assert "NEW.ast_symbol IS NOT OLD.ast_symbol" in objects[
+            "trg_observations_update_revision"
+        ]
+        assert "old observation trigger" not in objects[
+            "trg_observations_update_revision"
+        ]
+        assert "NEW.anchor_id IS NOT OLD.anchor_id" in objects[
+            "trg_episodic_update_revision"
+        ]
+        assert "NEW.tags IS NOT OLD.tags" in objects[
+            "trg_episodic_update_revision"
+        ]
+        assert "old episodic trigger" not in objects[
+            "trg_episodic_update_revision"
+        ]
+        _assert_canonical_schema_complete(store)
+    finally:
+        store.close()
+
