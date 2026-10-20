@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "mcp==1.9.4",
+    "pydantic>=2.11,<2.13",
     "fastembed==0.8.0",
     "scikit-learn==1.9.0",
     "numpy==2.5.3",
@@ -42,8 +43,9 @@ dev = [
     "ruff==0.9.10",
 ]
 
-[project.entry-points]
-console_scripts = { cognigraph = "memory_cli:main", memory_cli = "memory_cli:main" }
+[project.scripts]
+cognigraph = "memory_cli:main"
+memory_cli = "memory_cli:main"
 
 [tool.setuptools]
 py-modules = [
@@ -54,6 +56,10 @@ py-modules = [
     "pm_context",
     "pm_lifecycle",
     "pm_structural",
+    "pm_backup",
+    "corpus_hygiene",
+    "branch_promotion",
+    "genesis_migrate",
     "server",
     "wire",
     "bootstrap",

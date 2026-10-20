@@ -83,6 +83,49 @@ jobs:
           fi
         shell: bash
 
+      - name: Verify built wheel contains runtime modules and schema resources
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            PYTHON=venv/Scripts/python
+          else
+            PYTHON=venv/bin/python
+          fi
+          "$PYTHON" -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/cognigraph-wheel"
+          "$PYTHON" - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wheel_path = next((Path(__import__("os").environ["RUNNER_TEMP"]) / "cognigraph-wheel").glob("*.whl"))
+          with ZipFile(wheel_path) as wheel:
+              names = set(wheel.namelist())
+              required = {
+                  "memory_cli.py",
+                  "memory_store.py",
+                  "pm_backup.py",
+                  "corpus_hygiene.py",
+                  "branch_promotion.py",
+                  "genesis_migrate.py",
+                  "phase0_schema.sql",
+                  "phase1_episodic.sql",
+                  "phase1_episodic_embeddings.sql",
+                  "phase2_branch_admin.sql",
+                  "episodic_fts.sql",
+                  "legacy_provenance.sql",
+              }
+              missing = sorted(required - names)
+              if missing:
+                  raise SystemExit(f"Wheel is missing required runtime files: {missing}")
+              entry_points = next((name for name in names if name.endswith(".dist-info/entry_points.txt")), None)
+              if not entry_points:
+                  raise SystemExit("Wheel is missing console entry-point metadata")
+              metadata = wheel.read(entry_points).decode("utf-8")
+              for script in ("cognigraph = memory_cli:main", "memory_cli = memory_cli:main"):
+                  if script not in metadata:
+                      raise SystemExit(f"Wheel is missing console script: {script}")
+          print(f"Wheel packaging smoke check passed: {wheel_path.name}")
+          PY
+        shell: bash
+
       # Watchdog is a separate optional extra (pyproject [watchdog]), NOT in
       # [dev], so without this the test_watcher.py module-level importorskip
       # skips the ENTIRE watcher module on Linux CI. Scoped to exactly one

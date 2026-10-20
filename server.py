@@ -5,6 +5,7 @@ Run via stdio - point opencode's `mcp` config (others use `mcpServers`) at this 
 """
 import contextvars
 import logging
+import os
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -45,6 +46,11 @@ def _uri_to_path(uri: str) -> Optional[Path]:
         if parsed.scheme != "file":
             return Path(uri)
         path = unquote(parsed.path)
+        # On POSIX, file:////tmp/x parses to //tmp/x. Normalize that
+        # non-authority form to a single-rooted local path; preserve Windows
+        # drive-letter handling and any explicit URI authority.
+        if os.name != "nt" and not parsed.netloc and path.startswith("//"):
+            path = "/" + path.lstrip("/")
         if path.startswith("/") and len(path) > 2 and path[2] == ":":
             path = path[1:]
         return Path(path)
