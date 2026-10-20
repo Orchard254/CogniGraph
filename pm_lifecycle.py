@@ -6,6 +6,15 @@ import re
 import posixpath
 import subprocess
 from pathlib import Path
+from typing import Optional, List, Dict, Any, Tuple
+
+from pm_common import (
+    tokenize_text, looks_like_secret,
+    _vec_to_blob, _get_embed_model,
+    _EMBED_MODEL_NAME, _SEMANTIC_AVAILABLE, np,
+    _blob_to_vec, logger, _epistemic_status, _is_test_file,
+)
+from corpus_hygiene import STUB_PREFIXES, _stub_where, _stub_params
 
 
 def _canonical_path(value):
@@ -38,15 +47,6 @@ _paths_match = _paths_compatible
 _path_compatible = _paths_compatible
 _path_matches = _paths_compatible
 _compatible_paths = _paths_compatible
-from typing import Optional, List, Dict, Any, Tuple
-
-from pm_common import (
-    tokenize_text, looks_like_secret,
-    _vec_to_blob, _get_embed_model,
-    _EMBED_MODEL_NAME, _SEMANTIC_AVAILABLE, np,
-    _blob_to_vec, logger, _epistemic_status, _is_test_file,
-)
-from corpus_hygiene import STUB_PREFIXES, _stub_where, _stub_params
 
 
 def _run_git(root: Path, *args: str):
