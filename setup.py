@@ -26,9 +26,11 @@ class BuildPyWithSchema(build_py):
             source = source_root / filename
             if not source.is_file():
                 raise FileNotFoundError(f"Required CogniGraph schema resource is missing: {source}")
-            target = build_root / filename
-            self.copy_file(str(source), str(target))
-            self.outputs.append(str(target))
+            self.copy_file(str(source), str(build_root / filename))
+
+    def get_outputs(self, include_bytecode=1):
+        outputs = super().get_outputs(include_bytecode=include_bytecode)
+        return outputs + [str(Path(self.build_lib) / name) for name in _SCHEMA_FILES]
 
 
 setup(cmdclass={"build_py": BuildPyWithSchema})
