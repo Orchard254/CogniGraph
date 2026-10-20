@@ -53,7 +53,7 @@ def test_checkpoint_progress_writes_blocker_and_unfinished_state_facts(store):
     milestone_rows = [r for r in rows if r["content"].startswith("progress checkpoint probe")]
     assert len(milestone_rows) == 1
     mc = milestone_rows[0]["content"]
-    assert "Verified: yes" in mc
+    assert "Verified: caller_reported" in mc
     assert "Acceptance criteria: 3" in mc
     assert "Verified Baseline: pytest -q" in mc
 

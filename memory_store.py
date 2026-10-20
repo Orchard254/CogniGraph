@@ -1363,27 +1363,36 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         conflicts_with edge from the kept fact to the deprecated one."""
         if looks_like_secret(rationale):
             raise ValueError("refused: this looks like it contains a credential or secret in the conflict rationale.")
-        k_row = self.conn.execute("SELECT id, deprecated_at FROM memory WHERE id = ?", (keep_id,)).fetchone()
-        d_row = self.conn.execute("SELECT id FROM memory WHERE id = ?", (deprecate_id,)).fetchone()
-        if not k_row:
-            raise ValueError(f"no memory row with id {keep_id}")
-        if d_row is None:
-            raise ValueError(f"no memory row with id {deprecate_id}")
-        if k_row["deprecated_at"] is not None:
-            raise ValueError(f"keep fact {keep_id} is already deprecated; resolve against an active fact")
         if keep_id == deprecate_id:
             raise ValueError("keep_id and deprecate_id must be different")
         reason = f"conflict resolved; kept #{keep_id}"
         if rationale:
             reason = f"{reason}: {rationale}"
-        # Atomic: both operations or neither.
+        # Atomic precondition check + mutation: reads and state validation must
+        # occur INSIDE the transaction so no concurrent writer can deprecate the
+        # proposed winner between the check and the modification.
         self.conn.execute("BEGIN IMMEDIATE")
         try:
+            k_row = self.conn.execute("SELECT id, deprecated_at FROM memory WHERE id = ?", (keep_id,)).fetchone()
+            d_row = self.conn.execute("SELECT id FROM memory WHERE id = ?", (deprecate_id,)).fetchone()
+            if not k_row:
+                raise ValueError(f"no memory row with id {keep_id}")
+            if d_row is None:
+                raise ValueError(f"no memory row with id {deprecate_id}")
+            if k_row["deprecated_at"] is not None:
+                raise ValueError(f"keep fact {keep_id} is already deprecated; resolve against an active fact")
+            # Revalidate keep winner is still active immediately before mutation.
+            k_row2 = self.conn.execute("SELECT deprecated_at FROM memory WHERE id = ?", (keep_id,)).fetchone()
+            if not k_row2 or k_row2["deprecated_at"] is not None:
+                raise ValueError(f"keep fact {keep_id} is no longer active; resolve against an active fact")
             self.deprecate(deprecate_id, reason)
             edge_id = self.link_facts(keep_id, deprecate_id, "conflicts_with")
             self.conn.execute("COMMIT")
         except Exception:
-            self.conn.execute("ROLLBACK")
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
             raise
         return {"status": "resolved", "keep_id": keep_id, "deprecated_id": deprecate_id, "edge_id": edge_id}
 

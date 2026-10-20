@@ -298,6 +298,9 @@ class LifecycleMixin:
         clean_paths = [fp.strip().replace("\\", "/").lower() for fp in file_paths if fp.strip()]
         if not clean_paths:
             return {"status": "NO_FILES_PROVIDED"}
+        def _path_in_batch(path):
+            p = (path or "").strip().replace("\\", "/").lower()
+            return any(p == cp or p.startswith(cp + "/") for cp in clean_paths)
 
         file_briefings = {}
         cross_dependencies = []
@@ -317,7 +320,7 @@ class LifecycleMixin:
         for edge in all_edges:
             sf = (edge["source_file"] or "").replace("\\", "/").lower()
             tf = (edge["target_file"] or "").replace("\\", "/").lower()
-            if any(cp in sf for cp in clean_paths) and any(cp in tf for cp in clean_paths):
+            if _path_in_batch(sf) and _path_in_batch(tf):
                 cross_dependencies.append({
                     "relation": edge["relation"],
                     "source_file": edge["source_file"],
@@ -351,7 +354,7 @@ class LifecycleMixin:
         for r in struct_rows:
             cf = (r["caller_file"] or "").replace("\\", "/").lower()
             tf = (r["callee_file"] or "").replace("\\", "/").lower()
-            if any(cp in cf for cp in clean_paths) and any(cp in tf for cp in clean_paths):
+            if _path_in_batch(cf) and _path_in_batch(tf):
                 structural_dependencies.append({
                     "edge_type": r["edge_type"],
                     "caller_file": r["caller_file"],
@@ -380,7 +383,7 @@ class LifecycleMixin:
                 continue
             try:
                 row = self.conn.execute(
-                    "SELECT MAX(last_seen_at) AS ts FROM structural_nodes WHERE file_path = ?",
+                    "SELECT MAX(last_seen_at) AS ts FROM structural_nodes WHERE file_path = ? AND node_type != 'module_ref'",
                     (cp,),
                 ).fetchone()
             except Exception:
@@ -388,7 +391,43 @@ class LifecycleMixin:
             ts_raw = row["ts"] if row else None
             if ts_raw is None:
                 structural_index_freshness_verified = False
-                known_limitations.append(f"freshness unverifiable: {cp} is not indexed")
+                known_limitations.append(f"freshness unverifiable: {cp} has no indexed code nodes")
+                continue
+            # Reject rows that are only module_refs.
+            try:
+                code_nodes = self.conn.execute(
+                    "SELECT id, node_type, name, class_name, line_start, line_end, code_hash "
+                    "FROM structural_nodes WHERE file_path = ? AND node_type != 'module_ref'",
+                    (cp,),
+                ).fetchall()
+            except Exception:
+                code_nodes = []
+            if not code_nodes:
+                structural_index_freshness_verified = False
+                known_limitations.append(f"freshness unverifiable: {cp} has no indexed code nodes")
+                continue
+            # Content-hash verification: each indexed structural node's code_hash
+            # must still match the live source snippet. This prevents a stale
+            # module_ref timestamp (or an out-of-band edit that preserves mtime
+            # precision) from passing the gate.
+            try:
+                lines = disk.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+            except OSError:
+                structural_index_freshness_verified = False
+                known_limitations.append(f"freshness unverifiable: cannot read {cp}")
+                continue
+            for n in code_nodes:
+                if not n["code_hash"]:
+                    continue
+                ls = max(0, (n["line_start"] or 1) - 1)
+                le = min(len(lines), n["line_end"] or len(lines))
+                snippet = "".join(lines[ls:le])
+                actual = hashlib.sha256(snippet.encode("utf-8")).hexdigest()
+                if actual != n["code_hash"]:
+                    structural_index_freshness_verified = False
+                    known_limitations.append(f"index stale: {cp} content hash mismatch for {n['node_type']} {n['name']}")
+                    break
+            if not structural_index_freshness_verified and any("content hash mismatch" in kl for kl in known_limitations):
                 continue
             try:
                 dt = datetime.datetime.fromisoformat(str(ts_raw))
@@ -428,8 +467,8 @@ class LifecycleMixin:
             for r in struct_rows:
                 cf = (r["caller_file"] or "").replace("\\", "/").lower()
                 tf = (r["callee_file"] or "").replace("\\", "/").lower()
-                caller_in = any(cp in cf or cf in cp for cp in clean_paths)
-                callee_in = any(cp in tf or tf in cp for cp in clean_paths)
+                caller_in = _path_in_batch(cf)
+                callee_in = _path_in_batch(tf)
                 if caller_in ^ callee_in and not (caller_in and callee_in):
                     external_dependencies.append({
                         "edge_type": r["edge_type"],
@@ -469,7 +508,7 @@ class LifecycleMixin:
                 "WHERE deprecated_at IS NULL AND category = 'constraint'"
             ).fetchall():
                 cfp = (cr["file_path"] or "").replace("\\", "/").lower()
-                applies = (not cfp) or any(cp in cfp or cfp in cp for cp in clean_paths)
+                applies = (not cfp) or any(cfp == cp or cfp.startswith(cp + "/") or cp.startswith(cfp + "/") for cp in clean_paths)
                 if applies:
                     constraint_checks.append({
                         "fact_id": cr["id"],
@@ -491,7 +530,9 @@ class LifecycleMixin:
         if not analysis_complete:
             reason = (
                 f"Incomplete analysis: structural_scan_failed={structural_scan_failed}, "
-                f"constraint_query_failed={constraint_query_failed}; review before proceeding."
+                f"constraint_query_failed={constraint_query_failed}, "
+                f"external_dependency_scan_failed={external_dependency_scan_failed}, "
+                f"structural_index_freshness_verified={structural_index_freshness_verified}; review before proceeding."
             )
         elif constraint_checks and not cross_dependencies and not structural_dependencies:
             reason = (
@@ -520,7 +561,7 @@ class LifecycleMixin:
             "external_dependencies_count": len(external_dependencies),
             "external_dependencies": external_dependencies,
             "likely_relevant_tests": external_test_candidates,
-            "impact_scope": "batch_plus_external_callers" if external_dependencies else "batch_only",
+            "impact_scope": ("incomplete" if external_dependency_scan_failed else ("batch_plus_external_callers" if external_dependencies else "batch_only")),
             "known_limitations": known_limitations,
             "structural_index_freshness": ("verified" if structural_index_freshness_verified else "not_verified"),
             "analysis_complete": analysis_complete,
@@ -1467,191 +1508,206 @@ class LifecycleMixin:
         code provenance anchors, and the verified test baseline into the live
         `memory` table (see write() intake contract).
         """
-        written_ids = []
-        # Distinguish caller-reported status from independently evidenced verification.
-        # A caller-supplied result must at minimum include the command, a
-        # successful exit code, and the exact commit SHA it was run against.
-        # Without those the value remains caller-reported.
-        if verified and isinstance(verification_evidence, dict):
-            ev = verification_evidence
-            _ev_ok = (ev.get("command") is not None and str(ev.get("command")).strip() != "")
-            try:
-                _ev_ok = _ev_ok and (str(ev.get("exit_code")) in ("0", "0.0") or ev.get("exit_code") == 0)
-            except Exception:
-                _ev_ok = False
-            _ev_commit_ok = False
-            if ev.get("commit_sha"):
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            written_ids = []
+            # Distinguish caller-reported status from independently evidenced verification.
+            # A caller-supplied result must at minimum include the command, a
+            # successful exit code, and the exact commit SHA it was run against.
+            # Without those the value remains caller-reported.
+            if verified and isinstance(verification_evidence, dict):
+                ev = verification_evidence
+                _ev_ok = (ev.get("command") is not None and str(ev.get("command")).strip() != "")
                 try:
-                    current = self._current_git_commit()
-                    if current is not None and str(ev.get("commit_sha")).strip() == current.strip():
-                        _ev_commit_ok = True
+                    _ev_ok = _ev_ok and (str(ev.get("exit_code")) in ("0", "0.0") or ev.get("exit_code") == 0)
                 except Exception:
-                    _ev_commit_ok = False
-            if _ev_ok and _ev_commit_ok and ev.get("command"):
-                verification_status = "evidence_verified"
+                    _ev_ok = False
+                _ev_commit_ok = False
+                if ev.get("commit_sha"):
+                    try:
+                        current = self._current_git_commit()
+                        if current is not None and str(ev.get("commit_sha")).strip() == current.strip():
+                            _ev_commit_ok = True
+                    except Exception:
+                        _ev_commit_ok = False
+                if _ev_ok and _ev_commit_ok and ev.get("command"):
+                    verification_status = "evidence_verified"
+                else:
+                    verification_status = "caller_reported"
             else:
-                verification_status = "caller_reported"
-        else:
-            verification_status = "caller_reported" if verified is True else "unverified"
+                verification_status = "caller_reported" if verified is True else "unverified"
         
-        # 0. Negative knowledge: approaches that failed and why, stored as
-        # constraints so no future agent re-derives the same dead end.
-        if failures:
-            for fl in failures:
-                fid = self.write(
-                    category="constraint",
-                    content=fl.get("content", ""),
-                    rationale=fl.get("rationale") or fl.get("why_failed"),
+            # 0. Negative knowledge: approaches that failed and why, stored as
+            # constraints so no future agent re-derives the same dead end.
+            if failures:
+                for fl in failures:
+                    fid = self.write(
+                        category="constraint",
+                        content=fl.get("content", ""),
+                        rationale=fl.get("rationale") or fl.get("why_failed"),
+                        confidence="confirmed",
+                        tags="negative-knowledge,known-failure",
+                        importance=4,
+                        session_id=session_id,
+                        evidence_type=(fl.get("evidence_type") if isinstance(fl, dict) else None) or evidence_type or "task_checkpoint",
+                        source_ref=(fl.get("source_ref") if isinstance(fl, dict) else None) or source_ref,
+                    )
+                    written_ids.append(fid)
+
+            # 1. Write Decisions
+            if decisions:
+                for d in decisions:
+                    did = self.write(
+                        category="decision",
+                        content=d["content"],
+                        rationale=d.get("rationale"),
+                        confidence=d.get("confidence", "confirmed"),
+                        file_path=d.get("file_path"),
+                        tags=d.get("tags"),
+                        importance=d.get("importance", 4),
+                        session_id=session_id,
+                        evidence_type=d.get("evidence_type", evidence_type) or "task_checkpoint",
+                        source_ref=d.get("source_ref", source_ref) or None,
+                    )
+                    written_ids.append(did)
+
+            # 2. Write Components with Code Provenance
+            if components:
+                for c in components:
+                    cid = self.write(
+                        category="component",
+                        content=c["content"],
+                        rationale=c.get("rationale"),
+                        confidence=c.get("confidence", "confirmed"),
+                        file_path=c.get("file_path"),
+                        line_start=c.get("line_start"),
+                        line_end=c.get("line_end"),
+                        code_hash=c.get("code_hash"),
+                        tags=c.get("tags"),
+                        importance=c.get("importance", 3),
+                        session_id=session_id,
+                        evidence_type=c.get("evidence_type", evidence_type) or "task_checkpoint",
+                        source_ref=c.get("source_ref", source_ref) or None,
+                    )
+                    written_ids.append(cid)
+
+            # 3. Create Graph Edges (skip edges referencing missing/duplicate facts)
+            skipped_links = []
+            if links:
+                for src, tgt, rel in links:
+                    try:
+                        self.link_facts(src, tgt, rel)
+                    except ValueError as e:
+                        skipped_links.append({"src": src, "tgt": tgt, "rel": rel, "reason": str(e)})
+
+            # 4a. Unfinished items: separate state facts tagged unfinished,backlog
+            unfinished_ids = []
+            for item in (unfinished or []):
+                uid = self.write(
+                    category="state",
+                    content=item,
+                    rationale="Post-task verification checkpoint (unfinished)",
                     confidence="confirmed",
-                    tags="negative-knowledge,known-failure",
+                    tags="unfinished,backlog",
+                    session_id=session_id,
                     importance=4,
-                    session_id=session_id,
-                    evidence_type=(fl.get("evidence_type") if isinstance(fl, dict) else None) or evidence_type or "task_checkpoint",
-                    source_ref=(fl.get("source_ref") if isinstance(fl, dict) else None) or source_ref,
+                    evidence_type=evidence_type or "task_checkpoint",
+                    source_ref=source_ref,
                 )
-                written_ids.append(fid)
+                unfinished_ids.append(uid)
+                written_ids.append(uid)
 
-        # 1. Write Decisions
-        if decisions:
-            for d in decisions:
-                did = self.write(
-                    category="decision",
-                    content=d["content"],
-                    rationale=d.get("rationale"),
-                    confidence=d.get("confidence", "confirmed"),
-                    file_path=d.get("file_path"),
-                    tags=d.get("tags"),
-                    importance=d.get("importance", 4),
+            # 4b. Blockers: separate state facts tagged blocker,open
+            blocker_ids = []
+            for item in (blockers or []):
+                bid = self.write(
+                    category="state",
+                    content=item,
+                    rationale="Post-task verification checkpoint (blocker)",
+                    confidence="confirmed",
+                    tags="blocker,open",
                     session_id=session_id,
-                    evidence_type=d.get("evidence_type", evidence_type) or "task_checkpoint",
-                    source_ref=d.get("source_ref", source_ref) or None,
+                    importance=4,
+                    evidence_type=evidence_type or "task_checkpoint",
+                    source_ref=source_ref,
                 )
-                written_ids.append(did)
+                blocker_ids.append(bid)
+                written_ids.append(bid)
 
-        # 2. Write Components with Code Provenance
-        if components:
-            for c in components:
-                cid = self.write(
-                    category="component",
-                    content=c["content"],
-                    rationale=c.get("rationale"),
-                    confidence=c.get("confidence", "confirmed"),
-                    file_path=c.get("file_path"),
-                    line_start=c.get("line_start"),
-                    line_end=c.get("line_end"),
-                    code_hash=c.get("code_hash"),
-                    tags=c.get("tags"),
-                    importance=c.get("importance", 3),
+            # 4c. Acceptance criteria: separate state facts tagged acceptance-criteria
+            acceptance_ids = []
+            for item in (acceptance_criteria or []):
+                aid = self.write(
+                    category="state",
+                    content=item,
+                    rationale="Post-task verification checkpoint (acceptance criterion)",
+                    confidence="confirmed",
+                    tags="acceptance-criteria",
                     session_id=session_id,
-                    evidence_type=c.get("evidence_type", evidence_type) or "task_checkpoint",
-                    source_ref=c.get("source_ref", source_ref) or None,
+                    importance=4,
+                    evidence_type=evidence_type or "task_checkpoint",
+                    source_ref=source_ref,
                 )
-                written_ids.append(cid)
+                acceptance_ids.append(aid)
+                written_ids.append(aid)
 
-        # 3. Create Graph Edges (skip edges referencing missing/duplicate facts)
-        if links:
-            for src, tgt, rel in links:
-                try:
-                    self.link_facts(src, tgt, rel)
-                except ValueError:
-                    pass
+            # 4d. Record State Milestone & Test Baseline
+            state_content = summary
+            if verified is None:
+                state_content += " | Verified: unknown"
+            elif verified:
+                if verification_status == "evidence_verified":
+                    state_content += " | Verified: yes"
+                else:
+                    state_content += " | Verified: caller_reported"
+            else:
+                state_content += " | Verified: no"
+            if acceptance_criteria is not None:
+                state_content += f" | Acceptance criteria: {len(acceptance_criteria)}"
+            if test_baseline:
+                state_content += f" | Verified Baseline: {test_baseline}"
+            state_content += f" | Verification status: {verification_status}"
 
-        # 4a. Unfinished items: separate state facts tagged unfinished,backlog
-        unfinished_ids = []
-        for item in (unfinished or []):
-            uid = self.write(
+            state_id = self.write(
                 category="state",
-                content=item,
-                rationale="Post-task verification checkpoint (unfinished)",
+                content=state_content,
+                rationale="Post-task verification checkpoint",
                 confidence="confirmed",
-                tags="unfinished,backlog",
                 session_id=session_id,
                 importance=4,
                 evidence_type=evidence_type or "task_checkpoint",
                 source_ref=source_ref,
             )
-            unfinished_ids.append(uid)
-            written_ids.append(uid)
+            written_ids.append(state_id)
 
-        # 4b. Blockers: separate state facts tagged blocker,open
-        blocker_ids = []
-        for item in (blockers or []):
-            bid = self.write(
-                category="state",
-                content=item,
-                rationale="Post-task verification checkpoint (blocker)",
-                confidence="confirmed",
-                tags="blocker,open",
-                session_id=session_id,
-                importance=4,
-                evidence_type=evidence_type or "task_checkpoint",
-                source_ref=source_ref,
-            )
-            blocker_ids.append(bid)
-            written_ids.append(bid)
+            state_content += f" | Verification status: {verification_status}"
+            # patch state content already written? Instead append in earlier? Too late.
+            recorded = {
+                "unfinished": len(unfinished_ids),
+                "blockers": len(blocker_ids),
+                "acceptance_criteria": len(acceptance_ids),
+                "state_milestone": 1,
+                "skipped_links": skipped_links,
+            }
 
-        # 4c. Acceptance criteria: separate state facts tagged acceptance-criteria
-        acceptance_ids = []
-        for item in (acceptance_criteria or []):
-            aid = self.write(
-                category="state",
-                content=item,
-                rationale="Post-task verification checkpoint (acceptance criterion)",
-                confidence="confirmed",
-                tags="acceptance-criteria",
-                session_id=session_id,
-                importance=4,
-                evidence_type=evidence_type or "task_checkpoint",
-                source_ref=source_ref,
-            )
-            acceptance_ids.append(aid)
-            written_ids.append(aid)
+            self.conn.execute("COMMIT")
+            return {
+                "status": "CHECKPOINT_RECORDED",
+                "state_id": -state_id if state_id < 0 else state_id,
+                "state_was_duplicate": state_id < 0,
+                "total_facts_written": sum(1 for i in written_ids if i > 0),
+                "duplicates_skipped": sum(1 for i in written_ids if i < 0),
+                "duplicates_of_existing_ids": [-i for i in written_ids if i < 0],
+                "fact_ids": [-i if i < 0 else i for i in written_ids],
+                "written_ids": [-i if i < 0 else i for i in written_ids],
+                "verification_status": verification_status,
+                "recorded": recorded,
+            }
 
-        # 4d. Record State Milestone & Test Baseline
-        state_content = summary
-        if verified is None:
-            state_content += " | Verified: unknown"
-        elif verified:
-            state_content += " | Verified: yes"
-        else:
-            state_content += " | Verified: no"
-        if acceptance_criteria is not None:
-            state_content += f" | Acceptance criteria: {len(acceptance_criteria)}"
-        if test_baseline:
-            state_content += f" | Verified Baseline: {test_baseline}"
-        state_content += f" | Verification status: {verification_status}"
 
-        state_id = self.write(
-            category="state",
-            content=state_content,
-            rationale="Post-task verification checkpoint",
-            confidence="confirmed",
-            session_id=session_id,
-            importance=4,
-            evidence_type=evidence_type or "task_checkpoint",
-            source_ref=source_ref,
-        )
-        written_ids.append(state_id)
-
-        state_content += f" | Verification status: {verification_status}"
-        # patch state content already written? Instead append in earlier? Too late.
-        recorded = {
-            "unfinished": len(unfinished_ids),
-            "blockers": len(blocker_ids),
-            "acceptance_criteria": len(acceptance_ids),
-            "state_milestone": 1,
-        }
-
-        return {
-            "status": "CHECKPOINT_RECORDED",
-            "state_id": -state_id if state_id < 0 else state_id,
-            "state_was_duplicate": state_id < 0,
-            "total_facts_written": sum(1 for i in written_ids if i > 0),
-            "duplicates_skipped": sum(1 for i in written_ids if i < 0),
-            "duplicates_of_existing_ids": [-i for i in written_ids if i < 0],
-            "fact_ids": [-i if i < 0 else i for i in written_ids],
-            "written_ids": [-i if i < 0 else i for i in written_ids],
-            "verification_status": verification_status,
-            "recorded": recorded,
-        }
-
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise

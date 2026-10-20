@@ -614,8 +614,9 @@ def memory_check_security(file_paths: List[str]) -> dict:
 def memory_acquire_lock(resource: str, locked_by: str, ttl_seconds: int = 300) -> dict:
     """Acquire a named lock on a resource for multi-agent coordination. Returns success boolean."""
     with _store() as _s:
-        ok = _s.acquire_lock(resource, locked_by, ttl_seconds)
-    return {"resource": resource, "locked_by": locked_by, "acquired": ok}
+        ttl = _clamp_ttl(ttl_seconds)
+        ok = _s.acquire_lock(resource, locked_by, ttl)
+    return {"resource": resource, "locked_by": locked_by, "ttl_seconds": ttl, "acquired": ok}
 
 
 @mcp.tool()
