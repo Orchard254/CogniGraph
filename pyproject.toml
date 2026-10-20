@@ -42,8 +42,9 @@ dev = [
     "ruff==0.9.10",
 ]
 
-[project.entry-points]
-console_scripts = { cognigraph = "memory_cli:main", memory_cli = "memory_cli:main" }
+[project.scripts]
+cognigraph = "memory_cli:main"
+memory_cli = "memory_cli:main"
 
 [tool.setuptools]
 py-modules = [
@@ -54,6 +55,10 @@ py-modules = [
     "pm_context",
     "pm_lifecycle",
     "pm_structural",
+    "pm_backup",
+    "corpus_hygiene",
+    "branch_promotion",
+    "genesis_migrate",
     "server",
     "wire",
     "bootstrap",
@@ -112,7 +117,7 @@ addopts = "--ignore=scratch"
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 markers = [
-    "stress_heavy: marks tests as heavy stress tests (skipped by default unless explicitly run with -m stress_heavy)",
+    "stress_heavy: marks stress-heavy tests as opt-in; run explicitly with -m stress_heavy",
 ]
 
 [tool.coverage.run]
