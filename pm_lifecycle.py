@@ -1468,16 +1468,23 @@ class LifecycleMixin:
         `memory` table (see write() intake contract).
         """
         written_ids = []
-        # Distinguish caller-reported status from evidence-backed verification.
+        # Distinguish caller-reported status from independently evidenced verification.
+        # A caller-supplied result must at minimum include the command, a
+        # successful exit code, and the exact commit SHA it was run against.
+        # Without those the value remains caller-reported.
         if verified and isinstance(verification_evidence, dict):
             ev = verification_evidence
-            _ev_ok = (str(ev.get("exit_code")) in ("0", "0.0") or ev.get("exit_code") == 0)
-            _ev_commit_ok = True
+            _ev_ok = (ev.get("command") is not None and str(ev.get("command")).strip() != "")
+            try:
+                _ev_ok = _ev_ok and (str(ev.get("exit_code")) in ("0", "0.0") or ev.get("exit_code") == 0)
+            except Exception:
+                _ev_ok = False
+            _ev_commit_ok = False
             if ev.get("commit_sha"):
                 try:
                     current = self._current_git_commit()
-                    if current and str(ev.get("commit_sha")).strip() != current.strip():
-                        _ev_commit_ok = False
+                    if current is not None and str(ev.get("commit_sha")).strip() == current.strip():
+                        _ev_commit_ok = True
                 except Exception:
                     _ev_commit_ok = False
             if _ev_ok and _ev_commit_ok and ev.get("command"):
@@ -1644,6 +1651,7 @@ class LifecycleMixin:
             "duplicates_of_existing_ids": [-i for i in written_ids if i < 0],
             "fact_ids": [-i if i < 0 else i for i in written_ids],
             "written_ids": [-i if i < 0 else i for i in written_ids],
+            "verification_status": verification_status,
             "recorded": recorded,
         }
 
