@@ -3,6 +3,8 @@
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 import memory_store
 from memory_store import MemoryStore
 
