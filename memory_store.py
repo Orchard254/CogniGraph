@@ -762,7 +762,11 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                 "refused: this looks like it contains a credential or secret in tags. "
                 "Store where the secret is configured instead of its value."
             )
-        if any(looks_like_secret(value) for value in (session_id, file_path, code_hash, git_commit_sha) if value):
+        if any(
+            looks_like_secret(value)
+            for value in (session_id, file_path, code_hash, git_commit_sha)
+            if value
+        ):
             raise ValueError(
                 "refused: this looks like it contains a credential or secret in the write metadata."
             )
