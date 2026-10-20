@@ -28,6 +28,7 @@ _REQUIRED_TABLES = {
 }
 
 _REQUIRED_GUARDRAILS = {
+    "trg_repositories_revision_monotonic",
     "trg_observations_insert_revision",
     "trg_observations_update_revision",
     "trg_observations_repo_isolation",
@@ -261,3 +262,38 @@ def test_startup_repairs_a_missing_anchor_repository_guard(tmp_path, monkeypatch
     finally:
         repaired.close()
 
+def test_repository_revision_must_advance_exactly_one_step(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_store, "_SQLITE_VEC_PKG_AVAILABLE", False)
+    store = MemoryStore(str(tmp_path / "revision-monotonicity.db"))
+    now = "2026-10-20T00:00:00+00:00"
+    try:
+        repo_id = store.conn.execute(
+            "INSERT INTO repositories (root_path, current_revision, created_at) "
+            "VALUES (?, 1, ?)",
+            (str(tmp_path / "monotonic-repo"), now),
+        ).lastrowid
+
+        # A legitimate next revision is permitted.
+        store.conn.execute(
+            "UPDATE repositories SET current_revision=2 WHERE repo_id=?",
+            (repo_id,),
+        )
+        assert store.conn.execute(
+            "SELECT current_revision FROM repositories WHERE repo_id=?", (repo_id,)
+        ).fetchone()[0] == 2
+
+        # Neither rollback/no-op nor skipping revisions may rewrite the cursor.
+        for invalid_revision in (1, 2, 4, 100):
+            with pytest.raises(
+                sqlite3.IntegrityError,
+                match="current_revision must advance by exactly one",
+            ):
+                store.conn.execute(
+                    "UPDATE repositories SET current_revision=? WHERE repo_id=?",
+                    (invalid_revision, repo_id),
+                )
+        assert store.conn.execute(
+            "SELECT current_revision FROM repositories WHERE repo_id=?", (repo_id,)
+        ).fetchone()[0] == 2
+    finally:
+        store.close()
