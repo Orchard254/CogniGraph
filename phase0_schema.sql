@@ -13,9 +13,6 @@ CREATE TABLE IF NOT EXISTS repositories (
     created_at      TEXT NOT NULL
 );
 
--- Minimal branch table: only the auto-created canonical root branch exists
--- in this increment. Full experimental-branch workflow (Sections 16-25) is
--- deferred, but observations need a branch_id to point at per Section 10.
 -- The revision cursor is a monotonic sequence, not a user-settable label.
 -- Every legitimate RevisionTransaction (and genesis migration) advances exactly
 -- one step. Reject rollback, no-op writes, and unaccounted multi-step jumps.
@@ -25,6 +22,10 @@ WHEN NEW.current_revision != OLD.current_revision + 1
 BEGIN
     SELECT RAISE(ABORT, 'revision protocol violation: current_revision must advance by exactly one');
 END;
+
+-- Minimal branch table: only the auto-created canonical root branch exists
+-- in this increment. Full experimental-branch workflow (Sections 16-25) is
+-- deferred, but observations need a branch_id to point at per Section 10.
 
 CREATE TABLE IF NOT EXISTS memory_branches (
     branch_id        INTEGER PRIMARY KEY AUTOINCREMENT,
