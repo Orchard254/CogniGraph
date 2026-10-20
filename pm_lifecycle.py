@@ -542,6 +542,9 @@ class LifecycleMixin:
                 unique_ext_deps.append(d)
         external_dependencies = unique_ext_deps[:50]
         # Deduplicate by canonical path while preserving original stored paths.
+        # Transitive affected-test projection: merge the direct external
+        # candidates with the (transitive) affected_tests reverse-BFS so the
+        # reported set covers tests that indirectly exercise changed code.
         _seen_tests = set()
         _unique_tests = []
         for _p in external_test_candidates:
@@ -604,6 +607,16 @@ class LifecycleMixin:
                 "edge_types": meta["edge_types"],
             })
         affected_tests.sort(key=lambda x: (x["depth"], x["test_file"]))
+
+        # Test-aware projection for likely_relevant_tests: merge direct
+        # external candidates with transitive affected tests.
+        _merged = sorted(set(external_test_candidates) | {a["test_file"] for a in affected_tests})
+        _seen3=set(); _uniq3=[]
+        for _p in _merged:
+            _c=_canonical_path(_p)
+            if _c in _seen3: continue
+            _seen3.add(_c); _uniq3.append(_p)
+        external_test_candidates = sorted(_uniq3)
 
         # Stored constraints surfaced as a validation checklist (section F slice)
         constraint_checks = []
