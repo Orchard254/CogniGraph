@@ -96,19 +96,39 @@ def close_thread_stores(db_path: Optional[str] = None) -> None:
                 pass
 
 def _prune_deleted_file(rel: str, store: MemoryStore) -> None:
-    """Remove structural rows for a deleted file. Never raises.
+    """Retire generated file-stub facts and remove structural rows for a file.
 
-    The deletion complement to _sync_file: sync only revisits files that
-    still exist, so without this, deleted files leave permanent orphan
-    rows. Child tables (structural_edges, call_sites, fact_node_links)
-    clean up automatically via ON DELETE CASCADE.
+    Only generated `Source file:` stubs are deprecated. Curated knowledge
+    anchored to the same path is retained, and the stub remains in history.
+    Both phases are best-effort and independent so a fact-cleanup problem does
+    not prevent structural rows from being removed (or vice versa).
     """
     try:
         if MemoryStore is not None and store is not None:
             store = _thread_store(store.db_path)
+    except Exception as e:
+        logger.warning("watcher could not obtain thread store for %s: %r", rel, e)
+        bump_background_failure("file_stub_cleanup")
+        return
+
+    try:
+        rows = store.conn.execute(
+            "SELECT id FROM memory "
+            "WHERE file_path = ? AND deprecated_at IS NULL "
+            "AND content LIKE 'Source file:%'",
+            (rel,),
+        ).fetchall()
+        stub_ids = [int(row["id"]) for row in rows]
+        if stub_ids:
+            store.deprecate_many(stub_ids, reason=f"source file removed from workspace: {rel}")
+    except Exception as e:
+        logger.warning("watcher file-stub cleanup failed %s: %r", rel, e)
+        bump_background_failure("file_stub_cleanup")
+
+    try:
         store.delete_structural_file(rel)
     except Exception as e:
-        logger.warning("watcher delete prune failed %s: %r", rel, e)
+        logger.warning("watcher structural delete prune failed %s: %r", rel, e)
         bump_background_failure("structural_sync")
 
 

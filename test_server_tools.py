@@ -260,6 +260,7 @@ def test_stats_real_db(real_db):
     assert out["total_active"] == 0
     assert out["background_failures"] == {
         "vec_sync": 0, "structural_sync": 0, "re_embed": 0, "fact_linking": 0,
+        "file_stub_cleanup": 0,
     }
 
 

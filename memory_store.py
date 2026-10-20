@@ -134,6 +134,7 @@ _BACKGROUND_FAILURES = {
     "structural_sync": 0,
     "re_embed": 0,
     "fact_linking": 0,
+    "file_stub_cleanup": 0,
 }
 
 
