@@ -20,3 +20,16 @@ CREATE TABLE IF NOT EXISTS legacy_provenance (
 
 CREATE INDEX IF NOT EXISTS idx_legacy_provenance_legacy ON legacy_provenance(legacy_memory_id);
 CREATE INDEX IF NOT EXISTS idx_legacy_provenance_episodic ON legacy_provenance(episodic_memory_id);
+
+-- Genesis provenance is a permanent ID/file mapping, so it is append-only.
+CREATE TRIGGER IF NOT EXISTS trg_legacy_provenance_immutable_update
+BEFORE UPDATE ON legacy_provenance
+BEGIN
+    SELECT RAISE(ABORT, 'append-only audit ledger: legacy_provenance cannot be updated');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_legacy_provenance_immutable_delete
+BEFORE DELETE ON legacy_provenance
+BEGIN
+    SELECT RAISE(ABORT, 'append-only audit ledger: legacy_provenance cannot be deleted');
+END;
