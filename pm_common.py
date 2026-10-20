@@ -123,9 +123,10 @@ def _cosine_sim(a, b) -> float:
     # Both are already L2-normalized from SentenceTransformer, so dot == cosine
     return max(0.0, dot)
 
-VALID_CATEGORIES = {"component", "decision", "constraint", "state", "other"}
+VALID_CATEGORIES = {"component", "decision", "constraint", "state", "other", "convention"}
 VALID_CONFIDENCE = {"confirmed", "assumed", "uncertain"}
-VALID_RELATIONS = {"depends_on", "implements", "conflicts_with", "relates_to"}
+VALID_EVIDENCE_TYPES = {'user_instruction','agent_observation','task_checkpoint','code_analysis','test_result','external_reference','inferred'}
+VALID_RELATIONS = {"depends_on", "implements", "conflicts_with", "relates_to", "alternative_to"}
 MAX_LIMIT = 200
 
 
@@ -154,8 +155,10 @@ KNOWN_RESULT_FIELDS = frozenset({
     "id", "content", "category", "rationale", "confidence", "session_id",
     "file_path", "tags", "importance", "line_start", "line_end", "code_hash",
     "git_commit_sha", "created_at", "updated_at", "access_count",
+    "created_by_agent", "branch_id", "trust_level",
     "last_accessed_at", "score", "source", "version", "superseded_by",
     "deprecated_at", "deprecated_reason",
+    "evidence_type", "source_ref",
     # query_hybrid(..., explain=True) only
     "fused_score", "lanes",
     # episodic / locate_fact only
@@ -263,7 +266,7 @@ def tokenize_text(text: Optional[str]) -> set:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    category TEXT NOT NULL CHECK(category IN ('component', 'decision', 'constraint', 'state', 'other')),
+    category TEXT NOT NULL CHECK(category IN ('component', 'decision', 'constraint', 'state', 'other', 'convention')),
     content TEXT NOT NULL,
     rationale TEXT,
     confidence TEXT NOT NULL DEFAULT 'assumed' CHECK(confidence IN ('confirmed', 'assumed', 'uncertain')),
@@ -281,7 +284,12 @@ CREATE TABLE IF NOT EXISTS memory (
     line_end INTEGER,
     code_hash TEXT,
     git_commit_sha TEXT,
-    tags TEXT
+    tags TEXT,
+    evidence_type TEXT DEFAULT 'inferred' CHECK(evidence_type IS NULL OR evidence_type IN ('user_instruction', 'agent_observation', 'task_checkpoint', 'code_analysis', 'test_result', 'external_reference', 'inferred')),
+    source_ref TEXT,
+    created_by_agent TEXT,
+    branch_id INTEGER,
+    trust_level INTEGER NOT NULL DEFAULT 3 CHECK(trust_level BETWEEN 1 AND 5)
 );
 
 CREATE INDEX IF NOT EXISTS idx_memory_category ON memory(category);
@@ -292,7 +300,7 @@ CREATE TABLE IF NOT EXISTS memory_edges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_id INTEGER NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
     target_id INTEGER NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
-    relation TEXT NOT NULL CHECK(relation IN ('depends_on', 'implements', 'conflicts_with', 'relates_to')),
+    relation TEXT NOT NULL CHECK(relation IN ('depends_on', 'implements', 'conflicts_with', 'relates_to', 'alternative_to')),
     created_at TEXT NOT NULL,
     UNIQUE(source_id, target_id, relation)
 );
@@ -581,3 +589,117 @@ def default_db_path() -> str:
 
 
 
+
+
+def _epistemic_status(fact, scan_result=None):
+    """First-class epistemic status for a fact given an optional scan result.
+
+    Returns one of: known, partially_known, unverified, outdated, conflicting, unknown.
+    """
+    try:
+        f = dict(fact) if not isinstance(fact, dict) else dict(fact)
+    except Exception:
+        f = {}
+    # Normalize scan_result shapes:
+    fid = f.get("id")
+    if isinstance(f, dict) and "id" not in f and hasattr(fact, "get"):
+        pass
+    # detect membership in scan_provenance-style dict
+    lists = {}
+    if isinstance(scan_result, dict):
+        for key in ("ok", "drifted", "missing", "healed", "conflicting",
+                    "contradictions", "conflicts", "contradicted"):
+            v = scan_result.get(key)
+            if isinstance(v, list):
+                lists[key] = v
+
+    def _member(keys):
+        for k in keys:
+            if k in lists:
+                for entry in lists[k]:
+                    try:
+                        if (isinstance(entry, dict) and entry.get("id") == fid) or entry == fid:
+                            return k, entry
+                    except Exception:
+                        continue
+        return None, None
+
+    # conflicting
+    ck, entry = _member(["conflicting", "contradictions", "conflicts", "contradicted"])
+    if ck:
+        return "conflicting"
+    # Single verify_provenance result dict
+    if isinstance(scan_result, dict) and "status" in scan_result and not lists:
+        st = str(scan_result.get("status", "")).upper()
+        if st in ("VERIFIED", "OK"):
+            return "known"
+        if st in ("HEALED_LINE_SHIFT", "HEALED"):
+            return "partially_known"
+        if st in ("DRIFT_DETECTED", "DRIFTED", "DEPRECATED_FILE_DELETED", "MISSING"):
+            return "outdated"
+        if st in ("NO_FILE_PATH",):
+            # fall through to fact-based
+            pass
+    mk, entry = _member(["missing"])
+    if mk:
+        return "outdated"
+    dk, entry = _member(["drifted"])
+    if dk:
+        return "outdated"
+    hk, entry = _member(["healed"])
+    if hk:
+        return "partially_known"
+    okk, entry = _member(["ok"])
+    if okk:
+        if isinstance(entry, dict):
+            note = str(entry.get("note", "")).lower()
+            if note in ("no_hash", "no-hash", "") and not f.get("code_hash"):
+                return "unverified"
+            if note in ("no_hash",):
+                return "unverified"
+        if not f.get("code_hash"):
+            return "unverified"
+        return "known"
+
+    # fact-based fallback when no scan membership
+    code_hash = f.get("code_hash")
+    file_path = f.get("file_path")
+    confidence = str(f.get("confidence", "")).lower()
+    if f.get("conflicting") or f.get("contradiction"):
+        return "conflicting"
+    if not file_path and not code_hash:
+        return "unknown"
+    if not code_hash:
+        return "unverified"
+    if confidence in ("uncertain", "low", "possibly_outdated"):
+        return "partially_known"
+    # scan_result None but fact already has provenance -> treat as known
+    return "known"
+
+
+def _is_test_file(file_path):
+    """Classify a file path as a test file based on common naming patterns."""
+    if not file_path:
+        return False
+    import os
+    p = str(file_path).replace("\\", "/").lower()
+    base = p.rsplit("/", 1)[-1]
+    # directory-based
+    if "/tests/" in p or "/test/" in p or p.startswith("tests/") or p.startswith("test/"):
+        return True
+    # Python
+    if base.startswith("test_") and base.endswith(".py"):
+        return True
+    if base.endswith("_test.py"):
+        return True
+    # JS/TS
+    for ext in (".js", ".ts", ".tsx", ".jsx", ".mjs"):
+        if base.endswith(f".test{ext}") or base.endswith(f".spec{ext}"):
+            return True
+    # other common
+    if base.endswith("_test.go") or base.endswith("_test.rs"):
+        return True
+    return False
+
+# aliases expected by modules/tests
+is_test_file = _is_test_file

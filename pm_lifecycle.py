@@ -11,7 +11,7 @@ from pm_common import (
     tokenize_text, looks_like_secret,
     _vec_to_blob, _get_embed_model,
     _EMBED_MODEL_NAME, _SEMANTIC_AVAILABLE, np,
-    _blob_to_vec, logger,
+    _blob_to_vec, logger, _epistemic_status, _is_test_file,
 )
 from corpus_hygiene import STUB_PREFIXES, _stub_where, _stub_params
 
@@ -164,6 +164,8 @@ def classify_pair(fact_a: Dict[str, Any], fact_b: Dict[str, Any]) -> Dict[str, A
 
 
 class LifecycleMixin:
+    _epistemic_status = staticmethod(_epistemic_status)
+    _is_test_file = staticmethod(_is_test_file)
     # Audit sweep thresholds. The semantic default sits just under the
     # write-time dedup threshold in write() (0.88) on purpose: dedup only ever
     # sees a pair at the instant of writing, and this corpus is re-embedded
@@ -363,6 +365,35 @@ class LifecycleMixin:
                 "sync callees before callers for cross-file resolution"
             )
 
+        # Stored constraints surfaced as a validation checklist (section F slice)
+        constraint_checks = []
+        try:
+            for cr in self.conn.execute(
+                "SELECT id, file_path, content, importance FROM memory "
+                "WHERE deprecated_at IS NULL AND category = 'constraint'"
+            ).fetchall():
+                cfp = (cr["file_path"] or "").replace("\\", "/").lower()
+                applies = (not cfp) or any(cp in cfp or cfp in cp for cp in clean_paths)
+                if applies:
+                    constraint_checks.append({
+                        "fact_id": cr["id"],
+                        "file_path": cr["file_path"],
+                        "constraint": cr["content"],
+                        "importance": cr["importance"],
+                        "verdict": "review",
+                    })
+        except Exception:
+            constraint_checks = []
+        verdict = "REVIEW_REQUIRED" if constraint_checks else "PASS"
+
+        safe = len(cross_dependencies) == 0 and len(structural_dependencies) == 0
+        if safe:
+            reason = "No cross-file dependencies detected across the batch; safe to continue."
+        else:
+            reason = (
+                f"Cross-file dependencies detected ({len(cross_dependencies)} memory, "
+                f"{len(structural_dependencies)} structural); review before proceeding."
+            )
         return {
             "status": "CHECKED",
             "files_analyzed": len(clean_paths),
@@ -371,11 +402,17 @@ class LifecycleMixin:
             "structural_dependencies_count": len(structural_dependencies),
             "structural_dependencies": structural_dependencies,
             "known_limitations": known_limitations,
+            "safe_to_continue": safe,
+            "safe_to_continue_reason": reason,
             "briefings": file_briefings,
+            "constraint_checks": constraint_checks,
+            "verdict": verdict,
+            "constraint_verdict": verdict,
         }
 
     def check_hygiene(self, project_root: Optional[str] = None,
-                      max_dirty_files: int = 20) -> Dict[str, Any]:
+                      max_dirty_files: int = 20,
+                      ci_status: str = "") -> Dict[str, Any]:
         """Commit/push-discipline status for the working tree (local git only).
 
         Read-only planning aid for the finalizing phase: working-tree
@@ -408,6 +445,7 @@ class LifecycleMixin:
         root = Path(project_root) if project_root else Path.cwd()
         base: Dict[str, Any] = {
             "status": "NOT_A_REPO",
+            "ci_status": ci_status or None,
             "project_root": str(root),
             "branch": None,
             "detached": False,
@@ -1291,7 +1329,13 @@ class LifecycleMixin:
                         test_baseline: Optional[str] = None,
                         links: Optional[List[Tuple[int, int, str]]] = None,
                         session_id: Optional[str] = None,
-                        failures: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+                        failures: Optional[List[Dict[str, Any]]] = None,
+                        unfinished: Optional[List[str]] = None,
+                        blockers: Optional[List[str]] = None,
+                        acceptance_criteria: Optional[List[str]] = None,
+                        verified: Optional[bool] = None,
+                        evidence_type: Optional[str] = None,
+                        source_ref: Optional[str] = None) -> Dict[str, Any]:
         """
         POST-CODING LIFECYCLE CHECKPOINT:
         Atomically records all achievements, new components, architectural decisions,
@@ -1312,6 +1356,8 @@ class LifecycleMixin:
                     tags="negative-knowledge,known-failure",
                     importance=4,
                     session_id=session_id,
+                    evidence_type=(fl.get("evidence_type") if isinstance(fl, dict) else None) or evidence_type or "task_checkpoint",
+                    source_ref=(fl.get("source_ref") if isinstance(fl, dict) else None) or source_ref,
                 )
                 written_ids.append(fid)
 
@@ -1327,6 +1373,8 @@ class LifecycleMixin:
                     tags=d.get("tags"),
                     importance=d.get("importance", 4),
                     session_id=session_id,
+                    evidence_type=d.get("evidence_type", evidence_type) or "task_checkpoint",
+                    source_ref=d.get("source_ref", source_ref) or None,
                 )
                 written_ids.append(did)
 
@@ -1345,6 +1393,8 @@ class LifecycleMixin:
                     tags=c.get("tags"),
                     importance=c.get("importance", 3),
                     session_id=session_id,
+                    evidence_type=c.get("evidence_type", evidence_type) or "task_checkpoint",
+                    source_ref=c.get("source_ref", source_ref) or None,
                 )
                 written_ids.append(cid)
 
@@ -1356,11 +1406,70 @@ class LifecycleMixin:
                 except ValueError:
                     pass
 
-        # 4. Record State Milestone & Test Baseline
+        # 4a. Unfinished items: separate state facts tagged unfinished,backlog
+        unfinished_ids = []
+        for item in (unfinished or []):
+            uid = self.write(
+                category="state",
+                content=item,
+                rationale="Post-task verification checkpoint (unfinished)",
+                confidence="confirmed",
+                tags="unfinished,backlog",
+                session_id=session_id,
+                importance=4,
+                evidence_type=evidence_type or "task_checkpoint",
+                source_ref=source_ref,
+            )
+            unfinished_ids.append(uid)
+            written_ids.append(uid)
+
+        # 4b. Blockers: separate state facts tagged blocker,open
+        blocker_ids = []
+        for item in (blockers or []):
+            bid = self.write(
+                category="state",
+                content=item,
+                rationale="Post-task verification checkpoint (blocker)",
+                confidence="confirmed",
+                tags="blocker,open",
+                session_id=session_id,
+                importance=4,
+                evidence_type=evidence_type or "task_checkpoint",
+                source_ref=source_ref,
+            )
+            blocker_ids.append(bid)
+            written_ids.append(bid)
+
+        # 4c. Acceptance criteria: separate state facts tagged acceptance-criteria
+        acceptance_ids = []
+        for item in (acceptance_criteria or []):
+            aid = self.write(
+                category="state",
+                content=item,
+                rationale="Post-task verification checkpoint (acceptance criterion)",
+                confidence="confirmed",
+                tags="acceptance-criteria",
+                session_id=session_id,
+                importance=4,
+                evidence_type=evidence_type or "task_checkpoint",
+                source_ref=source_ref,
+            )
+            acceptance_ids.append(aid)
+            written_ids.append(aid)
+
+        # 4d. Record State Milestone & Test Baseline
         state_content = summary
+        if verified is None:
+            state_content += " | Verified: unknown"
+        elif verified:
+            state_content += " | Verified: yes"
+        else:
+            state_content += " | Verified: no"
+        if acceptance_criteria is not None:
+            state_content += f" | Acceptance criteria: {len(acceptance_criteria)}"
         if test_baseline:
             state_content += f" | Verified Baseline: {test_baseline}"
-        
+
         state_id = self.write(
             category="state",
             content=state_content,
@@ -1368,8 +1477,17 @@ class LifecycleMixin:
             confidence="confirmed",
             session_id=session_id,
             importance=4,
+            evidence_type=evidence_type or "task_checkpoint",
+            source_ref=source_ref,
         )
         written_ids.append(state_id)
+
+        recorded = {
+            "unfinished": len(unfinished_ids),
+            "blockers": len(blocker_ids),
+            "acceptance_criteria": len(acceptance_ids),
+            "state_milestone": 1,
+        }
 
         return {
             "status": "CHECKPOINT_RECORDED",
@@ -1379,5 +1497,7 @@ class LifecycleMixin:
             "duplicates_skipped": sum(1 for i in written_ids if i < 0),
             "duplicates_of_existing_ids": [-i for i in written_ids if i < 0],
             "fact_ids": [-i if i < 0 else i for i in written_ids],
+            "written_ids": [-i if i < 0 else i for i in written_ids],
+            "recorded": recorded,
         }
 

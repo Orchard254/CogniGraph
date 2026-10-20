@@ -121,23 +121,29 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 18 tools.
+The server registers 24 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `memory_write` | `category`, `content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `importance?`, `line_start?`, `line_end?`, `code_hash?`, `git_commit_sha?` | Record a durable fact this session learned that future sessions will need: decisions, constraints, gotchas, where components live. Secrets are refused. |
+| `memory_write` | `category`, `content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `importance?`, `line_start?`, `line_end?`, `code_hash?`, `git_commit_sha?`, `evidence_type?`, `source_ref?`, `created_by_agent?`, `branch_id?`, `trust_level?` | Record a durable fact this session learned that future sessions will need: decisions, constraints, gotchas, where components live. Secrets are refused. |
 | `memory_write_batch` | `facts` | Atomic batch form of memory_write for several related facts. |
 | `memory_query` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?`, `explain?`, `fields?` | Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have. |
 | `memory_get_context` | `query`, `agent_type?`, `max_tokens?`, `limit?`, `intent?` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. |
 | `memory_get_file_context` | `file_path` | Call while planning an approach to a file — and before editing it: its symbols, anchored facts, callers, and call-graph edges. |
 | `memory_check_safety` | `file_paths` | Call before a multi-file refactor: dependency risk matrix across the files you're about to change. |
-| `memory_check_hygiene` | `project_root?` | Commit/push-discipline status for the working tree: cleanliness, ahead/behind, stale branches. Local git only, read-only; no CI correlation in v1. |
+| `memory_check_security` | `file_paths` | Heuristic security scan: flag sensitive/PII/dangerous patterns (password, secret, token, eval, exec, shell, SQL interpolation) with file:line, plus cross-file impact. |
+| `memory_acquire_lock` | `resource`, `locked_by`, `ttl_seconds?` | Acquire a named lock on a resource for multi-agent coordination. Returns success boolean. |
+| `memory_release_lock` | `resource`, `locked_by` | Release a named lock previously acquired by locked_by. |
+| `memory_validate_constraints` | `file_paths` | Validate stored constraints against the files about to be edited; returns constraint_checks and verdict. |
+| `memory_check_hygiene` | `project_root?`, `ci_status?` | Commit/push-discipline status for the working tree: cleanliness, ahead/behind, stale branches. Local git only, read-only; optional ci_status records external CI result. |
 | `memory_supersede` | `old_id`, `new_content`, `rationale?`, `confidence?`, `session_id?`, `file_path?`, `tags?`, `expected_version?`, `inherit_provenance?`, `line_start?`, `line_end?`, `code_hash?`, `git_commit_sha?` | Replace an outdated fact with corrected content. Use when you discover memory that is wrong. |
 | `memory_deprecate` | `id`, `reason?` | Mark one fact (or a batch of ids) obsolete without replacement. |
+| `memory_resolve_conflict` | `keep_id`, `deprecate_id`, `rationale?` | Resolve a conflict between two facts: deprecate the losing fact and |
 | `memory_stats` | — | Memory health: active/deprecated counts, category breakdown, edges. Call at session start per AGENTS.md. |
 | `memory_prepare_task` | `intent`, `file_paths?`, `limit?` | REQUIRED before writing or modifying any code in this repository. Returns the task briefing: relevant decisions, constraints, component facts, file-level impacts, cross-file dependency risks, and the current verified test baseline. |
-| `memory_checkpoint_task` | `summary`, `components?`, `decisions?`, `test_baseline?`, `failures?` | Call immediately after a task is verified complete (tests green). Records new components, decisions, the test baseline, and failed approaches as durable memory for future sessions. |
+| `memory_checkpoint_task` | `summary`, `components?`, `decisions?`, `test_baseline?`, `failures?`, `unfinished?`, `blockers?`, `acceptance_criteria?`, `verified?`, `evidence_type?`, `source_ref?` | Call immediately after a task is verified complete (tests green). Records new components, decisions, the test baseline, and failed approaches as durable memory for future sessions. |
 | `memory_who_calls` | `symbol` | Where a symbol is defined, every call site, and importing files. Ask mid-reasoning while planning an approach — and before renaming or changing a signature. |
+| `memory_search_symbols` | `query`, `limit?` | Fuzzy/ambiguous symbol discovery: LIKE-search structural_nodes, returns file:line:name:type hits (limit capped). |
 | `memory_who_inherits` | `symbol`, `max_depth?` | Which classes inherit from this base class (exact), transitively. No LIKE false positives. |
 | `memory_blast_radius` | `symbol`, `class_name?`, `file_path?`, `max_depth?`, `direction?`, `file_detail?`, `max_symbols_per_file?` | Transitive blast radius: who depends on this symbol, transitively. Call while planning an approach or estimating effort, before making changes — not just as a pre-edit gate. |
 | `memory_read_code` | `items`, `max_lines_per_item?`, `max_total_chars?`, `context?` | Read scoped source lines by symbol or explicit file range, batched in one call. Request order is preserved in results; batch budget cutoffs return per-item errors (not partial content) so re-request those items in a smaller batch. |

@@ -1,9 +1,12 @@
 """Context layer: LLM priming output - context briefings, file briefings, dependency maps, and proactive suggestions."""
 import sqlite3
 from pathlib import Path
+from pm_common import _epistemic_status, _is_test_file
 from typing import Optional, List, Dict, Any
 
 class ContextMixin:
+    _epistemic_status = staticmethod(_epistemic_status)
+    _is_test_file = staticmethod(_is_test_file)
     _CODING_INTENTS = {"fix", "implement", "refactor", "add", "remove", "optimize", "test", "debug"}
     _FACT_CONTENT_CAP = 500
     _FACT_RATIONALE_CAP = 300
@@ -266,11 +269,20 @@ class ContextMixin:
                 if f["file_path"]:
                     lines_range = f":L{f['line_start']}-L{f['line_end']}" if f.get("line_start") else ""
                     prov.append(f"file: {f['file_path']}{lines_range}")
+                _bid = f.get("branch_id")
+                if _bid is not None:
+                    prov.append(f"branch: {_bid}")
+                _tl = f.get("trust_level")
+                if _tl is not None and _tl != 3:
+                    prov.append(f"trust: {_tl}")
             
             if f["confidence"] != "confirmed":
                 prov.append(f"confidence: {f['confidence']}")
             if f.get("tags"):
                 prov.append(f"tags: {f['tags']}")
+            _et = f.get("evidence_type")
+            if _et and _et != "inferred":
+                prov.append(f"evidence: {_et}")
             
             # Enhanced importance highlighting
 
@@ -303,7 +315,9 @@ class ContextMixin:
             
             prov_str = f" *({', '.join(prov)})*" if prov else ""
             content = self._cap_text(f["content"], self._FACT_CONTENT_CAP)
-            lines.append(f"{idx}. **[{label}]**{importance_tag} {content}{prov_str}")
+            _status = self._epistemic_status(f, None)
+            status_tag = f" [{_status}]" if _status and _status != "known" else ""
+            lines.append(f"{idx}. **[{label}]**{importance_tag}{status_tag} {content}{prov_str}")
             
             # Enhanced rationale formatting
             if f.get("rationale"):

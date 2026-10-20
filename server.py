@@ -22,6 +22,8 @@ from pm_common import (
     KNOWN_RESULT_FIELDS,
     ProjectFieldError,
     parse_fields,
+    _epistemic_status,
+    _is_test_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -313,7 +315,10 @@ def memory_write(category: str, content: str, rationale: str = "",
                  confidence: str = "assumed", session_id: str = "",
                  file_path: str = "", tags: str = "", importance: int = 3,
                  line_start: int = 0, line_end: int = 0, code_hash: str = "",
-                 git_commit_sha: str = "") -> dict:
+                 git_commit_sha: str = "",
+                 evidence_type: str = "", source_ref: str = "",
+                 created_by_agent: str = "",
+                 branch_id: int = 0, trust_level: int = 3) -> dict:
     """Record a durable fact this session learned that future sessions will need: decisions, constraints, gotchas, where components live. Secrets are refused."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
     with _store() as _s:
@@ -330,6 +335,11 @@ def memory_write(category: str, content: str, rationale: str = "",
             line_end=line_end or None,
             code_hash=code_hash or None,
             git_commit_sha=git_commit_sha or None,
+            evidence_type=evidence_type or None,
+            source_ref=source_ref or None,
+            created_by_agent=created_by_agent or None,
+            branch_id=branch_id or None,
+            trust_level=trust_level,
         )
     if new_id < 0:
         # Auto-dedup guard triggered: near-duplicate already exists
@@ -368,7 +378,11 @@ class FactSpec(TypedDict, total=False):
     line_end: int
     code_hash: str
     git_commit_sha: str
-
+    evidence_type: str
+    source_ref: str
+    created_by_agent: str
+    branch_id: int
+    trust_level: int
 
 @mcp.tool()
 def memory_write_batch(facts: List[FactSpec]) -> dict:
@@ -518,17 +532,104 @@ def memory_get_file_context(file_path: str) -> dict:
 @mcp.tool()
 def memory_check_safety(file_paths: List[str]) -> dict:
     """Call before a multi-file refactor: dependency risk matrix across the files you're about to change."""
+    paths = file_paths if isinstance(file_paths, list) else []
+    with _store() as _s:
+        result = _s.check_safety(paths)
+        # Append local git status (dirty tree / HEAD) as repo_state (best effort).
+        try:
+            root = None
+            for fp in paths:
+                cand = _find_enclosing_project(Path(fp) if not Path(fp).is_absolute() else Path(fp))
+                if cand:
+                    root = cand
+                    break
+            if root is None:
+                root = _find_enclosing_project(Path.cwd())
+            result["repo_state"] = _s.check_hygiene(str(root) if root else None)
+        except Exception as e:
+            result["repo_state"] = {"error": str(e)}
+    return result
+
+
+@mcp.tool()
+def memory_check_security(file_paths: List[str]) -> dict:
+    """Heuristic security scan: flag sensitive/PII/dangerous patterns (password, secret, token, eval, exec, shell, SQL interpolation) with file:line, plus cross-file impact."""
+    paths = file_paths if isinstance(file_paths, list) else []
+    import re
+    patterns = [
+        ("secret_or_credential", re.compile(r"\b(password|secret|token|api[_-]?key|private[_-]?key|credential)\b", re.I)),
+        ("dangerous_exec", re.compile(r"\b(eval|exec|compile)\s*\(", re.I)),
+        ("shell_spawn", re.compile(r"shell\s*=\s*True|os\.system\s*\(|subprocess\.(call|run|Popen).*shell", re.I)),
+        ("sql_interpolation", re.compile(r"(SELECT|INSERT|UPDATE|DELETE).*\{|f['\"].*(SELECT|INSERT|UPDATE|DELETE)|\.format\s*\(", re.I)),
+    ]
+    hits = []
+    limitations = []
+    for fp in paths:
+        pth = Path(fp)
+        if not pth.is_absolute():
+            pth = Path.cwd() / pth
+        if not pth.is_file():
+            limitations.append(f"file not found: {fp}")
+            continue
+        try:
+            text = pth.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            limitations.append(f"could not read {fp}: {e}")
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            for label, rx in patterns:
+                if rx.search(line):
+                    hits.append({
+                        "file_path": str(fp),
+                        "line": i,
+                        "pattern": label,
+                        "snippet": line.strip()[:200],
+                    })
+    with _store() as _s:
+        try:
+            impact = _s.check_safety(paths)
+        except Exception as e:
+            impact = {"error": str(e)}
+    return {
+        "status": "CHECKED",
+        "files_analyzed": len(paths),
+        "hit_count": len(hits),
+        "hits": hits,
+        "cross_file_impact": impact,
+        "limitations": limitations,
+    }
+
+
+@mcp.tool()
+def memory_acquire_lock(resource: str, locked_by: str, ttl_seconds: int = 300) -> dict:
+    """Acquire a named lock on a resource for multi-agent coordination. Returns success boolean."""
+    with _store() as _s:
+        ok = _s.acquire_lock(resource, locked_by, ttl_seconds)
+    return {"resource": resource, "locked_by": locked_by, "acquired": ok}
+
+
+@mcp.tool()
+def memory_release_lock(resource: str, locked_by: str) -> dict:
+    """Release a named lock previously acquired by locked_by."""
+    with _store() as _s:
+        ok = _s.release_lock(resource, locked_by)
+    return {"resource": resource, "locked_by": locked_by, "released": ok}
+
+
+@mcp.tool()
+def memory_validate_constraints(file_paths: List[str]) -> dict:
+    """Validate stored constraints against the files about to be edited; returns constraint_checks and verdict."""
     with _store() as _s:
         return _s.check_safety(file_paths if isinstance(file_paths, list) else [])
 
 
 @mcp.tool()
-def memory_check_hygiene(project_root: str = "") -> dict:
-    """Commit/push-discipline status for the working tree: cleanliness, ahead/behind, stale branches. Local git only, read-only; no CI correlation in v1."""
+def memory_check_hygiene(project_root: str = "", ci_status: str = "") -> dict:
+    """Commit/push-discipline status for the working tree: cleanliness, ahead/behind, stale branches. Local git only, read-only; optional ci_status records external CI result."""
     # Deliberately no _ensure_first_time_setup: a read-only status probe must
     # never trigger bootstrap writes (AGENTS.md / hook install).
     with _store() as _s:
-        return _s.check_hygiene(project_root or None)
+        return _s.check_hygiene(project_root or None, ci_status=ci_status)
 
 
 @mcp.tool()
@@ -592,6 +693,16 @@ def memory_deprecate(id: Union[int, List[int]], reason: str = "") -> dict:
 
 
 @mcp.tool()
+def memory_resolve_conflict(keep_id: int, deprecate_id: int, rationale: str = "") -> dict:
+    """Resolve a conflict between two facts: deprecate the losing fact and
+    record a conflicts_with edge linking the kept fact to the deprecated one.
+    """
+    _ensure_first_time_setup()
+    with _store() as _s:
+        return _s.resolve_conflict(keep_id, deprecate_id, rationale or None)
+
+
+@mcp.tool()
 def memory_stats() -> dict:
     """Memory health: active/deprecated counts, category breakdown, edges. Call at session start per AGENTS.md."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
@@ -616,6 +727,12 @@ def memory_checkpoint_task(
     decisions: List[Dict[str, Any]] | None = None,
     test_baseline: str = "",
     failures: List[Dict[str, Any]] | None = None,
+    unfinished: List[str] | None = None,
+    blockers: List[str] | None = None,
+    acceptance_criteria: List[str] | None = None,
+    verified: bool | None = None,
+    evidence_type: str = "",
+    source_ref: str = "",
 ) -> dict:
     """Call immediately after a task is verified complete (tests green). Records new components, decisions, the test baseline, and failed approaches as durable memory for future sessions."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
@@ -626,7 +743,14 @@ def memory_checkpoint_task(
             decisions=decisions or [],
             test_baseline=test_baseline or None,
             failures=failures or [],
+            unfinished=unfinished,
+            blockers=blockers,
+            acceptance_criteria=acceptance_criteria,
+            verified=verified,
+            evidence_type=evidence_type or None,
+            source_ref=source_ref or None,
         )
+
     # Translate negative dedup sentinels to positive IDs, matching memory_write/memory_write_batch
     fact_ids = result.get("fact_ids", [])
     if any(isinstance(i, int) and i < 0 for i in fact_ids) or result.get("state_id", 0) < 0:
@@ -649,6 +773,13 @@ def memory_who_calls(symbol: str) -> dict:
     """Where a symbol is defined, every call site, and importing files. Ask mid-reasoning while planning an approach — and before renaming or changing a signature."""
     with _store() as _s:
         return _s.who_calls(symbol)
+
+
+@mcp.tool()
+def memory_search_symbols(query: str, limit: int = 20) -> dict:
+    """Fuzzy/ambiguous symbol discovery: LIKE-search structural_nodes, returns file:line:name:type hits (limit capped)."""
+    with _store() as _s:
+        return _s.search_symbols(query, limit=limit)
 
 
 @mcp.tool()

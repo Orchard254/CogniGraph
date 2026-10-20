@@ -9,12 +9,15 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
 from corpus_hygiene import STUB_PREFIXES
+from pm_common import _epistemic_status, _is_test_file
 
 logger = logging.getLogger(__name__)
 
 
 
 class StructuralMixin:
+    _epistemic_status = staticmethod(_epistemic_status)
+    _is_test_file = staticmethod(_is_test_file)
     # Provenance artifacts and non-codebase directories that must never enter
     # the structural index, no matter which caller syncs them: indexing them
     # pollutes project_shape and creates phantom callers in the code graph.
@@ -1507,6 +1510,56 @@ class StructuralMixin:
                 "max_total_chars": budget, "max_lines_per_item": max_lines,
                 "known_limitations": list(self._READ_KNOWN_LIMITATIONS)}
 
+    def search_symbols(self, query: str, limit: int = 20) -> dict:
+        """Fuzzy/ambiguous symbol discovery over structural_nodes (LIKE, ranked).
+
+        Returns file:line:name:type hits. Limit capped at 100. Ranking (lower
+        score first): exact name, prefix, substring.
+        """
+        q = (query or "").strip()
+        try:
+            cap = int(limit)
+        except (TypeError, ValueError):
+            cap = 20
+        cap = max(1, min(cap, 100))
+        if not q:
+            return {"query": query, "count": 0, "hits": [],
+                    "known_limitations": ["empty query"]}
+        pattern = "%{}%".format(q)
+        rows = self.conn.execute(
+            "SELECT node_type, name, class_name, file_path, line_start, line_end "
+            "FROM structural_nodes WHERE name LIKE ?",
+            (pattern,),
+        ).fetchall()
+        scored = []
+        ql = q.lower()
+        for r in rows:
+            name = r["name"] or ""
+            nl = name.lower()
+            if nl == ql:
+                score = 0
+            elif nl.startswith(ql):
+                score = 1
+            elif ql in nl:
+                score = 2
+            else:
+                score = 3
+            scored.append((score, name, r))
+        scored.sort(key=lambda x: (x[0], x[1]))
+        hits = []
+        for score, _name, r in scored[:cap]:
+            hits.append({
+                "file_path": r["file_path"],
+                "line_start": r["line_start"],
+                "line_end": r["line_end"],
+                "name": r["name"],
+                "type": r["node_type"],
+                "class_name": r["class_name"],
+                "score": score,
+            })
+        return {"query": query, "count": len(hits), "hits": hits,
+                "total_candidates": len(scored)}
+
     def project_shape(self) -> str:
         """Compact orientation briefing: indexed file inventory and code-graph size."""
         try:
@@ -1528,17 +1581,20 @@ class StructuralMixin:
         except sqlite3.OperationalError:
             return "### Project Shape\n*Structural index not available yet.*"
 
+        test_file_set = {r["file_path"] for r in files if _is_test_file(r["file_path"])}
         lines = [
             "### Project Shape",
             "",
             f"- **{totals['f'] or 0} indexed files** — {totals['defs'] or 0} functions/methods, {totals['classes'] or 0} classes",
+            f"- Test files indexed: **{len(test_file_set)}**",
             f"- Code graph: **{call_edges} call edges**, **{import_edges} import edges**",
             "",
             "#### Files (by definition count):",
         ]
         if files:
             for r in files:
-                lines.append(f"- `{r['file_path']}` ({r['defs']} defs)")
+                tag = " [test]" if _is_test_file(r["file_path"]) else ""
+                lines.append(f"- `{r['file_path']}` ({r['defs']} defs){tag}")
         else:
             lines.append("*No structural index yet — run bootstrap or sync_structural_nodes.*")
         # Class hierarchy per file (exact bases)

@@ -22,6 +22,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from pm_common import (
     # backward-compatible re-exports
     SCHEMA, MAX_LIMIT, VALID_CATEGORIES, VALID_CONFIDENCE, VALID_RELATIONS,
+    VALID_EVIDENCE_TYPES,
     looks_like_secret, tokenize_text, find_project_root, default_db_path,
     DATA_DIR_NAME, LEGACY_DATA_DIR_NAME,
     maybe_migrate_legacy_data_dir, ensure_startup_migration,
@@ -63,6 +64,7 @@ __all__ = [
     "VALID_CATEGORIES",
     "VALID_CONFIDENCE",
     "VALID_RELATIONS",
+    "VALID_EVIDENCE_TYPES",
     "_SECRET_PATTERNS",
     "_SEMANTIC_AVAILABLE",
     "_SQLITE_VEC_PKG_AVAILABLE",
@@ -387,10 +389,128 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             "code_hash": "TEXT",
             "git_commit_sha": "TEXT",
             "tags": "TEXT",
+            "evidence_type": "TEXT NOT NULL DEFAULT 'inferred'",
+            "source_ref": "TEXT",
+            "created_by_agent": "TEXT",
+            "branch_id": "INTEGER",
+            "trust_level": "INTEGER NOT NULL DEFAULT 3",
         }
         for col_name, col_type in additions.items():
             if col_name not in cols:
                 self.conn.execute(f"ALTER TABLE memory ADD COLUMN {col_name} {col_type}")
+
+        # Ensure performance indexes for new memory columns (old DB auto-create).
+        for _idx_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_memory_branch ON memory(branch_id)",
+            "CREATE INDEX IF NOT EXISTS idx_memory_evidence ON memory(evidence_type)",
+            "CREATE INDEX IF NOT EXISTS idx_memory_created_by ON memory(created_by_agent)",
+        ):
+            self.conn.execute(_idx_sql)
+
+        # Rebuild `memory` table when its CREATE TABLE SQL lacks 'convention' in
+        # the category CHECK constraint (older databases). ALTER TABLE cannot
+        # amend a CHECK, so rebuild preserving rowids and data, recreating
+        # indexes/triggers without dropping the FTS virtual table.
+        try:
+            mem_row = self.conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='memory'"
+            ).fetchone()
+            mem_sql = (mem_row["sql"] if mem_row else "") or ""
+            if mem_sql and "'convention'" not in mem_sql:
+                try:
+                    self.conn.execute("PRAGMA foreign_keys=OFF")
+                    self.conn.execute("PRAGMA legacy_alter_table=ON")
+                    self.conn.execute("BEGIN IMMEDIATE")
+                    # Preserve the original column order intersection for the copy.
+                    old_cols = [c["name"] for c in self.conn.execute("PRAGMA table_info(memory)").fetchall()]
+                    self.conn.execute("ALTER TABLE memory RENAME TO memory_old")
+                    self.conn.execute("""
+                    CREATE TABLE memory (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        category TEXT NOT NULL CHECK(category IN ('component', 'decision', 'constraint', 'state', 'other', 'convention')),
+                        content TEXT NOT NULL,
+                        rationale TEXT,
+                        confidence TEXT NOT NULL DEFAULT 'assumed' CHECK(confidence IN ('confirmed', 'assumed', 'uncertain')),
+                        created_at TEXT NOT NULL,
+                        session_id TEXT,
+                        version INTEGER NOT NULL DEFAULT 1,
+                        importance INTEGER NOT NULL DEFAULT 3 CHECK(importance BETWEEN 1 AND 5),
+                        access_count INTEGER NOT NULL DEFAULT 0,
+                        last_accessed_at TEXT,
+                        superseded_by INTEGER REFERENCES memory(id),
+                        deprecated_at TEXT,
+                        deprecated_reason TEXT,
+                        file_path TEXT,
+                        line_start INTEGER,
+                        line_end INTEGER,
+                        code_hash TEXT,
+                        git_commit_sha TEXT,
+                        tags TEXT,
+                        evidence_type TEXT DEFAULT 'inferred' CHECK(evidence_type IS NULL OR evidence_type IN ('user_instruction', 'agent_observation', 'task_checkpoint', 'code_analysis', 'test_result', 'external_reference', 'inferred')),
+                        source_ref TEXT,
+                        created_by_agent TEXT,
+                        branch_id INTEGER,
+                        trust_level INTEGER NOT NULL DEFAULT 3 CHECK(trust_level BETWEEN 1 AND 5)
+                    );
+                    """)
+                    new_cols = [c["name"] for c in self.conn.execute("PRAGMA table_info(memory)").fetchall()]
+                    common = [c for c in old_cols if c in new_cols]
+                    if common:
+                        col_csv = ", ".join(common)
+                        self.conn.execute(f"INSERT INTO memory ({col_csv}) SELECT {col_csv} FROM memory_old")
+                    self.conn.execute("DROP TABLE memory_old")
+                    # Recreate standard indexes
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_category ON memory(category)")
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_active ON memory(deprecated_at)")
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_file ON memory(file_path)")
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_branch ON memory(branch_id)")
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_evidence ON memory(evidence_type)")
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_created_by ON memory(created_by_agent)")
+                    # Recreate memory_fts triggers (FTS table itself untouched)
+                    self.conn.execute("DROP TRIGGER IF EXISTS memory_ai")
+                    self.conn.execute("DROP TRIGGER IF EXISTS memory_ad")
+                    self.conn.execute("DROP TRIGGER IF EXISTS memory_au")
+                    self.conn.execute("""
+                    CREATE TRIGGER memory_ai AFTER INSERT ON memory BEGIN
+                        INSERT INTO memory_fts(rowid, content, rationale, tags, file_path) VALUES (new.id, new.content, new.rationale, new.tags, new.file_path);
+                    END;
+                    """)
+                    self.conn.execute("""
+                    CREATE TRIGGER memory_ad AFTER DELETE ON memory BEGIN
+                        INSERT INTO memory_fts(memory_fts, rowid, content, rationale, tags, file_path) VALUES('delete', old.id, old.content, old.rationale, old.tags, old.file_path);
+                    END;
+                    """)
+                    self.conn.execute("""
+                    CREATE TRIGGER memory_au AFTER UPDATE ON memory BEGIN
+                        INSERT INTO memory_fts(memory_fts, rowid, content, rationale, tags, file_path) VALUES('delete', old.id, old.content, old.rationale, old.tags, old.file_path);
+                        INSERT INTO memory_fts(rowid, content, rationale, tags, file_path) VALUES (new.id, new.content, new.rationale, new.tags, new.file_path);
+                    END;
+                    """)
+                    # Keep external-content FTS index consistent without dropping it.
+                    self.conn.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')")
+                    self.conn.execute("COMMIT")
+                    self.conn.execute("PRAGMA legacy_alter_table=OFF")
+                except Exception:
+                    try:
+                        self.conn.execute("ROLLBACK")
+                    except Exception:
+                        pass
+                    raise
+                finally:
+                    try:
+                        self.conn.execute("PRAGMA legacy_alter_table=OFF")
+                    except Exception:
+                        pass
+                    try:
+                        self.conn.execute("PRAGMA foreign_keys=ON")
+                    except Exception as e2:
+                        logger.warning("foreign_keys re-enable after memory rebuild failed: %r", e2)
+        except Exception as e:
+            logger.warning("memory table rebuild (convention) failed: %r", e)
+            try:
+                self.conn.execute("PRAGMA foreign_keys=ON")
+            except Exception:
+                pass
 
         # Ensure memory_edges and memory_locks exist
         self.conn.execute("""
@@ -398,7 +518,7 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source_id INTEGER NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
             target_id INTEGER NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
-            relation TEXT NOT NULL CHECK(relation IN ('depends_on', 'implements', 'conflicts_with', 'relates_to')),
+            relation TEXT NOT NULL CHECK(relation IN ('depends_on', 'implements', 'conflicts_with', 'relates_to', 'alternative_to')),
             created_at TEXT NOT NULL,
             UNIQUE(source_id, target_id, relation)
         );
@@ -411,6 +531,55 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             expires_at TEXT NOT NULL
         );
         """)
+
+        # Widen memory_edges.relation CHECK to include 'alternative_to'
+        # (older databases carry the pre-change CHECK; ALTER TABLE cannot
+        # amend a CHECK, so rebuild the table preserving rows). Preserves
+        # source/target/relation/created_at and rowids.
+        try:
+            me_row = self.conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='memory_edges'"
+            ).fetchone()
+            me_sql = (me_row["sql"] if me_row else "") or ""
+            if me_sql and "'alternative_to'" not in me_sql:
+                self.conn.execute("DROP TRIGGER IF EXISTS vec_ei")
+                self.conn.execute("DROP TRIGGER IF EXISTS vec_ed")
+                self.conn.execute("DROP TRIGGER IF EXISTS vec_eu")
+                self.conn.execute("DROP TRIGGER IF EXISTS vec_episodic_ei")
+                self.conn.execute("DROP TRIGGER IF EXISTS vec_episodic_ed")
+                self.conn.execute("DROP TRIGGER IF EXISTS vec_episodic_eu")
+                self.conn.execute("PRAGMA foreign_keys=OFF")
+                self.conn.execute("BEGIN IMMEDIATE")
+                self.conn.execute("ALTER TABLE memory_edges RENAME TO memory_edges_old")
+                self.conn.execute("""
+                CREATE TABLE memory_edges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_id INTEGER NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
+                    target_id INTEGER NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
+                    relation TEXT NOT NULL CHECK(relation IN ('depends_on', 'implements', 'conflicts_with', 'relates_to', 'alternative_to')),
+                    created_at TEXT NOT NULL,
+                    UNIQUE(source_id, target_id, relation)
+                );
+                """)
+                self.conn.execute(
+                    "INSERT INTO memory_edges (id, source_id, target_id, relation, created_at) "
+                    "SELECT id, source_id, target_id, relation, created_at FROM memory_edges_old"
+                )
+                self.conn.execute("DROP TABLE memory_edges_old")
+                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_source ON memory_edges(source_id)")
+                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_target ON memory_edges(target_id)")
+                self.conn.execute("COMMIT")
+                self.conn.execute("PRAGMA foreign_keys=ON")
+        except Exception as e:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            logger.warning("memory_edges relation-check migration failed: %r", e)
+            try:
+                self.conn.execute("PRAGMA foreign_keys=ON")
+            except Exception:
+                pass
 
         # Phase 3: retrieval usage log for usage-pattern learning and proactive suggestions
         self.conn.execute("""
@@ -721,6 +890,9 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
               importance: int = 3, line_start: Optional[int] = None,
               line_end: Optional[int] = None, code_hash: Optional[str] = None,
               git_commit_sha: Optional[str] = None,
+              evidence_type: Optional[str] = None, source_ref: Optional[str] = None,
+              created_by_agent: Optional[str] = None, agent_type: Optional[str] = None,
+              branch_id: Optional[int] = None, trust_level: Optional[int] = None,
               force: bool = False, embed: bool = True) -> int:
         """Write a new fact into the live `memory` table. Returns positive ID,
         or negative ID sentinel if a near-duplicate exists.
@@ -744,6 +916,27 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             raise ValueError(f"category must be one of {sorted(VALID_CATEGORIES)}, got {category!r}")
         if confidence not in VALID_CONFIDENCE:
             raise ValueError(f"confidence must be one of {sorted(VALID_CONFIDENCE)}, got {confidence!r}")
+        # evidence_type: source-level default 'inferred' when None
+        if evidence_type is None:
+            evidence_type = "inferred"
+        else:
+            evidence_type = str(evidence_type).lower().strip()
+            if evidence_type not in VALID_EVIDENCE_TYPES:
+                raise ValueError(f"evidence_type must be one of {sorted(VALID_EVIDENCE_TYPES)}, got {evidence_type!r}")
+        if created_by_agent is None and agent_type:
+            created_by_agent = agent_type
+        source_ref = source_ref.strip() if isinstance(source_ref, str) and source_ref.strip() else (None if source_ref is None else source_ref)
+        if branch_id is not None:
+            try:
+                branch_id = int(branch_id)
+            except (TypeError, ValueError):
+                branch_id = None
+        if trust_level is None:
+            trust_level = 3
+        try:
+            trust_level = max(1, min(5, int(trust_level)))
+        except (TypeError, ValueError):
+            trust_level = 3
         if not content or not content.strip():
             raise ValueError("content must not be empty")
         if looks_like_secret(content) or looks_like_secret(rationale):
@@ -765,7 +958,7 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             )
         if any(
             looks_like_secret(value)
-            for value in (session_id, file_path, code_hash, git_commit_sha)
+            for value in (session_id, file_path, code_hash, git_commit_sha, source_ref)
             if value
         ):
             raise ValueError(
@@ -797,11 +990,13 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         try:
             cur = self.conn.execute(
                 "INSERT INTO memory (category, content, rationale, confidence, created_at, session_id, "
-                "file_path, tags, importance, line_start, line_end, code_hash, git_commit_sha) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "file_path, tags, importance, line_start, line_end, code_hash, git_commit_sha, "
+                "evidence_type, source_ref, created_by_agent, branch_id, trust_level) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (category, content.strip() if content else "", rationale, confidence, now, session_id,
                  norm_file_path, tags,
-                 max(1, min(5, int(importance))), line_start, line_end, code_hash, git_commit_sha),
+                 max(1, min(5, int(importance))), line_start, line_end, code_hash, git_commit_sha,
+                 evidence_type, source_ref, created_by_agent, branch_id, trust_level),
             )
         except sqlite3.IntegrityError:
             # ux_stub_once (#530): a concurrent stub ingest won the race and
@@ -964,6 +1159,11 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                     line_end=f.get("line_end"),
                     code_hash=f.get("code_hash"),
                     git_commit_sha=f.get("git_commit_sha") or batch_sha,
+                    evidence_type=f.get("evidence_type"),
+                    source_ref=f.get("source_ref"),
+                    created_by_agent=f.get("created_by_agent") or f.get("agent_type"),
+                    branch_id=f.get("branch_id"),
+                    trust_level=f.get("trust_level"),
                     force=force,
                     embed=False,
                 )
@@ -993,7 +1193,8 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
                   inherit_provenance: bool = True,
                   line_start: Optional[int] = None, line_end: Optional[int] = None,
                   code_hash: Optional[str] = None,
-                  git_commit_sha: Optional[str] = None) -> int:
+                  git_commit_sha: Optional[str] = None,
+                  evidence_type: Optional[str] = None, source_ref: Optional[str] = None) -> int:
         """Replace a fact, deprecating the original.
 
         PROVENANCE INHERITANCE. By default the replacement inherits the old
@@ -1022,8 +1223,24 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         if confidence not in VALID_CONFIDENCE:
             raise ValueError(f"confidence must be one of {sorted(VALID_CONFIDENCE)}, got {confidence!r}")
         effective_tags = tags.strip() if tags else row["tags"]
+        # evidence_type / source_ref: inherit from old row unless explicitly provided
+        old_et = row["evidence_type"] if "evidence_type" in row.keys() else None
+        old_sr = row["source_ref"] if "source_ref" in row.keys() else None
+        if evidence_type is None:
+            effective_evidence_type = old_et if old_et is not None else "inferred"
+        else:
+            effective_evidence_type = str(evidence_type).lower().strip()
+            if effective_evidence_type not in VALID_EVIDENCE_TYPES:
+                raise ValueError(f"evidence_type must be one of {sorted(VALID_EVIDENCE_TYPES)}, got {effective_evidence_type!r}")
+            if not effective_evidence_type:
+                effective_evidence_type = "inferred"
+        if source_ref is None:
+            effective_source_ref = old_sr
+        else:
+            effective_source_ref = source_ref.strip() if isinstance(source_ref, str) and source_ref.strip() else None
         if (looks_like_secret(new_content) or looks_like_secret(rationale)
-                or looks_like_secret(effective_tags)):
+                or looks_like_secret(effective_tags)
+                or looks_like_secret(effective_source_ref)):
             raise ValueError("refused: this looks like it contains a credential or secret.")
         
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -1060,13 +1277,17 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             self.conn.execute("BEGIN IMMEDIATE")
             cur = self.conn.execute(
                 "INSERT INTO memory (category, content, rationale, confidence, created_at, session_id, "
-                "version, importance, file_path, tags, line_start, line_end, code_hash, git_commit_sha) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (row["category"], new_content.strip(), rationale, confidence, now, session_id,
-                 new_version, row["importance"],
-                 norm_file_path,
-                 effective_tags,
-                 norm_line_start, norm_line_end, norm_code_hash, norm_sha),
+	                "version, importance, file_path, tags, line_start, line_end, code_hash, git_commit_sha, "
+	                "evidence_type, source_ref, branch_id, trust_level) "
+	                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	                (row["category"], new_content.strip(), rationale, confidence, now, session_id,
+	                 new_version, row["importance"],
+	                 norm_file_path,
+	                 effective_tags,
+	                 norm_line_start, norm_line_end, norm_code_hash, norm_sha,
+	                 effective_evidence_type, effective_source_ref,
+	                 row["branch_id"] if "branch_id" in row.keys() else None,
+	                 (row["trust_level"] if ("trust_level" in row.keys() and row["trust_level"] is not None) else 3)),
             )
             new_id = cur.lastrowid
             self.conn.execute(
@@ -1136,6 +1357,24 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             )
             out.append({"id": fid, "status": "deprecated"})
         return out
+
+    def resolve_conflict(self, keep_id: int, deprecate_id: int, rationale: Optional[str] = None) -> Dict[str, Any]:
+        """Reconcile a conflict by deprecating the losing fact and recording a
+        conflicts_with edge from the kept fact to the deprecated one."""
+        if looks_like_secret(rationale):
+            raise ValueError("refused: this looks like it contains a credential or secret in the conflict rationale.")
+        k_row = self.conn.execute("SELECT id FROM memory WHERE id = ?", (keep_id,)).fetchone()
+        d_row = self.conn.execute("SELECT id FROM memory WHERE id = ?", (deprecate_id,)).fetchone()
+        if not k_row:
+            raise ValueError(f"no memory row with id {keep_id}")
+        if not d_row:
+            raise ValueError(f"no memory row with id {deprecate_id}")
+        reason = f"conflict resolved; kept #{keep_id}"
+        if rationale:
+            reason = f"{reason}: {rationale}"
+        self.deprecate(deprecate_id, reason)
+        edge_id = self.link_facts(keep_id, deprecate_id, "conflicts_with")
+        return {"status": "resolved", "keep_id": keep_id, "deprecated_id": deprecate_id, "edge_id": edge_id}
 
     def revision_transaction(self, repo_id: int) -> "RevisionTransaction":
 
@@ -1320,6 +1559,11 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             "code_hash": row["code_hash"] if "code_hash" in keys else None,
             "git_commit_sha": row["git_commit_sha"] if "git_commit_sha" in keys else None,
             "tags": row["tags"] if "tags" in keys else None,
+            "evidence_type": row["evidence_type"] if "evidence_type" in keys and row["evidence_type"] is not None else "inferred",
+            "source_ref": row["source_ref"] if "source_ref" in keys else None,
+            "created_by_agent": row["created_by_agent"] if "created_by_agent" in keys else None,
+            "branch_id": row["branch_id"] if "branch_id" in keys else None,
+            "trust_level": (row["trust_level"] if ("trust_level" in keys and row["trust_level"] is not None) else 3),
         }
 
     def get_state(self, category: Optional[str] = None, limit: Optional[int] = 200,
