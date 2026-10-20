@@ -94,3 +94,45 @@ def test_flag_fact_rejects_secret_in_persisted_metadata(tmp_path):
     finally:
         store.close()
 
+def test_write_rejects_secret_in_persisted_file_metadata(tmp_path):
+    store = MemoryStore(db_path=str(tmp_path / "memory.db"))
+    try:
+        secret = "OPENAI_API_KEY=sk-proj-" + "A" * 40
+        with pytest.raises(ValueError, match="secret"):
+            store.write(
+                category="component",
+                content="Safe deployment fact.",
+                session_id=secret,
+                force=True,
+                embed=False,
+            )
+        with pytest.raises(ValueError, match="secret"):
+            store.write(
+                category="component",
+                content="Safe deployment fact.",
+                file_path="src/" + "github_pat_" + "A" * 40,
+                force=True,
+                embed=False,
+            )
+    finally:
+        store.close()
+
+
+def test_supersede_rejects_secret_in_replacement_metadata(tmp_path):
+    store = MemoryStore(db_path=str(tmp_path / "memory.db"))
+    try:
+        fact_id = store.write(
+            category="component",
+            content="Safe original deployment fact.",
+            force=True,
+            embed=False,
+        )
+        with pytest.raises(ValueError, match="secret"):
+            store.supersede(
+                fact_id,
+                "Safe revised deployment fact.",
+                session_id="xoxb-" + "A" * 40,
+            )
+    finally:
+        store.close()
+
