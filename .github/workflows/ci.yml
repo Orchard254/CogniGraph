@@ -85,8 +85,13 @@ jobs:
 
       - name: Verify built wheel contains runtime modules and schema resources
         run: |
-          python -m pip wheel --no-deps --no-build-isolation . --wheel-dir "$RUNNER_TEMP/cognigraph-wheel"
-          python - <<'PY'
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            PYTHON=venv/Scripts/python
+          else
+            PYTHON=venv/bin/python
+          fi
+          "$PYTHON" -m pip wheel --no-deps --no-build-isolation . --wheel-dir "$RUNNER_TEMP/cognigraph-wheel"
+          "$PYTHON" - <<'PY'
           from pathlib import Path
           from zipfile import ZipFile
 
