@@ -628,6 +628,13 @@ def memory_release_lock(resource: str, locked_by: str) -> dict:
 
 
 @mcp.tool()
+def memory_lock_status(resource: str) -> dict:
+    """Return the active lease on a resource, if any (lock_status)."""
+    with _store() as _s:
+        status = _s.lock_status(resource)
+    return {"resource": resource, "status": status, "valid": status is not None}
+
+@mcp.tool()
 def memory_validate_constraints(file_paths: List[str]) -> dict:
     """Validate stored constraints against the files about to be edited; returns constraint_checks and verdict."""
     with _store() as _s:

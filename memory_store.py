@@ -1497,9 +1497,18 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
         return [dict(r) for r in rows]
 
     def acquire_lock(self, resource: str, locked_by: str, ttl_seconds: int = 60) -> bool:
+        if not resource or not locked_by:
+            return False
+        # Coerce non-numeric TTL; reject non-positive.
+        try:
+            ttl = int(ttl_seconds)
+        except (TypeError, ValueError):
+            ttl = 60
+        if ttl <= 0:
+            ttl = 1
         now_dt = datetime.datetime.now(datetime.timezone.utc)
         now_str = now_dt.isoformat()
-        expires_str = (now_dt + datetime.timedelta(seconds=ttl_seconds)).isoformat()
+        expires_str = (now_dt + datetime.timedelta(seconds=ttl)).isoformat()
 
         # Delete-check-insert must be atomic: two agents racing here must not
         # both observe "no row" and both INSERT. BEGIN IMMEDIATE serializes.
@@ -1541,11 +1550,53 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin):
             raise
 
     def release_lock(self, resource: str, locked_by: str) -> bool:
-        cur = self.conn.execute(
-            "DELETE FROM memory_locks WHERE resource = ? AND locked_by = ?",
-            (resource, locked_by),
-        )
-        return cur.rowcount > 0
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.conn.execute(
+                "SELECT locked_by FROM memory_locks WHERE resource = ?",
+                (resource,),
+            ).fetchone()
+            if row is None or row["locked_by"] != locked_by:
+                self.conn.execute("COMMIT")
+                return False
+            self.conn.execute(
+                "DELETE FROM memory_locks WHERE resource = ? AND locked_by = ?",
+                (resource, locked_by),
+            )
+            self.conn.execute("COMMIT")
+            return True
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+
+    def lock_status(self, resource: str) -> Optional[Dict[str, Any]]:
+        now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        row = self.conn.execute(
+            "SELECT resource, locked_by, locked_at, expires_at FROM memory_locks WHERE resource = ?",
+            (resource,),
+        ).fetchone()
+        if not row:
+            return None
+        if row["expires_at"] <= now_str:
+            return None
+        return {
+            "resource": row["resource"],
+            "locked_by": row["locked_by"],
+            "locked_at": row["locked_at"],
+            "expires_at": row["expires_at"],
+        }
+
+    def validate_lease(self, resource: str, locked_by: str) -> bool:
+        status = self.lock_status(resource)
+        return bool(status and status["locked_by"] == locked_by)
+
+    def _enforce_lock(self, resource: str, locked_by: str) -> None:
+        status = self.lock_status(resource)
+        if status and status["locked_by"] != locked_by:
+            raise PermissionError(f"resource {resource!r} is locked by {status['locked_by']!r}")
 
     def _row_to_dict(self, row: sqlite3.Row) -> Dict[str, Any]:
         keys = row.keys()
