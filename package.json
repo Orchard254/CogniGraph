@@ -38,6 +38,8 @@
     "__init__.py",
     "server.py",
     "memory_store.py",
+    "pm_backup.py",
+    "corpus_hygiene.py",
     "pm_common.py",
     "pm_search.py",
     "pm_context.py",
