@@ -43,11 +43,13 @@ def get_plugin_context(project_root: str, query: str, max_chars: int = 4500) -> 
         markdown = store.get_context(
             task, limit=5, max_chars=cap, agent_type="opencode"
         )
+        retrieval_id = getattr(store, "_last_retrieval_id", None)
     finally:
         store.close()
     if "*No matching facts found in memory.*" in markdown:
         return {"context_markdown": "", "status": "no_matches"}
-    return {"context_markdown": markdown[:cap], "status": "ok"}
+    return {"context_markdown": markdown[:cap], "status": "ok",
+            "retrieval_id": retrieval_id}
 
 
 def main(argv=None) -> int:
