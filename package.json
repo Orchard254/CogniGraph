@@ -41,6 +41,7 @@
     "pm_backup.py",
     "corpus_hygiene.py",
     "pm_common.py",
+    "pm_feedback.py",
     "pm_search.py",
     "pm_context.py",
     "pm_lifecycle.py",
@@ -67,7 +68,8 @@
     "install_opencode.py",
     "opencode_context.py",
     "integrations/opencode-v2/index.ts.template",
-    "OPENCODE_PLUGIN.md"
+    "OPENCODE_PLUGIN.md",
+    "docs/FEEDBACK_LEARNING.md"
   ],
   "dependencies": {},
   "devDependencies": {}

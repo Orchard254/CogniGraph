@@ -6,15 +6,20 @@
    Then STOP — no read/TodoWrite before memory_stats → memory_query(intent) → memory_prepare_task(intent, file_paths)
 
 At the start of EVERY session:
-0. If cognigraph tools are not available at session start, STOP and tell the user the memory server is not connected. Do not proceed without memory.
+0. Prefer CogniGraph MCP for deep retrieval. In OpenCode V2, a native plugin may already inject a CogniGraph context briefing; do not block ordinary work solely because MCP tools are absent. If no memory connection exists, disclose that limitation and verify context directly from code.
 1. Call `memory_stats` to confirm the database location and counts.
-2. Call `memory_query` BEFORE reading or editing any file. If memory has the answer, trust it — do not re-explore code you already know. Pass `intent` (fix/implement/refactor/optimize/...) so ranking boosts the right categories; it is auto-detected from the text if omitted.
+2. Call `memory_query` when MCP is available; in OpenCode the native briefing may satisfy initial context. Treat memory as evidence to check against current code, never as unquestionable truth. Pass `intent` (fix/implement/refactor/optimize/...) so ranking boosts the right categories; it is auto-detected from the text if omitted.
 3. Call `memory_prepare_task(intent, file_paths)` before writing any code.
 4. Call `memory_get_file_context(file_path)` while planning an approach to a file, and before modifying it — it now includes the file's code structure (functions/classes/imports) from the structural index.
 
 LLM priming (context retrieval):
 - Prefer `memory_get_context(query, agent_type=..., max_tokens=..., intent=...)` for a single Markdown briefing; it auto-detects intent, expands related constraints/decisions, and prioritizes critical facts.
 - Before touching 2+ files together, call `memory_check_safety(file_paths)` for the dependency risk matrix. `memory_prepare_task` already embeds file impacts, dependency risks, and the test baseline.
+
+Learning (task outcomes):
+- Retrieval tools return a `retrieval_id`. Use `memory_rate_context(retrieval_id, ratings)` only when the evidence is attributable to specific returned fact IDs. Ratings: `helpful`, `irrelevant`, `incorrect`.
+- Never mark facts helpful merely because they were retrieved, seen, or used in generated code. For a user report use `evidence_type='user'` only when the user explicitly supplied that judgement; for `evidence_type='test'` include the command, exit code 0, and current HEAD commit SHA, and make sure the result actually supports the rated fact.
+- `evidence_type='agent'` is available for diagnostic annotations but **does not train ranking**. Report corrections through `memory_supersede` or `memory_flag_fact` when appropriate, even without a rating.
 
 Learning (usage patterns):
 - Every `memory_query` retrieval is logged. Facts retrieved repeatedly for similar queries are automatically boosted in future rankings (caps at 1.15x).
@@ -54,4 +59,4 @@ Code graph (one-hop queries — ask these mid-reasoning instead of re-reading fi
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.
 - If `memory_cli.py wire` reports `WIRED_WITH_ERRORS`, fix `config_errors` first - the listed config was not written (wire.py:207-222).
-<!-- cognigraph-template sha256:013d78febaf7fbc833d1b8f2a523e816f1aef8cc2aa5b3bb10a296492b3b9215 -->
+<!-- cognigraph-template sha256:2834e3249a1388e2fdb2f3dd38d251f1f0b7d08f0b683b6f9e3bf57a13f393ef -->

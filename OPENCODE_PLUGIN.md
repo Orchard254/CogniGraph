@@ -41,7 +41,10 @@ normal migration command when convenient.
 3. On tool-driven continuations, the plugin injects the same cached briefing
    into the new outgoing request without re-querying SQLite.
 4. A new user task invalidates that session's cache. Sessions are isolated by ID.
-5. If memory is unavailable or retrieval times out, no context is injected;
+5. Successful retrievals include a receipt ID that agents may use to report
+   attributable feedback through the existing MCP interface. Repeated exposure
+   is never treated as evidence of correctness.
+6. If memory is unavailable or retrieval times out, no context is injected;
    coding continues normally and the original MCP tools still work.
 
 The bridge retrieves from the target project's existing memory database (and may

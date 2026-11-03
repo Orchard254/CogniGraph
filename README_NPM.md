@@ -27,6 +27,14 @@ The easiest way to add persistent memory to any AI coding agent:
 
 That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 18 (package.json engines). On first run the wrapper creates venv/, installs requirements.txt (only mcp is hard-required; sqlite-vec/tree-sitter*/fastembed/numpy lanes degrade with a warning), and launches server.py (index.js:98-132,171-232), guarded by a pre-spawn py_compile check and a 5 s startup watchdog (index.js:245-285). postinstall.js is best-effort and leaves a .postinstall-incomplete marker re-verified on next startup (index.js:175-183).
 
+## Relevance learning
+
+Context retrieval now returns a `retrieval_id`. Agents can record
+attributable `helpful`, `irrelevant`, and `incorrect` memory outcomes with
+`memory_rate_context`; only explicit user reports and metadata-checked test
+evidence influence future ranking. See
+[docs/FEEDBACK_LEARNING.md](docs/FEEDBACK_LEARNING.md).
+
 ## ✨ Features
 
 - **Universal Compatibility**: Works with Trae, Windsurf, Cursor, Claude Desktop, Zed, Kiro, VS Code, ZCode, and any MCP-compatible IDE
