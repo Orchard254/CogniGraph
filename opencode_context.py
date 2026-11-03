@@ -14,16 +14,48 @@ MAX_QUERY_CHARS = 4000
 MAX_CONTEXT_CHARS = 6000
 
 
-def get_plugin_context(project_root: str, query: str, max_chars: int = 4500) -> dict:
+# Limit automatic file context to source files; never infer secrets from tool output.
+_SOURCE_SUFFIXES = frozenset({
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".cs",
+    ".c", ".h", ".hpp", ".cpp", ".rb", ".php", ".vue", ".svelte", ".sql",
+})
+
+
+def _safe_project_file(root: Path, candidate: str) -> str | None:
+    """Return a relative project path, never a path outside this workspace."""
+    if not isinstance(candidate, str) or not candidate or len(candidate) > 512:
+        return None
+    try:
+        resolved = (root / candidate).resolve()
+        if not resolved.is_relative_to(root) or not resolved.is_file():
+            return None
+        relative = resolved.relative_to(root)
+        if relative.suffix.lower() not in _SOURCE_SUFFIXES:
+            return None
+        if any(part.startswith(".") or part.lower() in ("node_modules", "vendor")
+               for part in relative.parts):
+            return None
+        return relative.as_posix()
+    except (ValueError, OSError, RuntimeError):
+        return None
+
+
+def get_plugin_context(
+    project_root: str, query: str, max_chars: int = 4500,
+    file_paths: list[str] | None = None,
+) -> dict:
     root = Path(project_root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError("Project root is not a directory")
     task = str(query or "").strip()[:MAX_QUERY_CHARS]
-    if not task:
+    if file_paths is not None and not isinstance(file_paths, list):
+        raise ValueError("file_paths must be a list")
+    requested_files = file_paths or []
+    if not task and not requested_files:
         return {"context_markdown": "", "status": "empty_query"}
 
-    # Never search the CogniGraph installation folder or a parent project as a
-    # fallback: the active workspace is the only valid memory source.
+    # Never search an adjacent repository or the CogniGraph installation
+    # directory as a fallback.
     canonical = root / ".cognigraph" / "memory.db"
     legacy = root / ".project-memory" / "memory.db"
     db = canonical if canonical.is_file() else legacy
@@ -31,7 +63,7 @@ def get_plugin_context(project_root: str, query: str, max_chars: int = 4500) -> 
         return {"context_markdown": "", "status": "no_project_memory"}
 
     from pm_common import looks_like_secret
-    if looks_like_secret(task):
+    if task and looks_like_secret(task):
         # Automatic prompt handling must not persist credentials in usage logs.
         return {"context_markdown": "", "status": "sensitive_query"}
 
@@ -40,15 +72,39 @@ def get_plugin_context(project_root: str, query: str, max_chars: int = 4500) -> 
     cap = max(256, min(int(max_chars), MAX_CONTEXT_CHARS))
     store = MemoryStore(str(db))
     try:
-        markdown = store.get_context(
-            task, limit=5, max_chars=cap, agent_type="opencode"
-        )
-        retrieval_id = getattr(store, "_last_retrieval_id", None)
+        parts = []
+        retrieval_id = None
+        if task:
+            markdown = store.get_context(
+                task, limit=5, max_chars=cap, agent_type="opencode"
+            )
+            retrieval_id = getattr(store, "_last_retrieval_id", None)
+            if "*No matching facts found in memory.*" not in markdown:
+                parts.append(markdown[:cap])
+
+        # File focus comes only from structured successful IDE tool calls,
+        # not arbitrary text scraped from shell output. Re-validate here.
+        visited = set()
+        for candidate in reversed(requested_files[-2:]):
+            relative = _safe_project_file(root, candidate)
+            if not relative or relative in visited:
+                continue
+            visited.add(relative)
+            brief = store.get_file_context(relative)
+            if "UNMAPPED in memory" in brief:
+                continue
+            # Prioritize the most recently used file, fit within one cap.
+            remaining = cap - sum(len(p) for p in parts) - len(parts) * 2
+            if remaining < 160:
+                break
+            parts.append(brief[:remaining])
+
     finally:
         store.close()
-    if "*No matching facts found in memory.*" in markdown:
+    text = "\n\n".join(parts)[:cap]
+    if not text:
         return {"context_markdown": "", "status": "no_matches"}
-    return {"context_markdown": markdown[:cap], "status": "ok",
+    return {"context_markdown": text, "status": "ok",
             "retrieval_id": retrieval_id}
 
 
@@ -61,7 +117,10 @@ def main(argv=None) -> int:
         request = json.load(sys.stdin)
         if not isinstance(request, dict) or not isinstance(request.get("query"), str):
             raise ValueError("Input must be a JSON object with a string query")
-        response = get_plugin_context(args.project_root, request["query"], args.max_chars)
+        response = get_plugin_context(
+            args.project_root, request["query"], args.max_chars,
+            file_paths=request.get("file_paths"),
+        )
         sys.stdout.write(json.dumps(response) + "\n")
         return 0
     except (ValueError, OSError, RuntimeError, KeyError, ImportError) as exc:

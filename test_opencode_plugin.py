@@ -28,6 +28,92 @@ class OpenCodePluginTests(unittest.TestCase):
             self.assertIn('ctx.session.hook("prompt"', code)
             self.assertNotIn("__COGNIGRAPH_BRIDGE_JSON__", code)
 
+    def test_file_context_scoped_to_existing_project_source(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            db = root / ".cognigraph/memory.db"
+            db.parent.mkdir()
+            db.touch()
+            source = root / "src/main.py"
+            source.parent.mkdir()
+            source.write_text("x = 1\n")
+            (root / ".env").write_text("secret=example")
+            seen = []
+            class FakeStore:
+                def __init__(self, path):
+                    seen.append(path)
+                def get_file_context(self, name):
+                    seen.append(name)
+                    return "file briefing for " + name
+                def close(self):
+                    seen.append("closed")
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False)
+            }):
+                result = get_plugin_context(
+                    d, "", file_paths=[
+                        "../escape.py", "/not/the/project.py", ".env",
+                        "src/main.py", "src/main.py",
+                    ], max_chars=1200)
+            self.assertEqual(result["status"], "ok")
+            self.assertIn("file briefing for src/main.py", result["context_markdown"])
+            self.assertEqual(seen[1:-1], ["src/main.py"])
+            self.assertEqual(seen[-1], "closed")
+
+    def test_external_existing_file_is_not_used_as_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "project"
+            root.mkdir()
+            db = root / ".cognigraph/memory.db"
+            db.parent.mkdir()
+            db.touch()
+            outside = parent / "outside.py"
+            outside.write_text("private_setting = 3\n")
+            seen = []
+            class FakeStore:
+                def __init__(self, path):
+                    seen.append("opened")
+                def get_file_context(self, name):
+                    seen.append(name)
+                    return "not allowed"
+                def close(self):
+                    seen.append("closed")
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False)
+            }):
+                result = get_plugin_context(
+                    str(root), "", file_paths=["../outside.py"], max_chars=1200)
+            self.assertEqual(result["status"], "no_matches")
+            self.assertEqual(seen, ["opened", "closed"])
+
+    def test_latest_file_gets_first_place_in_small_context_budget(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            db = root / ".cognigraph/memory.db"
+            db.parent.mkdir()
+            db.touch()
+            for name in ("a.py", "b.py"):
+                (root / name).write_text("pass\n")
+            class FakeStore:
+                def __init__(self, path):
+                    pass
+                def get_file_context(self, name):
+                    return name + " " + ("memory " * 200)
+                def close(self):
+                    pass
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False)
+            }):
+                result = get_plugin_context(
+                    d, "", file_paths=["a.py", "b.py"], max_chars=256)
+            self.assertEqual(result["status"], "ok")
+            self.assertTrue(result["context_markdown"].startswith("b.py "))
+            self.assertLessEqual(len(result["context_markdown"]), 256)
+
     def test_custom_plugin_not_overwritten(self):
         with tempfile.TemporaryDirectory() as d:
             custom = Path(d) / ".opencode/plugins/cognigraph/index.ts"

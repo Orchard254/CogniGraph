@@ -84,9 +84,10 @@ track which citations were actually referenced in an edit, and associate
 tests with those files and facts. Require a user confirmation or a
 machine-checkable proof before raising a fact's credibility.
 
-**Phase B — progressive context.** Update the OpenCode integration when
-the active file or task scope changes, fetch file-specific dependencies
-just in time, and avoid redundant context on long conversations.
+**Phase B — progressive context (partially implemented).** The OpenCode V2
+plugin now refreshes file-specific memory after successful read/edit/write tool
+calls, while keeping the task briefing cached. Next priorities are external file
+changes, dependency-aware pre-edit validation, and source-fact validity checks.
 
 **Phase C — proactive relationships.** Use co-use and verified edit paths
 to discover candidate dependency links, retain evidence separately,
