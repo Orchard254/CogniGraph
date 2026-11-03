@@ -20,7 +20,10 @@ let input = '';
 process.stdin.on('data', c => input += c);
 process.stdin.on('end', () => {
   fs.appendFileSync(process.env.COGNIGRAPH_TEST_CALLS, '1');
-  process.stdout.write(JSON.stringify({context_markdown: 'context for ' + JSON.parse(input).query}));
+  const req = JSON.parse(input);
+  process.stdout.write(JSON.stringify({context_markdown: req.file_paths?.length
+    ? 'focused files: ' + req.file_paths.join(',')
+    : 'context for ' + req.query}));
 });
 `);
     let code = fs.readFileSync(template, 'utf8')
@@ -33,7 +36,8 @@ process.stdin.on('end', () => {
     const hooks = new Map();
     const ctx = {
       location: { directory: root },
-      session: { async hook(name, callback) { hooks.set(name, callback); return { async dispose() {} }; } }
+      session: { async hook(name, callback) { hooks.set(name, callback); return { async dispose() {} }; } },
+      tool: { async hook(name, callback) { hooks.set(name, callback); return { async dispose() {} }; } }
     };
     await plugin.setup(ctx);
     hooks.get('prompt')({sessionID: 's1', prompt: {text: 'fix login'}});
@@ -52,11 +56,41 @@ process.stdin.on('end', () => {
     assert.match(third.system[0].text, /context for add cache/);
     assert.equal(fs.readFileSync(countFile, 'utf8').length, 2);
 
+    const toolHook = hooks.get('execute.after');
+    // A completed read changes the focus and refreshes just the file context.
+    toolHook({sessionID:'s1', status:'completed', tool:'read',
+      input:{filePath:'src/auth.ts'}});
+    const focused = req();
+    await hooks.get('context')(focused);
+    assert.match(focused.system[0].text, /focused files: src\/auth.ts/);
+    assert.equal(fs.readFileSync(countFile, 'utf8').length, 3);
+
+    // The same read should not trigger another retrieval.
+    toolHook({sessionID:'s1', status:'completed', tool:'read',
+      input:{filePath:'src/auth.ts'}});
+    await hooks.get('context')(req());
+    assert.equal(fs.readFileSync(countFile, 'utf8').length, 3);
+
+    // Edits always refresh the active file briefing, even for the same path.
+    toolHook({sessionID:'s1', status:'completed', tool:'edit',
+      input:{filePath:'src/auth.ts'}});
+    await hooks.get('context')(req());
+    assert.equal(fs.readFileSync(countFile, 'utf8').length, 4);
+
+    // Failed tools and commands without a structured filename cannot focus.
+    toolHook({sessionID:'s1', status:'error', tool:'read',
+      input:{filePath:'src/passwords.ts'}});
+    toolHook({sessionID:'s1', status:'completed', tool:'bash',
+      input:{command:'cat src/passwords.ts'}});
+    await hooks.get('context')(req());
+    assert.equal(fs.readFileSync(countFile, 'utf8').length, 4);
+
     hooks.get('prompt')({sessionID: 's2', prompt: {text: 'fix login'}});
     const other = {sessionID: 's2', messages: [], system:[]};
     await hooks.get('context')(other);
     assert.match(other.system[0].text, /context for fix login/);
-    assert.equal(fs.readFileSync(countFile, 'utf8').length, 3);
+    assert.equal(fs.readFileSync(countFile, 'utf8').length, 5);
+    assert.doesNotMatch(other.system[0].text, /focused files/);
   } finally {
     if (originalCountPath === undefined) delete process.env.COGNIGRAPH_TEST_CALLS;
     else process.env.COGNIGRAPH_TEST_CALLS = originalCountPath;
