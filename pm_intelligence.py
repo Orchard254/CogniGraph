@@ -180,9 +180,18 @@ class IntelligenceMixin:
                 meta.append("source=" + status.lower())
             if flag:
                 meta.append("flagged")
-            line = "- [" + " | ".join(meta) + "] " + _safe_line(fact.get("content"), 220)
-            if sum(len(x) + 1 for x in lines) + len(line) + 1 > char_budget:
-                # Preserve meaningful boundaries and exact receipt semantics.
+            prefix = "- [" + " | ".join(meta) + "] "
+            used = sum(len(x) + 1 for x in lines)
+            room = char_budget - used - len(prefix) - 1
+            if room < 48:
+                # At very small budgets, skip rather than emitting an
+                # unrecognizable fragment that looks like a complete fact.
+                continue
+            # Show a clearly marked excerpt instead of dropping every fact
+            # when a tight budget cannot fit the full content.
+            content = _safe_line(fact.get("content"), min(220, room - 3))
+            line = prefix + content
+            if used + len(line) + 1 > char_budget:
                 continue
             lines.append(line)
             if source == "memory":
