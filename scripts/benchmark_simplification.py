@@ -62,11 +62,15 @@ def _rank_items(store: MemoryStore, items: list[dict], profile: str, agent_type:
             start = time.perf_counter()
             results = store.query_hybrid(
                 query, agent_type=agent_type, limit=10,
-                log_usage=False, expand_graph=False,
+                log_usage=False, expand_graph=False, explain=True,
             )
             times_ms.append((time.perf_counter() - start) * 1000)
+            # Disabled lanes still create zero-score candidates in the
+            # existing RRF implementation. They are NOT real matches in
+            # an ablated profile and must not count toward recall.
+            active = [row for row in results if row.get("fused_score", 0) > 0]
             rank = next(
-                (i for i, row in enumerate(results, 1)
+                (i for i, row in enumerate(active, 1)
                  if row.get("source") == "memory" and row["id"] == item["fact_id"]),
                 None,
             )
