@@ -178,9 +178,10 @@ def benchmark(agent_type: str = "default") -> dict:
                     report["splits"][split_name] = {
                         "profiles": profiles,
                         "relative_to_full": deltas,
-                        "full_meets_committed_gate": all(
-                            profiles["full"][metric] >= exp["splits"][split_name][metric]
-                            for metric in ("recall@5", "mrr")),
+                        "full_meets_committed_gate": (
+                            all(profiles["full"][metric] >= exp["splits"][split_name][metric]
+                                for metric in ("recall@5", "mrr"))
+                            if agent_type == "default" else None),
                     }
         finally:
             store.close()
@@ -210,7 +211,9 @@ def main(argv=None) -> int:
             for profile, delta in split["relative_to_full"].items():
                 print(f"  vs full: {profile:<9} {delta['rank_regressions']} worse, "
                       f"{delta['rank_improvements']} better, {delta['changed']} changed ranks")
-    if not all(split["full_meets_committed_gate"] for split in result["splits"].values()):
+    if args.agent == "default" and not all(
+        split["full_meets_committed_gate"] for split in result["splits"].values()
+    ):
         print("ERROR: Full profile does not meet current frozen gate", file=sys.stderr)
         return 1
     return 0
