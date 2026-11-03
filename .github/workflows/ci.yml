@@ -76,9 +76,20 @@ jobs:
       - name: Install Python dependencies (cache hit)
         if: steps.cache-venv.outputs.cache-hit == 'true'
         run: |
+          # Restored venv executables can point at removed Python patch-version
+          # paths on GitHub-hosted runners. Repair the cached environment
+          # before invoking pip instead of failing with "bad interpreter".
           if [ "$RUNNER_OS" = "Windows" ]; then
+            if ! venv/Scripts/python --version >/dev/null 2>&1 ||
+               ! venv/Scripts/pip --version >/dev/null 2>&1; then
+              python -m venv --clear venv
+            fi
             venv/Scripts/pip install -e ".[dev]"
           else
+            if ! venv/bin/python --version >/dev/null 2>&1 ||
+               ! venv/bin/pip --version >/dev/null 2>&1; then
+              python -m venv --clear venv
+            fi
             venv/bin/pip install -e ".[dev]"
           fi
         shell: bash
