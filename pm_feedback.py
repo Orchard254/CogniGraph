@@ -97,7 +97,7 @@ class FeedbackMixin:
             except (KeyError, TypeError, ValueError) as e:
                 raise ValueError("fact_id must be an integer") from e
             rating = item.get("rating")
-            if rating not in _FEEDBACK_VALUES or fact_id not in retrieved or fact_id in seen:
+            if not isinstance(rating, str) or rating not in _FEEDBACK_VALUES or fact_id not in retrieved or fact_id in seen:
                 raise ValueError("rating must be valid and fact_id must be unique and in this retrieval")
             active = self.conn.execute(
                 "SELECT 1 FROM memory WHERE id=? AND deprecated_at IS NULL", (fact_id,)
@@ -108,26 +108,30 @@ class FeedbackMixin:
             seen.add(fact_id)
 
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        recorded = 0
         self.conn.execute("BEGIN IMMEDIATE")
         try:
             for fid, rating in normalized:
-                self.conn.execute(
+                cur = self.conn.execute(
                     """INSERT INTO memory_relevance_feedback
                     (retrieval_id, fact_id, rating, evidence_type, evidence_ref, recorded_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(retrieval_id, fact_id) DO UPDATE SET
                        rating=excluded.rating, evidence_type=excluded.evidence_type,
-                       evidence_ref=excluded.evidence_ref, recorded_at=excluded.recorded_at""",
+                       evidence_ref=excluded.evidence_ref, recorded_at=excluded.recorded_at
+                    WHERE NOT (memory_relevance_feedback.evidence_type IN ('user','test')
+                               AND excluded.evidence_type='agent')""",
                     (rid, fid, rating, evidence_type, evidence_ref or None, now),
                 )
+                recorded += cur.rowcount
             self.conn.execute("COMMIT")
         except Exception:
             self.conn.execute("ROLLBACK")
             raise
         return {
             "retrieval_id": rid,
-            "recorded": len(normalized),
-            "ranking_effect": evidence_type in ("user", "test"),
+            "recorded": recorded,
+            "ranking_effect": recorded > 0 and evidence_type in ("user", "test"),
             "note": "Agent-only ratings are observational and do not alter ranking.",
         }
 
