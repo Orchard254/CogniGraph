@@ -85,7 +85,7 @@ def get_plugin_context(
         # File focus comes only from structured successful IDE tool calls,
         # not arbitrary text scraped from shell output. Re-validate here.
         visited = set()
-        for candidate in requested_files[-2:]:
+        for candidate in reversed(requested_files[-2:]):
             relative = _safe_project_file(root, candidate)
             if not relative or relative in visited:
                 continue
