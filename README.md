@@ -40,6 +40,15 @@ Reported outcomes tune future retrievals for similar tasks, with bounded
 boosts, negative feedback, and time decay. Inspect the learning history using
 `memory_relevance_feedback_stats`. See [Feedback Learning](docs/FEEDBACK_LEARNING.md).
 
+## Task outcome review
+
+After a coding task, `memory_record_task_outcome(retrieval_id, changed_files, test_evidence)`
+links reported file edits to *previously retrieved* fact IDs and queues only those
+facts for review. `memory_task_outcome_review_queue` shows what needs attribution.
+**Neither a reported passing test nor an edit automatically boosts a memory.**
+The existing `memory_rate_context` requires evidence specific to each fact.
+See [Task Outcome Review](docs/TASK_OUTCOMES.md).
+
 ## Key Capabilities
 
 1. **Hybrid RRF Search Engine**: Combines SQLite FTS5 BM25 keyword matching with term-vector similarity via Reciprocal Rank Fusion ($RRF = \frac{1}{5 + rank_{bm25}} + \frac{1}{5 + rank_{vec}}$).
@@ -153,7 +162,7 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 28 tools.
+The server registers 30 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -163,6 +172,8 @@ The server registers 28 tools.
 | `memory_get_context` | `query`, `agent_type?`, `max_tokens?`, `limit?`, `intent?` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. |
 | `memory_rate_context` | `retrieval_id`, `ratings`, `evidence_type?`, `evidence_ref?`, `verification_evidence?` | Record helpful, irrelevant, or incorrect fact feedback against a retrieval ID. |
 | `memory_relevance_feedback_stats` | — | Summarize relevance feedback counts by evidence type and rating. |
+| `memory_record_task_outcome` | `retrieval_id`, `changed_files`, `test_evidence?` | Log a completed coding task's edited files and optional test metadata, and suggest which retrieved facts need review. Does not alter memory ranking or verify that tests actually ran. |
+| `memory_task_outcome_review_queue` | `limit?` | List recently touched, previously retrieved facts awaiting explicit outcome attribution. No automatic reinforcement. |
 | `memory_get_file_context` | `file_path` | Call while planning an approach to a file — and before editing it: its symbols, anchored facts, callers, and call-graph edges. |
 | `memory_check_safety` | `file_paths` | Call before a multi-file refactor: dependency risk matrix across the files you're about to change. |
 | `memory_check_security` | `file_paths` | Heuristic security scan: flag sensitive/PII/dangerous patterns (password, secret, token, eval, exec, shell, SQL interpolation) with file:line, plus cross-file impact. |

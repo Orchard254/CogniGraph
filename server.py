@@ -551,6 +551,30 @@ def memory_relevance_feedback_stats() -> dict:
 
 
 @mcp.tool()
+def memory_record_task_outcome(retrieval_id: int, changed_files: List[str],
+                               test_evidence: dict | None = None) -> dict:
+    """Log a completed coding task's edited files and optional test metadata, and suggest which retrieved facts need review. Does not alter memory ranking or verify that tests actually ran."""
+    _ensure_first_time_setup()
+    with _store() as store:
+        try:
+            return store.record_task_outcome(
+                retrieval_id, changed_files, test_evidence=test_evidence)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+
+@mcp.tool()
+def memory_task_outcome_review_queue(limit: int = 10) -> dict:
+    """List recently touched, previously retrieved facts awaiting explicit outcome attribution. No automatic reinforcement."""
+    _ensure_first_time_setup()
+    with _store() as store:
+        try:
+            return store.task_outcome_review_queue(limit)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+
+@mcp.tool()
 def memory_get_file_context(file_path: str) -> dict:
     """Call while planning an approach to a file — and before editing it: its symbols, anchored facts, callers, and call-graph edges."""
     _ensure_first_time_setup()  # Auto-bootstrap on first use
