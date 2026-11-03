@@ -1,7 +1,9 @@
 """Tests for evidence-aware relevance learning (uses a small SQLite fixture)."""
 import datetime
 import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 
 from pm_feedback import FeedbackMixin
 
@@ -106,6 +108,37 @@ class RelevanceFeedbackTests(unittest.TestCase):
         boost = s._feedback_boost("fix oauth session login refresh")
         self.assertLessEqual(boost[1], 1.2)
         self.assertGreaterEqual(boost[2], 0.72)
+
+    def test_live_store_retrieval_ranking_changes_with_feedback(self):
+        from memory_store import MemoryStore
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "memory.db")
+            store = MemoryStore(path)
+            try:
+                a = store.write("decision", "OAuth session refresh login uses a server cookie",
+                                force=True, embed=False)
+                b = store.write("decision", "OAuth session refresh login needs a token",
+                                force=True, embed=False)
+                store._query_encode = lambda text: None
+                q = "fix OAuth session refresh login"
+                first = store.query_hybrid(q, limit=5, expand_graph=False,
+                                           log_usage=True, agent_type="default", explain=True)
+                receipt = store._last_retrieval_id
+                self.assertIsNotNone(receipt)
+                scores_before = {f["id"]: f["fused_score"] for f in first if f["source"] == "memory"}
+                self.assertIn(a, scores_before)
+                self.assertIn(b, scores_before)
+                store.record_relevance_feedback(receipt, [
+                    {"fact_id": a, "rating": "helpful"},
+                    {"fact_id": b, "rating": "incorrect"},
+                ], evidence_type="user")
+                after = store.query_hybrid(q, limit=5, expand_graph=False,
+                                           log_usage=False, agent_type="default", explain=True)
+                scores_after = {f["id"]: f["fused_score"] for f in after if f["source"] == "memory"}
+                self.assertGreater(scores_after[a], scores_before[a])
+                self.assertLess(scores_after[b], scores_before[b])
+            finally:
+                store.close()
 
 
 if __name__ == "__main__":
