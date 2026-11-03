@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Any, Tuple
 
 from corpus_hygiene import STUB_PREFIXES
 from pm_common import (
-    logger, tokenize_text, MAX_LIMIT,
+    logger, tokenize_text, looks_like_secret, MAX_LIMIT,
     _encode, _blob_to_vec, _cosine_sim, _vec_to_blob,
     project_fields,
 )
@@ -259,13 +259,16 @@ class SearchMixin:
 
     def _log_usage(self, query_text, intent, agent_type, retrieved_fact_ids, result_count, session_id=None):
         """Record one retrieval event for usage-pattern learning."""
+        if looks_like_secret(query_text):
+            return None  # Do not persist credential-bearing prompts in usage history.
         try:
             ids_str = ",".join(str(int(fid)) for fid in (retrieved_fact_ids or []))
             now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            self.conn.execute(
+            cur = self.conn.execute(
                 "INSERT INTO memory_usage_log (query_text, intent, agent_type, retrieved_fact_ids, result_count, session_id, logged_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (query_text, intent, agent_type, ids_str, result_count, session_id, now_str),
             )
+            return cur.lastrowid
         except sqlite3.ProgrammingError as e:
             # A cross-thread connection here is a real bug (per-thread stores
             # exist precisely to prevent it) — never demote to debug.
@@ -490,6 +493,7 @@ class SearchMixin:
     def query(self, text: str, category: Optional[str] = None, limit: int = 10,
               include_deprecated: bool = False, tag: Optional[str] = None,
               session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        self._last_retrieval_id = None
         limit = max(1, min(int(limit), MAX_LIMIT))
         if not text or not text.strip():
             return []
@@ -862,6 +866,7 @@ class SearchMixin:
         # (AGENT_LANE_WEIGHTS lives above Lane 4 so a zero struct weight can
         # skip the structural scan; lane_w is already resolved there.)
         usage_boosts = self._usage_boost(text)
+        feedback_boosts = self._feedback_boost(text)
 
         # Per-lane provenance, recorded only when asked for: (source, id) ->
         # [{lane, rank, weight}]. Always collected into a local so the fusion
@@ -890,6 +895,8 @@ class SearchMixin:
                     lane_weight *= intent_boosts[cat]
                 if fact_id in usage_boosts:
                     lane_weight *= usage_boosts[fact_id]
+                if fact_id in feedback_boosts:
+                    lane_weight *= feedback_boosts[fact_id]
                 if fact_id in file_anchored_ids:
                     lane_weight *= 1.6
             else:
@@ -998,7 +1005,8 @@ class SearchMixin:
                                 )
 
                     # Usage logging for pattern learning (best-effort, never breaks retrieval)
-                    self._log_usage(text, intent, agent_type or None, memory_ids, len(results), session_id)
+                    self._last_retrieval_id = self._log_usage(
+                        text, intent, agent_type or None, memory_ids, len(results), session_id)
                     self.conn.execute("COMMIT")
                 except Exception:
                     try:
