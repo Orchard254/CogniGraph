@@ -3,9 +3,10 @@
 
 Four profiles use identical candidate generation, RRF, recency, feedback,
 project scope, frozen query vectors and task labels. We zero selected
-fusion weights, *not* remove their computations. Therefore rank/recall
-comparisons are exact for this ablation, but relative timing is NOT a
-prediction of optimized implementation latency.
+fusion weights rather than removing all disabled-lane computations. The
+structural lane is an exception: existing code skips it at weight zero.
+Rank/recall comparisons are valid for this ablation, but relative timing
+is NOT a controlled implementation performance comparison.
 
 Never opens the committed evaluation fixture for writing.
 """
@@ -131,8 +132,8 @@ def benchmark(agent_type: str = "default") -> dict:
         "pinned_now": exp["pinned_now"],
         "fixture_sha256": exp["fixture"]["sha256"],
         "profiles": {name: sorted(keys) for name, keys in PROFILES.items()},
-        "method": "same candidate work, zeroed fusion weights, exact ranking ablation",
-        "latency_caveat": "All profiles still execute the same lane construction; profile runtimes DO NOT estimate speedups from physically removing lanes.",
+        "method": "zeroed fusion weights, exact positive-score ranking ablation; structural scan skipped at zero weight",
+        "latency_caveat": "Most disabled lanes still execute candidate work; structural scanning is skipped at zero weight. Timings are NOT optimized implementation speedups.",
         "splits": {},
     }
     temp_dirs = []
