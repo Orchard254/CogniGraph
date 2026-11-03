@@ -213,15 +213,16 @@ Create `.cognigraph/config.json` in your project root:
 }
 ```
 
-## 🛠️ Available MCP Tools
+## 🛠️ Everyday MCP workflows
 
-The server registers 14 tools.
+The server currently registers **31 MCP tools**. The names below are a **quick-start subset**, not the complete registry. See the [full interface](README.md#3-exposed-mcp-tools) and the [tool governance policy](docs/TOOL_GOVERNANCE.md).
 
 ### Core Memory Operations
 - `memory_write` - Record a new fact with provenance (secrets are refused)
 - `memory_write_batch` - Atomic batch form of `memory_write`
 - `memory_query` - Hybrid lexical + semantic + code-structure search
-- `memory_get_context` - Token-budgeted Markdown briefing on a topic
+- `memory_get_intelligent_context` - Preferred phase-aware coding briefing with relevance, evidence, and budget controls
+- `memory_get_context` - Legacy Markdown briefing for compatibility
 - `memory_stats` - Database health: counts, category breakdown, edges
 
 ### File Operations
@@ -272,7 +273,7 @@ Agent: "I need to modify auth.py"
 ### Before Starting Tasks
 ```
 Agent: "Add caching layer to API"
-→ Agent calls memory_prepare_task("add caching layer", ["api.py"])
+→ Agent requests memory_get_intelligent_context(task="add caching layer", phase="orient", focus_files=["api.py"])
 → System returns: architectural context, prior decisions, risks
 → Agent plans implementation with full context
 ```
