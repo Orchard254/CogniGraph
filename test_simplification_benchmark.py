@@ -21,6 +21,12 @@ class SimplificationBenchmarkTests(unittest.TestCase):
         self.assertEqual(bench.weights_for("full", original), original)
         self.assertEqual(AGENT_LANE_WEIGHTS["default"], original)
 
+    def test_opencode_full_profile_preserves_agent_specific_weights(self):
+        from pm_search import AGENT_LANE_WEIGHTS
+        original = dict(AGENT_LANE_WEIGHTS["opencode"])
+        self.assertEqual(bench.weights_for("full", original), original)
+        self.assertGreater(original["struct"], 0)
+
     def test_subset_profiles_zero_only_excluded_lane_weights(self):
         baseline = {"fts": 1.0, "tok": 0.85, "sem": 1.2,
                     "epi_fts": 1.0, "epi_tok": 0.85, "epi_sem": 1.2,
