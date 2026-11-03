@@ -43,6 +43,28 @@ class SimplificationBenchmarkTests(unittest.TestCase):
                 for key, value in observed.items():
                     self.assertEqual(value, baseline[key] if key in enabled else 0)
 
+    def test_disabled_lane_zero_score_does_not_count_as_retrieved(self):
+        from pm_search import AGENT_LANE_WEIGHTS
+        baseline = dict(AGENT_LANE_WEIGHTS["default"])
+        class FakeStore:
+            def query_hybrid(self, query, **kwargs):
+                self.kwargs = kwargs
+                return [
+                    {"id": 1, "source": "memory", "fused_score": 0.22},
+                    {"id": 2, "source": "memory", "fused_score": 0.0},
+                ]
+        store = FakeStore()
+        rows, _ = bench._rank_items(
+            store, [
+                {"fact_id": 1, "query": "sample", "category": "component"},
+                {"fact_id": 2, "query": "sample", "category": "decision"},
+            ], "fts_only",
+        )
+        self.assertEqual([row["rank"] for row in rows], [1, None])
+        self.assertTrue(store.kwargs["explain"])
+        self.assertFalse(store.kwargs["log_usage"])
+        self.assertEqual(AGENT_LANE_WEIGHTS["default"], baseline)
+
     def test_invalid_profile_rejected(self):
         with self.assertRaises(ValueError):
             bench.weights_for("unsupported", {"fts": 1})
