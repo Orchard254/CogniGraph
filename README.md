@@ -52,6 +52,20 @@ on session idle, without labeling retrieved facts as helpful. See
 [Task Outcome Review](docs/TASK_OUTCOMES.md) and
 [OpenCode Installation](OPENCODE_PLUGIN.md).
 
+## Context Intelligence Layer
+
+`memory_intelligent_context` creates a **task-stage-aware, evidence-labeled**
+briefing from the existing hybrid retrieval results. It supports stages
+`task`, `inspect`, `edit`, `verify`, and `resume`, explicit file focus,
+a strict character budget, category diversity, and optional already-seen
+memory IDs. Only facts **actually rendered** are recorded on the returned
+retrieval receipt for later attributable feedback. It does not promote
+unverified facts or assert that tests passed.
+
+OpenCode V2 uses it for initial task memory. The older `memory_get_context`
+and raw `memory_query` remain available unchanged. See
+[Context Intelligence](docs/CONTEXT_INTELLIGENCE.md).
+
 ## Key Capabilities
 
 1. **Hybrid RRF Search Engine**: Combines SQLite FTS5 BM25 keyword matching with term-vector similarity via Reciprocal Rank Fusion ($RRF = \frac{1}{5 + rank_{bm25}} + \frac{1}{5 + rank_{vec}}$).
@@ -165,7 +179,7 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 30 tools.
+The server registers 31 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -173,6 +187,7 @@ The server registers 30 tools.
 | `memory_write_batch` | `facts` | Atomic batch form of memory_write for several related facts. |
 | `memory_query` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?`, `explain?`, `fields?` | Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have. |
 | `memory_get_context` | `query`, `agent_type?`, `max_tokens?`, `limit?`, `intent?` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. |
+| `memory_intelligent_context` | `query`, `stage?`, `file_paths?`, `max_chars?`, `max_facts?`, `seen_fact_ids?`, `agent_type?`, `session_id?` | Give a coding agent stage-aware, concise knowledge, risks and evidence with exact fact receipts. Stage: task/inspect/edit/verify/resume. Character budget is strict. No auto-promoted facts. |
 | `memory_rate_context` | `retrieval_id`, `ratings`, `evidence_type?`, `evidence_ref?`, `verification_evidence?` | Record helpful, irrelevant, or incorrect fact feedback against a retrieval ID. |
 | `memory_relevance_feedback_stats` | — | Summarize relevance feedback counts by evidence type and rating. |
 | `memory_record_task_outcome` | `retrieval_id`, `changed_files`, `test_evidence?` | Log a completed coding task's edited files and optional test metadata, and suggest which retrieved facts need review. Does not alter memory ranking or verify that tests actually ran. |
