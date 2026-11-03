@@ -43,6 +43,16 @@ class OpenCodePluginTests(unittest.TestCase):
             self.assertEqual(result["status"], "no_project_memory")
             self.assertFalse((Path(d) / ".cognigraph").exists())
 
+    def test_sensitive_query_is_not_logged(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = Path(d) / ".cognigraph/memory.db"
+            db.parent.mkdir()
+            db.touch()
+            fake_pm = types.SimpleNamespace(looks_like_secret=lambda text: "token=" in text)
+            with patch.dict(sys.modules, {"pm_common": fake_pm}):
+                result = get_plugin_context(d, "token=abcdefghijklmnopqr123456")
+            self.assertEqual(result["status"], "sensitive_query")
+
     def test_bridge_passes_project_path_budget_and_agent(self):
         with tempfile.TemporaryDirectory() as d:
             db = Path(d) / ".cognigraph/memory.db"
@@ -57,7 +67,8 @@ class OpenCodePluginTests(unittest.TestCase):
                     return "### memory\nimportant fact"
                 def close(self):
                     calls.append("closed")
-            with patch.dict(sys.modules, {"memory_store": types.SimpleNamespace(MemoryStore=FakeStore)}):
+            with patch.dict(sys.modules, {"memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                                          "pm_common": types.SimpleNamespace(looks_like_secret=lambda text: False)}):
                 result = get_plugin_context(d, "fix authentication", max_chars=1200)
             self.assertEqual(result["status"], "ok")
             self.assertEqual(calls[0], str(db))
