@@ -55,7 +55,9 @@ tuning and holdout labels:
 **Important:** the benchmark disables lanes *at fusion* by temporarily
 zeroing their weights. A fact returned only because a disabled lane
 created a zero-score candidate does **not** count as a retrieved match.
-It continues to execute candidate generation for all lanes. These comparisons test relevance and ranking **only**. The recorded
+Most disabled lanes still execute candidate generation; the structural scan
+is already skipped when its fusion weight is zero. These comparisons test
+relevance and ranking **only**. The recorded
 full-profile query timings are diagnostics for this runner, not a prediction
 of the speedups from removing lanes. A subsequent implementation benchmark
 must actually skip disabled work before comparing latency, CPU and memory.
