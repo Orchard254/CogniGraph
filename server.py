@@ -521,6 +521,27 @@ def memory_get_context(query: str, agent_type: str = "default", max_tokens: int 
 
 
 @mcp.tool()
+def memory_intelligent_context(query: str, stage: str = "task",
+                               file_paths: List[str] | None = None,
+                               max_chars: int = 3600, max_facts: int = 7,
+                               seen_fact_ids: List[int] | None = None,
+                               agent_type: str = "default",
+                               session_id: str = "") -> dict:
+    """Give a coding agent stage-aware, concise knowledge, risks and evidence with exact fact receipts. Stage: task/inspect/edit/verify/resume. Character budget is strict. No auto-promoted facts."""
+    _ensure_first_time_setup()
+    with _store() as store:
+        try:
+            return store.get_intelligent_context(
+                query, stage=stage, file_paths=file_paths,
+                max_chars=max_chars, max_facts=max_facts,
+                seen_fact_ids=seen_fact_ids, agent_type=agent_type,
+                session_id=session_id or None,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+
+@mcp.tool()
 def memory_rate_context(retrieval_id: int, ratings: List[Dict[str, Any]],
                         evidence_type: str = "agent", evidence_ref: str = "",
                         verification_evidence: dict | None = None) -> dict:
