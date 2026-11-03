@@ -41,6 +41,7 @@
     "pm_backup.py",
     "corpus_hygiene.py",
     "pm_common.py",
+    "pm_feedback.py",
     "pm_search.py",
     "pm_context.py",
     "pm_lifecycle.py",
