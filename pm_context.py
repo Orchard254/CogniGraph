@@ -2,6 +2,7 @@
 import sqlite3
 from pathlib import Path
 from pm_common import _epistemic_status, _is_test_file
+from pm_freshness import freshness_note
 from typing import Optional, List, Dict, Any
 
 class ContextMixin:
@@ -252,6 +253,7 @@ class ContextMixin:
 
         lines = [f"### CogniGraph Context for: '{query}'", f"*Intent detected: **{detected_intent.upper()}** task*", ""]
         seen_ids: set[tuple] = set()
+        freshness_cache: dict = {}
 
         for idx, f in enumerate(final_results, 1):
             source = f.get("source", "memory")
@@ -280,6 +282,9 @@ class ContextMixin:
                 prov.append(f"confidence: {f['confidence']}")
             if f.get("tags"):
                 prov.append(f"tags: {f['tags']}")
+            source_warning = freshness_note(f, getattr(self, 'db_path', None), cache=freshness_cache)
+            if source_warning:
+                prov.append(source_warning)
             _et = f.get("evidence_type")
             if _et and _et != "inferred":
                 prov.append(f"evidence: {_et}")
@@ -493,6 +498,7 @@ class ContextMixin:
         constraints = []
 
         lines.append("#### Direct Components & Decisions:")
+        freshness_cache: dict = {}
         for f in direct_facts:
             seen_ids.add(f["id"])
             if f["category"] == "constraint":
@@ -502,6 +508,9 @@ class ContextMixin:
             flag_note = self._fact_flag_stamp(f["id"])
             if flag_note:
                 stamps.append(f"⚠️ {flag_note}")
+            source_warning = freshness_note(f, getattr(self, 'db_path', None), cache=freshness_cache)
+            if source_warning:
+                stamps.append(source_warning)
             code_hash = f.get("code_hash") or ""
             if code_hash and (len(code_hash) < 16 or any(c not in "0123456789abcdef" for c in code_hash.lower())):
                 stamps.append("provenance unverified")

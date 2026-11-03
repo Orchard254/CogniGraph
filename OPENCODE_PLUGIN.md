@@ -52,6 +52,12 @@ normal migration command when convenient.
 7. If memory is unavailable or retrieval times out, no context is injected;
    coding continues normally and existing MCP tools still work.
 
+On each refreshed file briefing, source-anchored facts with hashes receive
+read-only freshness checks. When the anchored code changed or disappeared,
+the injected context includes a warning for the agent to verify it. These
+warnings do not independently prove a fact false or modify stored memory.
+See [Source Freshness](docs/SOURCE_FRESHNESS.md).
+
 The bridge retrieves from the target project's existing memory database (and may
 update retrieval-usage counters). Neither
 an unrelated project nor the CogniGraph checkout can be used as a fallback.
