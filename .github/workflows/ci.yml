@@ -274,5 +274,7 @@ jobs:
       - name: Compare simplified retrieval profiles (diagnostic only)
         # This experiment changes no production weights or fixture and does
         # not claim that zeroed fusion weights save computation time.
-        run: venv/bin/python scripts/benchmark_simplification.py
+        run: |
+          venv/bin/python scripts/benchmark_simplification.py --agent default
+          venv/bin/python scripts/benchmark_simplification.py --agent opencode
         shell: bash
