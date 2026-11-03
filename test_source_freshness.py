@@ -97,7 +97,8 @@ class SourceFreshnessTests(unittest.TestCase):
 
     def test_non_project_database_does_not_guess_root(self):
         self.assertIsNone(project_root_for_db(str(self.root / "memory.db")))
-        self.assertEqual(project_root_for_db(str(self.db)), self.root)
+        # Windows may expose the same directory with 8.3 or long path spelling.
+        self.assertTrue(project_root_for_db(str(self.db)).samefile(self.root))
 
 
 class LiveContextFreshnessTests(unittest.TestCase):
