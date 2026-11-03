@@ -64,8 +64,11 @@ have received evidence-backed feedback.
   accurately. A future in-IDE approval UI should make attribution verifiable.
 - Retrieval log records are retained under existing project-local storage
   rules; this feature does not implement a retention/deletion policy.
-- This is an **MCP workflow**; the OpenCode plugin does not yet emit task
-  outcome reports automatically.
+- The OpenCode V2 plugin can now emit best-effort task-outcome reports
+  automatically after observed successful file-edit tools when a session
+  becomes idle, with the existing retrieval receipt and changed source paths.
+  This does not automatically mark tests as passed and does not rate facts.
+  MCP tools remain available for manual reports and review.
 
 ## Tests
 
