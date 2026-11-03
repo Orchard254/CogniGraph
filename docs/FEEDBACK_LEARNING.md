@@ -9,22 +9,22 @@ source of project facts; feedback changes retrieval ordering, not truth.
 
 ## What is implemented in this phase
 
-1. Each logged \`memory_query\` or \`memory_get_context\` result includes
-   a \`retrieval_id\`; the OpenCode V2 plugin also embeds a receipt ID
+1. Each logged `memory_query` or `memory_get_context` result includes
+   a `retrieval_id`; the OpenCode V2 plugin also embeds a receipt ID
    alongside its context briefing.
-2. \`memory_rate_context(retrieval_id, ratings, evidence_type, ...)\`
-   accepts one to 20 entries, each \`{"fact_id": 42, "rating": "helpful"}\`,
-   \`irrelevant\`, or \`incorrect\`. The referenced facts must actually
+2. `memory_rate_context(retrieval_id, ratings, evidence_type, ...)`
+   accepts one to 20 entries, each `{"fact_id": 42, "rating": "helpful"}`,
+   `irrelevant`, or `incorrect`. The referenced facts must actually
    have appeared in that retrieval, still be active, and belong to the
    primary memory store (not the episodic historical archive).
-3. Only \`evidence_type="user"\` (an explicitly reported user judgement)
-   or \`evidence_type="test"\` influence ranking. Test metadata requires
+3. Only `evidence_type="user"` (an explicitly reported user judgement)
+   or `evidence_type="test"` influence ranking. Test metadata requires
    a command, a successful exit code, and a commit SHA matching current
    git HEAD. **This only validates caller-supplied metadata; CogniGraph
    does not execute the test or independently confirm the outcome.**
    The agent must not claim a specific memory helped unless the
    evidence genuinely supports that conclusion.
-4. \`evidence_type="agent"\` is diagnostic only and **does not train**.
+4. `evidence_type="agent"` is diagnostic only and **does not train**.
    Mere retrievals, repeated tool calls, or unverified task completion
    never count as positive feedback.
 5. The retrieval engine applies small, capped multipliers **only for
@@ -34,15 +34,15 @@ source of project facts; feedback changes retrieval ordering, not truth.
 6. Duplicate ratings for the same retrieval/fact pair update that
    feedback event rather than increasing its weight. Invalid batches
    are rejected rather than partially written.
-7. \`memory_relevance_feedback_stats()\` reports outcome counts without
+7. `memory_relevance_feedback_stats()` reports outcome counts without
    exposing stored task text.
 
 ### Example
 
-First call \`memory_query(text="fix oauth session refresh", agent_type="opencode")\`,
+First call `memory_query(text="fix oauth session refresh", agent_type="opencode")`,
 then after a user explicitly identifies facts as useful/incorrect:
 
-\`\`\`json
+```json
 {
   "retrieval_id": 73,
   "ratings": [
@@ -51,17 +51,17 @@ then after a user explicitly identifies facts as useful/incorrect:
   ],
   "evidence_type": "user"
 }
-\`\`\`
+```
 
-For \`test\` evidence, include \`verification_evidence\` with
-\`command\`, \`exit_code\`, and \`commit_sha\` matching the current
+For `test` evidence, include `verification_evidence` with
+`command`, `exit_code`, and `commit_sha` matching the current
 checkout. If the evidence does not establish that a particular fact
 helped, do **not** rate it as helpful.
 
 ### Safeguards and limitations
 
 - Feedback never modifies a fact or its confidence; use
-  \`memory_supersede\`, \`memory_deprecate\`, or \`memory_flag_fact\`
+  `memory_supersede`, `memory_deprecate`, or `memory_flag_fact`
   for truth maintenance.
 - User reports are attributed as such but not cryptographically
   authenticated. A calling agent can supply a false attribution,
