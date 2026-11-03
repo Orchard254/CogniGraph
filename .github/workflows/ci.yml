@@ -270,3 +270,9 @@ jobs:
       - name: Run retrieval-quality gate against the frozen fixture
         run: venv/bin/python scripts/eval_gate.py
         shell: bash
+
+      - name: Compare simplified retrieval profiles (diagnostic only)
+        # This experiment changes no production weights or fixture and does
+        # not claim that zeroed fusion weights save computation time.
+        run: venv/bin/python scripts/benchmark_simplification.py
+        shell: bash
