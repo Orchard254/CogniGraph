@@ -64,6 +64,34 @@ The tool restores the original weights and clock after each run and calls
 retrieval counters, source history, or the committed fixture. The existing
 `eval-gate` check still protects the unchanged default ranking.
 
+## Initial measured results (2026-11-03 CI, pinned frozen fixture)
+
+Both the default agent and OpenCode were compared under their own configured
+fusion weights. `core` keeps only memory FTS, token, and semantic signals.
+
+| Agent / split | Profile | Recall@5 | MRR | Per-query rank changes vs full |
+|---|---|---:|---:|---|
+| Default / tuning (36) | full | 0.9722 | 0.7963 | reference |
+| Default / tuning (36) | core | 0.9722 | 0.7963 | 0 changed |
+| Default / holdout (16) | full | 0.9375 | 0.6760 | reference |
+| Default / holdout (16) | core | 0.9375 | 0.6760 | 0 changed |
+| OpenCode / tuning (36) | full | 0.9444 | 0.7083 | reference |
+| OpenCode / tuning (36) | core | **0.9722** | **0.7963** | 8 better, 0 worse |
+| OpenCode / holdout (16) | full | 0.8125 | 0.6271 | reference |
+| OpenCode / holdout (16) | core | **0.9375** | **0.6760** | 4 better, 0 worse |
+
+The `lexical` and `fts_only` configurations had lower recall@5 on both
+splits (tuning 0.8611 / 0.8889; holdout both 0.8125), making semantic
+retrieval worth retaining in the next experiment.
+
+**Interpretation:** The extra episodic/structural fusion does not improve
+this frozen evaluation, and for the OpenCode weights it hurts top-5 recall.
+This is **one project-specific 52-pair fixture, not proof of generality**.
+The ablation does not bypass candidate computation and cannot support
+claims about speed or memory reductions. Do not use these findings alone
+to delete episodic history, change defaults, or claim validated benefits
+on users' projects.
+
 ## Simplification acceptance criteria
 
 A simpler profile is *eligible for further trials*, not production adoption,
