@@ -83,9 +83,15 @@ fusion weights. `core` keeps only memory FTS, token, and semantic signals.
 | OpenCode / holdout (16) | full | 0.8125 | 0.6271 | reference |
 | OpenCode / holdout (16) | core | **0.9375** | **0.6760** | 4 better, 0 worse |
 
-The `lexical` and `fts_only` configurations had lower recall@5 on both
-splits (tuning 0.8611 / 0.8889; holdout both 0.8125), making semantic
-retrieval worth retaining in the next experiment.
+The `lexical` configuration had lower recall@5 (tuning 0.8611;
+holdout 0.8125). After explicitly excluding candidates with zero
+fusion scores, `fts_only` reached **0.0000 recall@5 on both splits**:
+these natural-language queries did not yield positive FTS-only matches.
+A first experimental run incorrectly counted zero-weight, zero-score
+candidates in this profile; that artifact was corrected and regression
+tested. This result does **not** mean FTS is useless as one signal in a
+hybrid retriever. It shows that semantic and/or tokenized retrieval is
+necessary for this benchmark's longer coding queries.
 
 **Interpretation:** The extra episodic/structural fusion does not improve
 this frozen evaluation, and for the OpenCode weights it hurts top-5 recall.
