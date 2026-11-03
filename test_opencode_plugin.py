@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from install_opencode import install
-from opencode_context import get_plugin_context
+from opencode_context import get_plugin_context, record_plugin_outcome
 
 
 class OpenCodePluginTests(unittest.TestCase):
@@ -113,6 +113,94 @@ class OpenCodePluginTests(unittest.TestCase):
             self.assertEqual(result["status"], "ok")
             self.assertTrue(result["context_markdown"].startswith("b.py "))
             self.assertLessEqual(len(result["context_markdown"]), 256)
+
+    def test_automatic_outcome_bridge_restricts_project_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            db = root / ".cognigraph" / "memory.db"
+            db.parent.mkdir()
+            db.touch()
+            source = root / "src/auth.py"
+            source.parent.mkdir()
+            source.write_text("def auth(): pass\\n")
+            (root / ".env").write_text("DO_NOT_READ=example")
+            outside = Path(directory) / "outside.py"
+            outside.write_text("private=True\\n")
+            seen = []
+            class FakeStore:
+                def __init__(self, path):
+                    seen.append(("db", path))
+                def record_task_outcome(self, receipt, paths):
+                    seen.append(("outcome", receipt, paths))
+                    return {"ranking_updated": False, "review_candidate_fact_ids": [2]}
+                def close(self):
+                    seen.append(("closed",))
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+            }):
+                result = record_plugin_outcome(
+                    str(root), 91,
+                    ["src/auth.py", str(source), ".env", "../outside.py", str(outside)],
+                )
+            self.assertEqual(result["status"], "recorded")
+            self.assertEqual(seen[1], ("outcome", 91, ["src/auth.py"]))
+            self.assertFalse(result["ranking_updated"])
+            self.assertEqual(seen[-1], ("closed",))
+
+    def test_automatic_outcome_bridge_does_not_create_memory(self):
+        with tempfile.TemporaryDirectory() as d:
+            source = Path(d) / "app.py"
+            source.write_text("x = 1\\n")
+            self.assertEqual(
+                record_plugin_outcome(d, 1, ["app.py"])["status"], "no_project_memory",
+            )
+            self.assertFalse((Path(d) / ".cognigraph").exists())
+            self.assertEqual(
+                record_plugin_outcome(d, 1, ["missing.py"])["status"],
+                "no_eligible_source_files",
+            )
+            with self.assertRaises(ValueError):
+                record_plugin_outcome(d, True, ["app.py"])
+            with self.assertRaises(ValueError):
+                record_plugin_outcome(d, 1, ["app.py"] * 21)
+
+    def test_automatic_outcome_bridge_updates_review_queue_not_ranking(self):
+        from memory_store import MemoryStore
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            db = root / ".cognigraph" / "memory.db"
+            db.parent.mkdir()
+            source = root / "src/auth.py"
+            source.parent.mkdir()
+            source.write_text("def auth(): return True\\n")
+            store = MemoryStore(str(db))
+            try:
+                fact = store.write(
+                    "component", "Session login authentication routes through auth.py",
+                    file_path="src/auth.py", force=True, embed=False,
+                )
+                receipt = store.conn.execute(
+                    """INSERT INTO memory_usage_log
+                    (query_text, retrieved_fact_ids, result_count, logged_at)
+                    VALUES (?, ?, ?, ?)""",
+                    ("fix session login authentication", str(fact), 1, "2026-11-03T00:00:00+00:00"),
+                ).lastrowid
+            finally:
+                store.close()
+            result = record_plugin_outcome(d, receipt, ["src/auth.py"])
+            self.assertEqual(result["status"], "recorded")
+            self.assertEqual(result["review_candidate_fact_ids"], [fact])
+            self.assertFalse(result["ranking_updated"])
+            store = MemoryStore(str(db))
+            try:
+                self.assertEqual(
+                    store.task_outcome_review_queue()["outcomes"][0]["test_status"],
+                    "no_test_report",
+                )
+                self.assertEqual(store._feedback_boost("fix session login authentication"), {})
+            finally:
+                store.close()
 
     def test_custom_plugin_not_overwritten(self):
         with tempfile.TemporaryDirectory() as d:
