@@ -54,6 +54,7 @@ py-modules = [
     "opencode_context",
     "memory_store",
     "pm_common",
+    "pm_feedback",
     "pm_search",
     "pm_context",
     "pm_lifecycle",
