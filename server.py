@@ -431,7 +431,8 @@ def memory_query(text: str, category: str = "", tag: str = "", limit: int = 10, 
             # Returned rather than raised: a mistyped field is a caller mistake,
             # not a crash, and the valid list is what the caller needs next.
             return {"error": str(e), "valid_fields": sorted(KNOWN_RESULT_FIELDS)}
-    out = {"count": len(results), "results": results}
+        retrieval_id = getattr(_s, "_last_retrieval_id", None)
+    out = {"count": len(results), "results": results, "retrieval_id": retrieval_id}
     # Self-describing projection: a trimmed result set must never be mistaken
     # for a complete one, so say what was dropped.
     projected = parse_fields(fields or None)
@@ -514,8 +515,39 @@ def memory_get_context(query: str, agent_type: str = "default", max_tokens: int 
             "agent_type": agent_type,
             "detected_intent": detected_intent,
             "format_info": dict(format_config),
-            "context_markdown": ctx_md
+            "context_markdown": ctx_md,
+            "retrieval_id": getattr(store, "_last_retrieval_id", None)
         }
+
+
+@mcp.tool()
+def memory_rate_context(retrieval_id: int, ratings: List[Dict[str, Any]],
+                        evidence_type: str = "agent", evidence_ref: str = "",
+                        verification_evidence: dict | None = None) -> dict:
+    """Record helpful, irrelevant, or incorrect fact feedback against a retrieval ID.
+
+    Only explicitly reported user feedback or test metadata checked against
+    the current git HEAD affects future ranking. Agent-only guesses are
+    recorded but do not influence ranking. Never rate facts just because
+    they appeared in context; use verified, attributable outcomes.
+    """
+    _ensure_first_time_setup()
+    with _store() as _s:
+        try:
+            return _s.record_relevance_feedback(
+                retrieval_id=retrieval_id, ratings=ratings, evidence_type=evidence_type,
+                evidence_ref=evidence_ref, verification_evidence=verification_evidence,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+
+@mcp.tool()
+def memory_relevance_feedback_stats() -> dict:
+    """Summarize relevance feedback counts by evidence type and rating."""
+    _ensure_first_time_setup()
+    with _store() as _s:
+        return _s.relevance_feedback_stats()
 
 
 @mcp.tool()
