@@ -44,7 +44,8 @@ normal migration command when convenient.
 5. If memory is unavailable or retrieval times out, no context is injected;
    coding continues normally and the original MCP tools still work.
 
-The bridge only reads the target project's existing memory database. Neither
+The bridge retrieves from the target project's existing memory database (and may
+update retrieval-usage counters). Neither
 an unrelated project nor the CogniGraph checkout can be used as a fallback.
 A bounded context payload is marked as **reference data, not instructions**;
 the agent should verify facts against current source code before modifying it.
