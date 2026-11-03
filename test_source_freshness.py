@@ -23,7 +23,7 @@ class SourceFreshnessTests(unittest.TestCase):
         self.path = self.root / "src" / "handler.py"
         self.path.parent.mkdir()
         self.before = "def handler():\n    return 1\n"
-        self.path.write_text(self.before, encoding="utf-8")
+        self.path.write_bytes(self.before.encode("utf-8"))
         self.db = self.root / ".cognigraph" / "memory.db"
         self.db.parent.mkdir()
         self.db.touch()
@@ -42,13 +42,13 @@ class SourceFreshnessTests(unittest.TestCase):
         self.assertEqual(freshness_note(self.fact, str(self.db)), "")
 
     def test_changed_source_is_warning_not_deprecation(self):
-        self.path.write_text(self.before.replace("return 1", "return 2"))
+        self.path.write_bytes(self.before.replace("return 1", "return 2").encode("utf-8"))
         report = check_source_freshness(self.fact, self.root)
         self.assertEqual(report["status"], "POSSIBLY_STALE")
         self.assertIn("SOURCE MAY HAVE CHANGED", freshness_note(self.fact, str(self.db)))
 
     def test_line_shift_detects_relocation_without_changing_anchor(self):
-        self.path.write_text("# new header\n" + self.before)
+        self.path.write_bytes(("# new header\n" + self.before).encode("utf-8"))
         report = check_source_freshness(self.fact, self.root)
         self.assertEqual(report["status"], "RELOCATED")
         self.assertEqual(report["current_lines"], [2, 3])
@@ -62,7 +62,7 @@ class SourceFreshnessTests(unittest.TestCase):
     def test_whole_file_hash_supported(self):
         fact = dict(self.fact, line_start=None, line_end=None)
         self.assertEqual(check_source_freshness(fact, self.root)["status"], "CURRENT")
-        self.path.write_text("# change\n" + self.before)
+        self.path.write_bytes(("# change\n" + self.before).encode("utf-8"))
         self.assertEqual(check_source_freshness(fact, self.root)["status"], "POSSIBLY_STALE")
 
     def test_outside_project_and_absolute_path_rejected(self):
@@ -109,20 +109,20 @@ class LiveContextFreshnessTests(unittest.TestCase):
             db = root / ".cognigraph" / "memory.db"
             db.parent.mkdir()
             file = root / "handler.py"
-            file.write_text("def login_handler():\n    return 1\n")
-            original = file.read_text()
+            file.write_bytes(b"def login_handler():\n    return 1\n")
+            original = file.read_bytes()
             store = MemoryStore(str(db))
             try:
                 fid = store.write(
                     "component", "login_handler validates session cookies for user login",
                     confidence="confirmed", file_path="handler.py",
-                    line_start=1, line_end=2, code_hash=digest(original),
+                    line_start=1, line_end=2, code_hash=hashlib.sha256(original).hexdigest(),
                     force=True, embed=False,
                 )
                 self.assertIsInstance(fid, int)
                 store._query_encode = lambda query: None
                 self.assertNotIn("SOURCE MAY HAVE CHANGED", store.get_file_context("handler.py"))
-                file.write_text("def login_handler():\n    return 2\n")
+                file.write_bytes(b"def login_handler():\n    return 2\n")
                 file_ctx = store.get_file_context("handler.py")
                 self.assertIn("SOURCE MAY HAVE CHANGED", file_ctx)
                 task_ctx = store.get_context("login_handler validates session cookies", max_chars=4000)
