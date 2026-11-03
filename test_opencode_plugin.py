@@ -61,6 +61,34 @@ class OpenCodePluginTests(unittest.TestCase):
             self.assertEqual(seen[1:-1], ["src/main.py"])
             self.assertEqual(seen[-1], "closed")
 
+    def test_external_existing_file_is_not_used_as_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "project"
+            root.mkdir()
+            db = root / ".cognigraph/memory.db"
+            db.parent.mkdir()
+            db.touch()
+            outside = parent / "outside.py"
+            outside.write_text("private_setting = 3\n")
+            seen = []
+            class FakeStore:
+                def __init__(self, path):
+                    seen.append("opened")
+                def get_file_context(self, name):
+                    seen.append(name)
+                    return "not allowed"
+                def close(self):
+                    seen.append("closed")
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False)
+            }):
+                result = get_plugin_context(
+                    str(root), "", file_paths=["../outside.py"], max_chars=1200)
+            self.assertEqual(result["status"], "no_matches")
+            self.assertEqual(seen, ["opened", "closed"])
+
     def test_custom_plugin_not_overwritten(self):
         with tempfile.TemporaryDirectory() as d:
             custom = Path(d) / ".opencode/plugins/cognigraph/index.ts"
