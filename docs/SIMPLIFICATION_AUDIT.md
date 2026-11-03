@@ -53,14 +53,15 @@ tuning and holdout labels:
 | `fts_only` | Memory FTS only | Lowest-complexity ranking reference |
 
 **Important:** the benchmark disables lanes *at fusion* by temporarily
-zeroing their weights. It continues to execute candidate generation for all
-lanes. These comparisons test relevance and ranking **only**. The recorded
+zeroing their weights. A fact returned only because a disabled lane
+created a zero-score candidate does **not** count as a retrieved match.
+It continues to execute candidate generation for all lanes. These comparisons test relevance and ranking **only**. The recorded
 full-profile query timings are diagnostics for this runner, not a prediction
 of the speedups from removing lanes. A subsequent implementation benchmark
 must actually skip disabled work before comparing latency, CPU and memory.
 
 The tool restores the original weights and clock after each run and calls
-`query_hybrid(log_usage=False, expand_graph=False)`. It does not update
+`query_hybrid(log_usage=False, expand_graph=False, explain=True)`. It does not update
 retrieval counters, source history, or the committed fixture. The existing
 `eval-gate` check still protects the unchanged default ranking.
 
