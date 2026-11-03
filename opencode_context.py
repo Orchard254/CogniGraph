@@ -75,12 +75,25 @@ def get_plugin_context(
         parts = []
         retrieval_id = None
         if task:
-            markdown = store.get_context(
-                task, limit=5, max_chars=cap, agent_type="opencode"
-            )
-            retrieval_id = getattr(store, "_last_retrieval_id", None)
-            if "*No matching facts found in memory.*" not in markdown:
-                parts.append(markdown[:cap])
+            # Prefer the bounded Context Intelligence Layer for the initial
+            # task briefing. Keep legacy compatibility for prior installations,
+            # constrained budgets, and isolated bridge mocks.
+            composer = getattr(store, "get_intelligent_context", None)
+            if callable(composer) and cap >= 512:
+                briefing = composer(
+                    task, phase="orient", max_chars=cap, limit=6,
+                    agent_type="opencode",
+                )
+                retrieval_id = briefing.get("retrieval_id")
+                if briefing.get("status") == "ok":
+                    parts.append(briefing["context_markdown"][:cap])
+            else:
+                markdown = store.get_context(
+                    task, limit=5, max_chars=cap, agent_type="opencode"
+                )
+                retrieval_id = getattr(store, "_last_retrieval_id", None)
+                if "*No matching facts found in memory.*" not in markdown:
+                    parts.append(markdown[:cap])
 
         # File focus comes only from structured successful IDE tool calls,
         # not arbitrary text scraped from shell output. Re-validate here.
