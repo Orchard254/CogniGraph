@@ -89,6 +89,31 @@ class OpenCodePluginTests(unittest.TestCase):
             self.assertEqual(result["status"], "no_matches")
             self.assertEqual(seen, ["opened", "closed"])
 
+    def test_latest_file_gets_first_place_in_small_context_budget(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            db = root / ".cognigraph/memory.db"
+            db.parent.mkdir()
+            db.touch()
+            for name in ("a.py", "b.py"):
+                (root / name).write_text("pass\n")
+            class FakeStore:
+                def __init__(self, path):
+                    pass
+                def get_file_context(self, name):
+                    return name + " " + ("memory " * 200)
+                def close(self):
+                    pass
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False)
+            }):
+                result = get_plugin_context(
+                    d, "", file_paths=["a.py", "b.py"], max_chars=256)
+            self.assertEqual(result["status"], "ok")
+            self.assertTrue(result["context_markdown"].startswith("b.py "))
+            self.assertLessEqual(len(result["context_markdown"]), 256)
+
     def test_custom_plugin_not_overwritten(self):
         with tempfile.TemporaryDirectory() as d:
             custom = Path(d) / ".opencode/plugins/cognigraph/index.ts"
