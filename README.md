@@ -8,6 +8,18 @@ Coding conventions and the context-building pipeline are recorded in project mem
 
 ---
 
+## Native OpenCode V2 context delivery
+
+CogniGraph can now also inject relevant project memory automatically into
+OpenCode V2 model requests through a native plugin hook, without requiring
+the model to remember to call MCP first. MCP tools remain available for deeper
+on-demand retrieval. The integration is opt-in per project.
+
+See [OpenCode Plugin Installation](OPENCODE_PLUGIN.md) and run
+`python install_opencode.py --root /path/to/project` from your CogniGraph
+environment. Requires an existing project memory database and a compatible
+OpenCode V2 installation.
+
 ## Key Capabilities
 
 1. **Hybrid RRF Search Engine**: Combines SQLite FTS5 BM25 keyword matching with term-vector similarity via Reciprocal Rank Fusion ($RRF = \frac{1}{5 + rank_{bm25}} + \frac{1}{5 + rank_{vec}}$).
