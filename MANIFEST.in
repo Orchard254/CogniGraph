@@ -4,3 +4,6 @@ include phase1_episodic_embeddings.sql
 include phase2_branch_admin.sql
 include episodic_fts.sql
 include legacy_provenance.sql
+
+include integrations/opencode-v2/index.ts.template
+include OPENCODE_PLUGIN.md
