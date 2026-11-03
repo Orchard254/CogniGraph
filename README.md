@@ -20,6 +20,14 @@ See [OpenCode Plugin Installation](OPENCODE_PLUGIN.md) and run
 environment. Requires an existing project memory database and a compatible
 OpenCode V2 installation.
 
+## Source freshness checks
+
+When source-anchored facts have a recorded SHA-256 hash, CogniGraph now checks
+whether their snippet still matches the current project files while building
+task and file briefings. Changed or missing source is flagged for review; facts
+are **never automatically deprecated or rewritten** by these checks. See
+[Source Freshness](docs/SOURCE_FRESHNESS.md).
+
 ## Learning from verified outcomes
 
 Context retrievals return a `retrieval_id`. When a user identifies a useful,
