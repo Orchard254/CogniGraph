@@ -49,19 +49,19 @@ def weights_for(profile: str, baseline: dict[str, float]) -> dict[str, float]:
             for key, value in baseline.items()}
 
 
-def _rank_items(store: MemoryStore, items: list[dict], profile: str) -> tuple[list[dict], list[float]]:
+def _rank_items(store: MemoryStore, items: list[dict], profile: str, agent_type: str = "default") -> tuple[list[dict], list[float]]:
     """Evaluate all golden pairs with no usage writes or ranking side effects."""
     out = []
     times_ms = []
     # Temporarily replace only the default agent's fusion weights. Restore
     # after each profile so no profile can contaminate another.
-    baseline = dict(AGENT_LANE_WEIGHTS["default"])
-    with patch.dict(AGENT_LANE_WEIGHTS, {"default": weights_for(profile, baseline)}):
+    baseline = dict(AGENT_LANE_WEIGHTS[agent_type])
+    with patch.dict(AGENT_LANE_WEIGHTS, {agent_type: weights_for(profile, baseline)}):
         for item in items:
             query = item["query"]
             start = time.perf_counter()
             results = store.query_hybrid(
-                query, agent_type="default", limit=10,
+                query, agent_type=agent_type, limit=10,
                 log_usage=False, expand_graph=False,
             )
             times_ms.append((time.perf_counter() - start) * 1000)
@@ -115,12 +115,15 @@ def _eval_clock(clock: str):
             os.environ[PINNED_NOW_ENV] = old
 
 
-def benchmark() -> dict:
+def benchmark(agent_type: str = "default") -> dict:
+    if agent_type not in ("default", "opencode"):
+        raise ValueError("benchmark agent must be default or opencode")
     exp = json.loads(EXPECTATIONS.read_text(encoding="utf-8"))
     import hashlib
     if hashlib.sha256(FIXTURE.read_bytes()).hexdigest() != exp["fixture"]["sha256"]:
         raise RuntimeError("Frozen fixture checksum mismatch; aborting analysis")
     report = {
+        "agent_type": agent_type,
         "pinned_now": exp["pinned_now"],
         "fixture_sha256": exp["fixture"]["sha256"],
         "profiles": {name: sorted(keys) for name, keys in PROFILES.items()},
@@ -156,7 +159,7 @@ def benchmark() -> dict:
                     profiles = {}
                     ranks = {}
                     for profile in PROFILES:
-                        scored, timings = _rank_items(store, items, profile)
+                        scored, timings = _rank_items(store, items, profile, agent_type)
                         ranks[profile] = scored
                         stats = aggregate(scored)
                         profiles[profile] = {
@@ -190,12 +193,14 @@ def benchmark() -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Read-only retrieval simplification ablation")
     parser.add_argument("--json", action="store_true", help="emit structured report")
+    parser.add_argument("--agent", default="default", choices=("default", "opencode"),
+                        help="agent-specific lane weights (default: default)")
     args = parser.parse_args(argv)
-    result = benchmark()
+    result = benchmark(args.agent)
     if args.json:
         print(json.dumps(result, indent=2))
     else:
-        print("CogniGraph retrieval simplification audit (frozen offline fixture)")
+        print("CogniGraph retrieval simplification audit (frozen offline fixture, agent: " + args.agent + ")")
         print("Note:", result["latency_caveat"])
         for name, split in result["splits"].items():
             print(f"\n{name} ({split['profiles']['full']['n']} labeled queries)")
