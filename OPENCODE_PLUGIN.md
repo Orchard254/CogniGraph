@@ -37,7 +37,11 @@ normal migration command when convenient.
 
 1. `prompt` hook records the submitted task without modifying the user's text.
 2. `context` hook reads the task, invokes `opencode_context.py` in a bounded
-   subprocess and appends the returned Markdown as a system text part.
+   subprocess and appends the returned Markdown as a system text part. Initial
+   task context now uses the Context Intelligence Layer to select concise,
+   evidence-labeled facts and risks, returning a receipt for only the memory
+   facts actually delivered. Explicit inspect/edit/verify/resume stages are
+   available through MCP; they are not yet automatically inferred by OpenCode.
 3. The OpenCode V2 `tool.execute.after` hook observes successful structured
    `read`, `edit`, `write`, and `multiedit` calls. When the actively worked-on
    source file changes (or is edited), CogniGraph refreshes a bounded,
