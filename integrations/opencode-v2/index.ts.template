@@ -62,7 +62,11 @@ function fetchContext(projectRoot, query) {
       if (code !== 0) return done("")
       try {
         const result = JSON.parse(stdout)
-        done(typeof result.context_markdown === "string" ? result.context_markdown : "")
+        const markdown = typeof result.context_markdown === "string" ? result.context_markdown : ""
+        const receipt = Number.isSafeInteger(result.retrieval_id) && result.retrieval_id > 0
+          ? `CogniGraph retrieval ID: ${result.retrieval_id}. Only rate cited facts after explicit user feedback or verified task evidence.\n`
+          : ""
+        done(markdown ? receipt + markdown : "")
       } catch {
         done("")
       }
