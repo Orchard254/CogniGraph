@@ -50,6 +50,8 @@ memory_cli = "memory_cli:main"
 [tool.setuptools]
 py-modules = [
     "memory_cli",
+    "install_opencode",
+    "opencode_context",
     "memory_store",
     "pm_common",
     "pm_search",
