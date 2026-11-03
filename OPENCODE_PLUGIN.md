@@ -49,7 +49,17 @@ normal migration command when convenient.
 5. A new user task resets both caches. Sessions are isolated by ID.
 6. Successful task-wide retrievals include a receipt ID that agents may use
    for attributable feedback through MCP. Mere exposure isn't evidence.
-7. If memory is unavailable or retrieval times out, no context is injected;
+7. OpenCode V2's documented `session.idle` event triggers automatic reporting
+   of successful structured `edit`, `write`, and `multiedit` tool paths
+   from that task. The generated plugin sends only the task retrieval receipt
+   and up to 20 project-relative source paths to a bounded local Python bridge,
+   which records a task-outcome report and review candidates in the existing
+   SQLite database. A new prompt or plugin unload also attempts to flush
+   pending observations.
+8. A reported edit is not confirmation the remembered fact helped, and no
+   ranking/confidence updates occur. The plugin deliberately does not send
+   test logs, terminal output, source content, or an inferred test pass.
+9. If memory is unavailable or retrieval times out, no context is injected;
    coding continues normally and existing MCP tools still work.
 
 On each refreshed file briefing, source-anchored facts with hashes receive

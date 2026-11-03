@@ -47,7 +47,10 @@ links reported file edits to *previously retrieved* fact IDs and queues only tho
 facts for review. `memory_task_outcome_review_queue` shows what needs attribution.
 **Neither a reported passing test nor an edit automatically boosts a memory.**
 The existing `memory_rate_context` requires evidence specific to each fact.
-See [Task Outcome Review](docs/TASK_OUTCOMES.md).
+OpenCode V2 can now report observed editor changes to this ledger automatically
+on session idle, without labeling retrieved facts as helpful. See
+[Task Outcome Review](docs/TASK_OUTCOMES.md) and
+[OpenCode Installation](OPENCODE_PLUGIN.md).
 
 ## Key Capabilities
 
