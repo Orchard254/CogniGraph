@@ -37,7 +37,10 @@ normal migration command when convenient.
 
 1. `prompt` hook records the submitted task without modifying the user's text.
 2. `context` hook reads the task, invokes `opencode_context.py` in a bounded
-   subprocess and appends the returned Markdown as a system text part.
+   subprocess and appends the returned Markdown as a system text part. The
+   initial task briefing is selected by the Context Intelligence Layer, which
+   prioritizes project knowledge by task phase, file relevance, provenance,
+   and a strict character budget.
 3. The OpenCode V2 `tool.execute.after` hook observes successful structured
    `read`, `edit`, `write`, and `multiedit` calls. When the actively worked-on
    source file changes (or is edited), CogniGraph refreshes a bounded,
@@ -73,6 +76,13 @@ update retrieval-usage counters). Neither
 an unrelated project nor the CogniGraph checkout can be used as a fallback.
 A bounded context payload is marked as **reference data, not instructions**;
 the agent should verify facts against current source code before modifying it.
+
+The Context Intelligence Layer is enabled for **initial task briefings**;
+file-focus refreshes still use the existing structural file-context system.
+Agents can request a distinct step-specific phase through the MCP tool
+`memory_get_intelligent_context`. Automatic inference of all coding phases
+from tool activity is not yet implemented. See
+[Context Intelligence](docs/CONTEXT_INTELLIGENCE.md).
 
 Current limitations: this adapter targets **OpenCode V2**, not V1. Only
 structured source-file paths from the supported editor tools trigger file

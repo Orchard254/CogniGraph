@@ -27,6 +27,13 @@ The easiest way to add persistent memory to any AI coding agent:
 
 That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 18 (package.json engines). On first run the wrapper creates venv/, installs requirements.txt (only mcp is hard-required; sqlite-vec/tree-sitter*/fastembed/numpy lanes degrade with a warning), and launches server.py (index.js:98-132,171-232), guarded by a pre-spawn py_compile check and a 5 s startup watchdog (index.js:245-285). postinstall.js is best-effort and leaves a .postinstall-incomplete marker re-verified on next startup (index.js:175-183).
 
+## Context intelligence
+
+Use `memory_get_intelligent_context` for phase-aware, bounded coding
+briefings with source-qualified fact references and explicit provenance
+warnings. The legacy retrieval tools remain available. See
+[Context Intelligence](docs/CONTEXT_INTELLIGENCE.md).
+
 ## Task outcome review
 
 After a coding task, use `memory_record_task_outcome` with a retrieval receipt

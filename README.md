@@ -20,6 +20,16 @@ See [OpenCode Plugin Installation](OPENCODE_PLUGIN.md) and run
 environment. Requires an existing project memory database and a compatible
 OpenCode V2 installation.
 
+## Context Intelligence Layer
+
+Coding agents can request a phase-aware, concise, source-labeled briefing with
+`memory_get_intelligent_context`. It prioritizes relevant decisions, constraints,
+components, and flagged knowledge for the current coding step. Retrieval receipts
+contain only the facts actually shown, and the composer respects a strict
+character budget. OpenCode V2 now uses it for the initial task briefing; the
+legacy context tools remain available. See
+[Context Intelligence](docs/CONTEXT_INTELLIGENCE.md).
+
 ## Source freshness checks
 
 When source-anchored facts have a recorded SHA-256 hash, CogniGraph now checks
@@ -165,7 +175,7 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 30 tools.
+The server registers 31 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -173,6 +183,7 @@ The server registers 30 tools.
 | `memory_write_batch` | `facts` | Atomic batch form of memory_write for several related facts. |
 | `memory_query` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?`, `explain?`, `fields?` | Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have. |
 | `memory_get_context` | `query`, `agent_type?`, `max_tokens?`, `limit?`, `intent?` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. |
+| `memory_get_intelligent_context` | `task`, `phase?`, `focus_files?`, `seen_refs?`, `max_tokens?`, `limit?`, `agent_type?` | Compose a phase-aware, provenance-labeled, budgeted coding briefing. Reports only shown fact IDs in its retrieval receipt; never changes fact truth or ranking. |
 | `memory_rate_context` | `retrieval_id`, `ratings`, `evidence_type?`, `evidence_ref?`, `verification_evidence?` | Record helpful, irrelevant, or incorrect fact feedback against a retrieval ID. |
 | `memory_relevance_feedback_stats` | — | Summarize relevance feedback counts by evidence type and rating. |
 | `memory_record_task_outcome` | `retrieval_id`, `changed_files`, `test_evidence?` | Log a completed coding task's edited files and optional test metadata, and suggest which retrieved facts need review. Does not alter memory ranking or verify that tests actually ran. |

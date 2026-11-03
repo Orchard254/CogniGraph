@@ -36,6 +36,7 @@ from pm_feedback import FeedbackMixin
 from pm_outcomes import TaskOutcomeMixin
 from pm_search import SearchMixin
 from pm_context import ContextMixin
+from pm_intelligence import IntelligenceMixin
 from pm_lifecycle import LifecycleMixin
 from pm_structural import StructuralMixin
 # corpus_hygiene is stdlib-only at module top level, so this is cycle-free
@@ -148,7 +149,7 @@ def bump_background_failure(kind: str) -> None:
         _BACKGROUND_FAILURES[kind] += 1
 
 
-class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin, FeedbackMixin, TaskOutcomeMixin):
+class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin, FeedbackMixin, TaskOutcomeMixin, IntelligenceMixin):
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or default_db_path()
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
