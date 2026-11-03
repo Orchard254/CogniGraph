@@ -108,19 +108,68 @@ def get_plugin_context(
             "retrieval_id": retrieval_id}
 
 
+
+def record_plugin_outcome(
+    project_root: str, retrieval_id: int, changed_files: list[str],
+) -> dict:
+    """Record observed editor changes for later review; never train rankings.
+
+    All paths must resolve to existing source files inside the active
+    project. No source content or tool output is stored.
+    """
+    root = Path(project_root).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError("Project root is not a directory")
+    if type(retrieval_id) is not int or retrieval_id <= 0:
+        raise ValueError("retrieval_id must be a positive integer")
+    if not isinstance(changed_files, list) or len(changed_files) > 20:
+        raise ValueError("changed_files must be a list of at most 20 paths")
+    valid = []
+    for file in changed_files:
+        relative = _safe_project_file(root, file)
+        if relative and relative not in valid:
+            valid.append(relative)
+    if not valid:
+        return {"status": "no_eligible_source_files", "ranking_updated": False}
+
+    canonical = root / ".cognigraph" / "memory.db"
+    legacy = root / ".project-memory" / "memory.db"
+    db = canonical if canonical.is_file() else legacy
+    if not db.is_file():
+        return {"status": "no_project_memory", "ranking_updated": False}
+
+    from memory_store import MemoryStore
+    store = MemoryStore(str(db))
+    try:
+        report = store.record_task_outcome(retrieval_id, valid)
+    finally:
+        store.close()
+    return {"status": "recorded", **report}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="IDE context retrieval via stdin JSON")
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--max-chars", type=int, default=4500)
+    parser.add_argument("--mode", choices=("context", "outcome"), default="context")
     args = parser.parse_args(argv)
     try:
         request = json.load(sys.stdin)
-        if not isinstance(request, dict) or not isinstance(request.get("query"), str):
-            raise ValueError("Input must be a JSON object with a string query")
-        response = get_plugin_context(
-            args.project_root, request["query"], args.max_chars,
-            file_paths=request.get("file_paths"),
-        )
+        if not isinstance(request, dict):
+            raise ValueError("Input must be a JSON object")
+        if args.mode == "outcome":
+            response = record_plugin_outcome(
+                args.project_root,
+                request.get("retrieval_id"),
+                request.get("changed_files"),
+            )
+        else:
+            if not isinstance(request.get("query"), str):
+                raise ValueError("Input must include a string query")
+            response = get_plugin_context(
+                args.project_root, request["query"], args.max_chars,
+                file_paths=request.get("file_paths"),
+            )
         sys.stdout.write(json.dumps(response) + "\n")
         return 0
     except (ValueError, OSError, RuntimeError, KeyError, ImportError) as exc:
