@@ -89,6 +89,16 @@ class RelevanceFeedbackTests(unittest.TestCase):
         s.conn.execute("UPDATE memory_relevance_feedback SET recorded_at=?", (old,))
         self.assertEqual(s._feedback_boost("fix oauth session login refresh"), {})
 
+    def test_agent_cannot_overwrite_evidenced_feedback(self):
+        s = self.store
+        s.record_relevance_feedback(10, [{"fact_id": 1, "rating": "helpful"}], "user")
+        result = s.record_relevance_feedback(
+            10, [{"fact_id": 1, "rating": "incorrect"}], "agent")
+        self.assertEqual(result["recorded"], 0)
+        self.assertEqual(s.relevance_feedback_stats()["by_evidence_and_rating"],
+                         {"user:helpful": 1})
+        self.assertGreater(s._feedback_boost("fix oauth session login refresh")[1], 1.0)
+
     def test_invalid_feedback_does_not_partially_write(self):
         s = self.store
         with self.assertRaises(ValueError):
