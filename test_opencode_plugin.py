@@ -227,6 +227,37 @@ class OpenCodePluginTests(unittest.TestCase):
                 result = get_plugin_context(d, "token=abcdefghijklmnopqr123456")
             self.assertEqual(result["status"], "sensitive_query")
 
+    def test_new_bridge_uses_context_intelligence_with_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / ".cognigraph" / "memory.db"
+            db.parent.mkdir()
+            db.touch()
+            received = []
+            class FakeStore:
+                def __init__(self, path):
+                    received.append(("opened", path))
+                def get_intelligent_context(self, query, **kwargs):
+                    received.append(("briefing", query, kwargs))
+                    return {
+                        "context_markdown": "### CogniGraph | Task orientation\\n- [MEM #17] Auth decision",
+                        "retrieval_id": 48, "status": "ok", "fact_ids": [17],
+                    }
+                def close(self):
+                    received.append(("closed",))
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False),
+            }):
+                result = get_plugin_context(directory, "fix login refresh", max_chars=1400)
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["retrieval_id"], 48)
+            self.assertIn("MEM #17", result["context_markdown"])
+            self.assertEqual(received[1][2]["stage"], "task")
+            self.assertEqual(received[1][2]["agent_type"], "opencode")
+            self.assertEqual(received[1][2]["max_chars"], 1400)
+            self.assertEqual(received[-1], ("closed",))
+
     def test_bridge_passes_project_path_budget_and_agent(self):
         with tempfile.TemporaryDirectory() as d:
             db = Path(d) / ".cognigraph/memory.db"
