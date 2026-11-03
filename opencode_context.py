@@ -30,6 +30,11 @@ def get_plugin_context(project_root: str, query: str, max_chars: int = 4500) -> 
     if not db.is_file():
         return {"context_markdown": "", "status": "no_project_memory"}
 
+    from pm_common import looks_like_secret
+    if looks_like_secret(task):
+        # Automatic prompt handling must not persist credentials in usage logs.
+        return {"context_markdown": "", "status": "sensitive_query"}
+
     from memory_store import MemoryStore
 
     cap = max(256, min(int(max_chars), MAX_CONTEXT_CHARS))
