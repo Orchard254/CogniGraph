@@ -9,3 +9,5 @@ include integrations/opencode-v2/index.ts.template
 include OPENCODE_PLUGIN.md
 
 include docs/FEEDBACK_LEARNING.md
+
+include docs/SOURCE_FRESHNESS.md
