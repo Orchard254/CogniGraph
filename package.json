@@ -42,6 +42,7 @@
     "corpus_hygiene.py",
     "pm_common.py",
     "pm_feedback.py",
+    "pm_intelligence.py",
     "pm_outcomes.py",
     "pm_freshness.py",
     "pm_search.py",
@@ -73,7 +74,8 @@
     "OPENCODE_PLUGIN.md",
     "docs/FEEDBACK_LEARNING.md",
     "docs/TASK_OUTCOMES.md",
-    "docs/SOURCE_FRESHNESS.md"
+    "docs/SOURCE_FRESHNESS.md",
+    "docs/CONTEXT_INTELLIGENCE.md"
   ],
   "dependencies": {},
   "devDependencies": {}
