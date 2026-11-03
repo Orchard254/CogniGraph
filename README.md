@@ -52,6 +52,13 @@ on session idle, without labeling retrieved facts as helpful. See
 [Task Outcome Review](docs/TASK_OUTCOMES.md) and
 [OpenCode Installation](OPENCODE_PLUGIN.md).
 
+## Simplification research
+
+We are evaluating whether a leaner memory interface and fewer retrieval lanes
+can preserve answer quality. The non-destructive offline benchmark compares
+full, core, lexical and FTS-only fusion against the frozen golden split.
+No production lanes are removed. See [Simplification Audit](docs/SIMPLIFICATION_AUDIT.md).
+
 ## Key Capabilities
 
 1. **Hybrid RRF Search Engine**: Combines SQLite FTS5 BM25 keyword matching with term-vector similarity via Reciprocal Rank Fusion ($RRF = \frac{1}{5 + rank_{bm25}} + \frac{1}{5 + rank_{vec}}$).
