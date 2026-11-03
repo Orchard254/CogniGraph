@@ -2,6 +2,14 @@
 
 CogniGraph: universal MCP server for persistent project memory across all AI coding IDEs.
 
+## Native OpenCode V2 context delivery
+
+The optional OpenCode V2 plugin injects relevant memory into outgoing model
+requests automatically. MCP remains available for on-demand queries.
+See [OPENCODE_PLUGIN.md](OPENCODE_PLUGIN.md). In the installed CogniGraph package,
+run `python install_opencode.py --root /path/to/project` using the bundled
+Python environment. Existing project memory must be initialized first.
+
 ## 🚀 Zero-Configuration Setup
 
 The easiest way to add persistent memory to any AI coding agent:

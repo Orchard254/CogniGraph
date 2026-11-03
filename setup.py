@@ -12,6 +12,7 @@ _SCHEMA_FILES = (
     "phase2_branch_admin.sql",
     "episodic_fts.sql",
     "legacy_provenance.sql",
+    "integrations/opencode-v2/index.ts.template",
 )
 
 
@@ -26,6 +27,7 @@ class BuildPyWithSchema(build_py):
             source = source_root / filename
             if not source.is_file():
                 raise FileNotFoundError(f"Required CogniGraph schema resource is missing: {source}")
+            (build_root / filename).parent.mkdir(parents=True, exist_ok=True)
             self.copy_file(str(source), str(build_root / filename))
 
     def get_outputs(self, include_bytecode=1):

@@ -33,12 +33,12 @@ const REQUIRED_FILES = [
   'server.py', 'memory_store.py', 'corpus_hygiene.py', 'pm_backup.py', 'pm_common.py', 'pm_search.py',
   'pm_context.py', 'pm_lifecycle.py', 'pm_structural.py', 'bootstrap.py',
   'structural_extract.py', 'branch_promotion.py', 'genesis_migrate.py',
-  'watcher.py', 'wire.py', 'memory_cli.py', '__init__.py',
+  'watcher.py', 'wire.py', 'memory_cli.py', 'install_opencode.py', 'opencode_context.py', '__init__.py',
   'requirements.txt',
   'phase0_schema.sql', 'phase1_episodic.sql',
   'phase1_episodic_embeddings.sql', 'phase2_branch_admin.sql',
   'episodic_fts.sql', 'legacy_provenance.sql',
-  'hooks/git_hook.py',
+  'hooks/git_hook.py', 'integrations/opencode-v2/index.ts.template', 'OPENCODE_PLUGIN.md',
 ];
 
 // Only 'mcp' is hard-required (the server cannot run without it); every
