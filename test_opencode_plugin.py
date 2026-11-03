@@ -71,7 +71,8 @@ class OpenCodePluginTests(unittest.TestCase):
                                           "pm_common": types.SimpleNamespace(looks_like_secret=lambda text: False)}):
                 result = get_plugin_context(d, "fix authentication", max_chars=1200)
             self.assertEqual(result["status"], "ok")
-            self.assertEqual(calls[0], str(db))
+            # Windows may return the same path in short (8.3) or long form.
+            self.assertTrue(Path(calls[0]).samefile(db))
             self.assertEqual(calls[1][1]["agent_type"], "opencode")
             self.assertEqual(calls[1][1]["max_chars"], 1200)
             self.assertEqual(calls[-1], "closed")
