@@ -75,12 +75,24 @@ def get_plugin_context(
         parts = []
         retrieval_id = None
         if task:
-            markdown = store.get_context(
-                task, limit=5, max_chars=cap, agent_type="opencode"
-            )
-            retrieval_id = getattr(store, "_last_retrieval_id", None)
-            if "*No matching facts found in memory.*" not in markdown:
-                parts.append(markdown[:cap])
+            # New installations receive compact, evidence-labeled task context.
+            # The fallback keeps older test doubles and installations compatible.
+            if hasattr(store, "get_intelligent_context"):
+                briefing = store.get_intelligent_context(
+                    task, stage="task", max_chars=cap,
+                    max_facts=7, agent_type="opencode",
+                )
+                markdown = briefing["context_markdown"]
+                retrieval_id = briefing.get("retrieval_id")
+                if briefing.get("status") == "ok":
+                    parts.append(markdown[:cap])
+            else:
+                markdown = store.get_context(
+                    task, limit=5, max_chars=cap, agent_type="opencode"
+                )
+                retrieval_id = getattr(store, "_last_retrieval_id", None)
+                if "*No matching facts found in memory.*" not in markdown:
+                    parts.append(markdown[:cap])
 
         # File focus comes only from structured successful IDE tool calls,
         # not arbitrary text scraped from shell output. Re-validate here.
