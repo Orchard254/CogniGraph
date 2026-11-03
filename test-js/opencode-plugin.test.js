@@ -14,7 +14,7 @@ test('OpenCode V2 hook injects per-request context while reusing retrieval per t
   process.env.COGNIGRAPH_TEST_CALLS = countFile;
   try {
     const fakeBridge = path.join(root, 'fake-bridge.js');
-    fs.writeFileSync(fakeBridge, \`
+    fs.writeFileSync(fakeBridge, `
 const fs = require('node:fs');
 let input = '';
 process.stdin.on('data', c => input += c);
@@ -22,7 +22,7 @@ process.stdin.on('end', () => {
   fs.appendFileSync(process.env.COGNIGRAPH_TEST_CALLS, '1');
   process.stdout.write(JSON.stringify({context_markdown: 'context for ' + JSON.parse(input).query}));
 });
-\`);
+`);
     let code = fs.readFileSync(template, 'utf8')
       .replace('import { Plugin } from "@opencode/plugin"', 'const Plugin = { define: (definition) => definition }')
       .replace('__COGNIGRAPH_PYTHON_JSON__', JSON.stringify(process.execPath))
