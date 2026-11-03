@@ -1,7 +1,7 @@
 """Bounded, project-scoped CogniGraph context bridge for IDE plugins.
 
 Protocol: one JSON object on stdin with `query`; one JSON object on stdout.
-No external model or MCP server is required for this read-only retrieval path.
+No external model or MCP server is required. Retrieval usage counters may update.
 """
 from __future__ import annotations
 
