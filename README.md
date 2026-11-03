@@ -20,6 +20,13 @@ See [OpenCode Plugin Installation](OPENCODE_PLUGIN.md) and run
 environment. Requires an existing project memory database and a compatible
 OpenCode V2 installation.
 
+## MCP interface discipline
+
+CogniGraph exposes 31 MCP tools, but most coding tasks should use a small,
+relevant subset. New capabilities should reuse existing tools, plugin hooks,
+or internal methods by default. See [Tool Governance](docs/TOOL_GOVERNANCE.md)
+for the current overlap audit and change-review requirements.
+
 ## Context Intelligence Layer
 
 Coding agents can request a phase-aware, concise, source-labeled briefing with
