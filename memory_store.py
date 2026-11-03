@@ -33,6 +33,7 @@ from pm_common import (
     logger,
 )
 from pm_feedback import FeedbackMixin
+from pm_outcomes import TaskOutcomeMixin
 from pm_search import SearchMixin
 from pm_context import ContextMixin
 from pm_lifecycle import LifecycleMixin
@@ -147,7 +148,7 @@ def bump_background_failure(kind: str) -> None:
         _BACKGROUND_FAILURES[kind] += 1
 
 
-class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin, FeedbackMixin):
+class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin, FeedbackMixin, TaskOutcomeMixin):
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or default_db_path()
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -159,6 +160,7 @@ class MemoryStore(SearchMixin, ContextMixin, LifecycleMixin, StructuralMixin, Fe
         self.conn.executescript(SCHEMA)
         self._ensure_schema_migrations()
         self._ensure_relevance_feedback_schema()
+        self._ensure_task_outcome_schema()
         self._ensure_embedding_schema()
 
         # Attempt to load sqlite-vec extension and create vec0-backed table for fast KNN

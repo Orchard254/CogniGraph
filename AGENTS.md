@@ -37,6 +37,10 @@ While working:
 At the end of every session:
 8. Call `memory_checkpoint_task` with the verified test output: `summary` (string), `test_baseline` (string), plus optional `components` and `decisions` (each a list of dicts with a required `content` key and optional `rationale`, `confidence`, `file_path`, `line_start`, `line_end`, `code_hash`, `tags`, `importance`), and optional `failures` (list of dicts with a required `content` key and optional `rationale`) for approaches that did not work.
 
+
+9. If the coding task changed files and you have a prior CogniGraph `retrieval_id`, call `memory_record_task_outcome(retrieval_id, changed_files, test_evidence?)` after completing the task. Only include files actually changed; only report test commands, exit codes, and commit SHAs you observed. This creates candidate memories for review and does **not** train ranking.
+10. Use `memory_task_outcome_review_queue` when useful to identify facts needing explicit review. Do not rate a memory as helpful solely because the task tests passed or the agent used it; use `memory_rate_context` only with attributable, fact-specific evidence or explicit user feedback.
+
 Maintenance (weekly or when drift is suspected) runs via CLI/background, not MCP:
 - `python memory_cli.py prune-stubs [--prune-root DIR] [--apply]` — deprecates whole-file `Source file:` stubs whose file no longer exists. Dry-run by default. Stubs are *inventory*, so a deleted file makes them false; curated facts with a dangling anchor are a **different** problem — null the `file_path` and keep the fact. The scope flag is `--prune-root`, not `--root`, because `--root` selects the database and would bootstrap a stray project for a typo.
 - `backup`, `scan-provenance`, `audit`, `pollution`, `prune`, `optimize`, `backfill`, `export`, `bootstrap`, `branch` via `memory_cli.py`; auto-maintenance also runs on server startup and takes a timestamped full-DB backup first (keep 8). Migration scripts snapshot automatically before mutating.
@@ -59,4 +63,4 @@ Code graph (one-hop queries — ask these mid-reasoning instead of re-reading fi
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.
 - If `memory_cli.py wire` reports `WIRED_WITH_ERRORS`, fix `config_errors` first - the listed config was not written (wire.py:207-222).
-<!-- cognigraph-template sha256:2834e3249a1388e2fdb2f3dd38d251f1f0b7d08f0b683b6f9e3bf57a13f393ef -->
+<!-- cognigraph-template sha256:dfb65579e55a6931cbc192b1389931d38ba4615d2de71544a6d2f4e23ed84a54 -->

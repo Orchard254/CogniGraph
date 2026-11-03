@@ -271,6 +271,8 @@ KNOWN_AGENTS_TEMPLATE_HASHES = frozenset({
     "013d78febaf7fbc833d1b8f2a523e816f1aef8cc2aa5b3bb10a296492b3b9215",
     # feat(relevance): task-outcome learning protocol + native OpenCode guidance
     "2834e3249a1388e2fdb2f3dd38d251f1f0b7d08f0b683b6f9e3bf57a13f393ef",
+    # docs(agents): task outcome review candidates after completed coding work
+    "dfb65579e55a6931cbc192b1389931d38ba4615d2de71544a6d2f4e23ed84a54",
 })
 
 
