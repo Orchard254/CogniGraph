@@ -20,6 +20,14 @@ See [OpenCode Plugin Installation](OPENCODE_PLUGIN.md) and run
 environment. Requires an existing project memory database and a compatible
 OpenCode V2 installation.
 
+## Product thesis and validation
+
+Our goal is measurably better project-aware coding decisions, not tool count or
+memory volume. The existing retrieval gate alone does not measure whether facts
+reach the model or improve coding outcomes. A report-only rendered-context
+benchmark compares legacy and phase-aware briefings on identical frozen
+queries. See [Product Thesis and Validation](docs/PRODUCT_THESIS_AND_VALIDATION.md).
+
 ## MCP interface discipline
 
 CogniGraph exposes 31 MCP tools, but most coding tasks should use a small,
