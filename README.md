@@ -20,6 +20,18 @@ See [OpenCode Plugin Installation](OPENCODE_PLUGIN.md) and run
 environment. Requires an existing project memory database and a compatible
 OpenCode V2 installation.
 
+## Learning from verified outcomes
+
+Context retrievals return a `retrieval_id`. When a user identifies a useful,
+irrelevant, or incorrect fact—or a task has attributable test evidence—the
+agent can call `memory_rate_context` with that retrieval ID and the fact IDs.
+Repeated retrieval alone is **not** positive evidence. Agent-only opinions are
+stored for diagnosis but do not change rankings.
+
+Reported outcomes tune future retrievals for similar tasks, with bounded
+boosts, negative feedback, and time decay. Inspect the learning history using
+`memory_relevance_feedback_stats`. See [Feedback Learning](docs/FEEDBACK_LEARNING.md).
+
 ## Key Capabilities
 
 1. **Hybrid RRF Search Engine**: Combines SQLite FTS5 BM25 keyword matching with term-vector similarity via Reciprocal Rank Fusion ($RRF = \frac{1}{5 + rank_{bm25}} + \frac{1}{5 + rank_{vec}}$).
@@ -133,7 +145,7 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 26 tools.
+The server registers 28 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -141,6 +153,8 @@ The server registers 26 tools.
 | `memory_write_batch` | `facts` | Atomic batch form of memory_write for several related facts. |
 | `memory_query` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?`, `explain?`, `fields?` | Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have. |
 | `memory_get_context` | `query`, `agent_type?`, `max_tokens?`, `limit?`, `intent?` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. |
+| `memory_rate_context` | `retrieval_id`, `ratings`, `evidence_type?`, `evidence_ref?`, `verification_evidence?` | Record helpful, irrelevant, or incorrect fact feedback against a retrieval ID. |
+| `memory_relevance_feedback_stats` | — | Summarize relevance feedback counts by evidence type and rating. |
 | `memory_get_file_context` | `file_path` | Call while planning an approach to a file — and before editing it: its symbols, anchored facts, callers, and call-graph edges. |
 | `memory_check_safety` | `file_paths` | Call before a multi-file refactor: dependency risk matrix across the files you're about to change. |
 | `memory_check_security` | `file_paths` | Heuristic security scan: flag sensitive/PII/dangerous patterns (password, secret, token, eval, exec, shell, SQL interpolation) with file:line, plus cross-file impact. |
