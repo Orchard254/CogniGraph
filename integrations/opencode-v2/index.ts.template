@@ -110,7 +110,7 @@ export default Plugin.define({
         : undefined
       if (typeof file !== "string" || !file.trim() || file.length > 512) return
       const index = state.focus.indexOf(file)
-      const changed = index !== state.focus.length - 1
+      const changed = index === -1 || index !== state.focus.length - 1
       const edited = event.tool !== "read"
       if (!changed && !edited) return
       if (index >= 0) state.focus.splice(index, 1)
