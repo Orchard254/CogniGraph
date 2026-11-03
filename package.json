@@ -68,7 +68,8 @@
     "install_opencode.py",
     "opencode_context.py",
     "integrations/opencode-v2/index.ts.template",
-    "OPENCODE_PLUGIN.md"
+    "OPENCODE_PLUGIN.md",
+    "docs/FEEDBACK_LEARNING.md"
   ],
   "dependencies": {},
   "devDependencies": {}
