@@ -88,6 +88,11 @@ Agents can request a distinct step-specific phase through the MCP tool
 from tool activity is not yet implemented. See
 [Context Intelligence](docs/CONTEXT_INTELLIGENCE.md).
 
+See [LLM Context Delivery Contract](docs/LLM_CONTEXT_DELIVERY_CONTRACT.md)
+for the request-level trust and repetition policy. Automatic cross-request
+suppression is intentionally not enabled until installed-host input assembly
+and required-fact coverage are verified.
+
 Current limitations: this adapter targets **OpenCode V2**, not V1. Only
 structured source-file paths from the supported editor tools trigger file
 refreshes; a shell command, file watcher, or external Git change does not.
