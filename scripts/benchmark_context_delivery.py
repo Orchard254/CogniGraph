@@ -12,6 +12,7 @@ Run: python scripts/benchmark_context_delivery.py --split holdout
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -51,7 +52,9 @@ def legacy_refs(markdown: str) -> list[str]:
         if not ident:
             continue
         source = "episodic" if label.startswith("EPISODIC/") else "memory"
-        result.append(f"{source}:{ident.group(1)}")
+        ref = f"{source}:{ident.group(1)}"
+        if ref not in result:
+            result.append(ref)
     return result
 
 
@@ -76,6 +79,8 @@ def assess_cases(rows: list[dict], limit: int) -> dict:
         "mean_delivered_chars": round(statistics.mean(lengths), 1) if n else None,
         "median_latency_ms": round(statistics.median(durations), 2) if n else None,
         "budget_violations": overflow,
+        "mean_primary_facts": round(statistics.mean(len(r["refs"]) for r in rows), 2) if n else None,
+        "p95_latency_ms": round(sorted(durations)[max(0, (95 * n + 99) // 100 - 1)], 2) if n else None,
     }
 
 
@@ -147,48 +152,76 @@ def run_benchmark(split: str = "holdout", budget: int = 2900, limit: int = 5) ->
         raise FileNotFoundError("The committed frozen evaluation fixture is required")
 
     metadata = json.loads(EXPECTATIONS.read_text(encoding="utf-8"))
-    # This is a diagnostic. The existing eval gate independently validates the
-    # committed fixture SHA; do not replace or loosen that gate.
-    os.environ[PINNED_NOW_ENV] = metadata["pinned_now"]
-    partitions = tuple(SPLITS) if split == "both" else (split,)
-    reports = {}
-    for partition in partitions:
-        gold = eval_golden.load_golden(SPLITS[partition])
-        by_variant = {}
-        for variant in ("legacy", "intelligent"):
-            path = eval_golden.snapshot_db(str(FIXTURE))
-            try:
-                from memory_store import MemoryStore
+    source_sha = hashlib.sha256(FIXTURE.read_bytes()).hexdigest()
+    if source_sha != metadata["fixture"]["sha256"]:
+        raise ValueError("Frozen fixture SHA-256 mismatch; do not benchmark altered data")
 
-                store = MemoryStore(path)
+    # Restore the caller's clock even if the benchmark fails halfway through.
+    old_clock = os.environ.get(PINNED_NOW_ENV)
+    os.environ[PINNED_NOW_ENV] = metadata["pinned_now"]
+    try:
+        partitions = tuple(SPLITS) if split == "both" else (split,)
+        reports = {}
+        for partition in partitions:
+            gold = eval_golden.load_golden(SPLITS[partition])
+            by_variant = {}
+            for variant in ("legacy", "intelligent"):
+                path = eval_golden.snapshot_db(str(FIXTURE))
                 try:
-                    observed = _run_variant(store, gold, variant, budget, limit)
+                    from memory_store import MemoryStore
+
+                    store = MemoryStore(path)
+                    try:
+                        before_usage = eval_golden.usage_log_count(path)
+                        before_access = store.conn.execute(
+                            "SELECT COALESCE(SUM(access_count), 0) FROM memory"
+                        ).fetchone()[0]
+                        observed = _run_variant(store, gold, variant, budget, limit)
+                        after_usage = eval_golden.usage_log_count(path)
+                        after_access = store.conn.execute(
+                            "SELECT COALESCE(SUM(access_count), 0) FROM memory"
+                        ).fetchone()[0]
+                        if (before_usage, before_access) != (after_usage, after_access):
+                            raise RuntimeError(
+                                "Context evaluation unexpectedly modified retrieval accounting"
+                            )
+                    finally:
+                        store.close()
                 finally:
-                    store.close()
-            finally:
-                shutil.rmtree(Path(path).parent, ignore_errors=True)
-            by_variant[variant] = {
-                "metrics": assess_cases(observed, limit),
-                "misses": [
-                    {"fact_id": row["expected_fact_id"], "query": row["query"]}
-                    for row in observed
-                    if f"memory:{row['expected_fact_id']}" not in row["refs"][:limit]
-                ],
-            }
-        reports[partition] = by_variant
-    return {
-        "dataset": "frozen single-target golden queries",
-        "scope": "rendered primary-fact delivery; NOT coding outcome quality",
-        "clock": metadata["pinned_now"],
-        "limit": limit,
-        "budget_chars": budget,
-        "splits": reports,
-        "comparison_note": (
-            "A delivered target fact is not proof the agent used it correctly. "
-            "This dataset does not label irrelevant/false facts or measure task completion. "
-            "No performance threshold is set from this result."
-        ),
-    }
+                    shutil.rmtree(Path(path).parent, ignore_errors=True)
+                by_variant[variant] = {
+                    "metrics": assess_cases(observed, limit),
+                    "misses": [
+                        {"fact_id": row["expected_fact_id"], "query": row["query"]}
+                        for row in observed
+                        if f"memory:{row['expected_fact_id']}" not in row["refs"][:limit]
+                    ],
+                    "accounting_unchanged": True,
+                }
+            reports[partition] = by_variant
+
+        if hashlib.sha256(FIXTURE.read_bytes()).hexdigest() != source_sha:
+            raise RuntimeError("Benchmark changed the committed fixture")
+        return {
+            "dataset": "frozen single-target golden queries",
+            "scope": "rendered primary-fact delivery; NOT coding outcome quality",
+            "clock": metadata["pinned_now"],
+            "fixture_sha256": source_sha,
+            "source_fixture_unchanged": True,
+            "limit": limit,
+            "budget_chars": budget,
+            "splits": reports,
+            "comparison_note": (
+                "A delivered target fact is not proof the agent used it correctly. "
+                "This dataset does not label irrelevant/false facts or measure task completion. "
+                "No performance threshold is set from this result."
+            ),
+        }
+    finally:
+        if old_clock is None:
+            os.environ.pop(PINNED_NOW_ENV, None)
+        else:
+            os.environ[PINNED_NOW_ENV] = old_clock
 
 
 def main(argv=None) -> int:
@@ -216,7 +249,9 @@ def main(argv=None) -> int:
                       f"mrr={scores['target_mrr']:<7} "
                       f"chars={scores['mean_delivered_chars']:<7} "
                       f"median_ms={scores['median_latency_ms']:<7} "
-                      f"budget_violations={scores['budget_violations']}")
+                      f"budget_violations={scores['budget_violations']} "
+              f"p95_ms={scores['p95_latency_ms']} "
+              f"primary_facts={scores['mean_primary_facts']}")
         print("  NOTE:", report["comparison_note"])
     return 0
 

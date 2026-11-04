@@ -270,6 +270,7 @@ jobs:
       - name: Run retrieval-quality gate against the frozen fixture
         run: venv/bin/python scripts/eval_gate.py
 
-      - name: Compare delivered context (report only; no quality threshold)
-        run: venv/bin/python scripts/benchmark_context_delivery.py --split holdout
+
+      - name: Compare delivered context (diagnostic, no metric threshold)
+        run: venv/bin/python scripts/benchmark_context_delivery.py --split both
         shell: bash
