@@ -270,13 +270,7 @@ jobs:
       - name: Run retrieval-quality gate against the frozen fixture
         run: venv/bin/python scripts/eval_gate.py
 
-      # Diagnostic only: no enforced advantage for either composer until
-      # delivered-context judgments and real agent task outcomes are validated.
-      # An execution error fails CI, but metric differences are reported,
-      # never interpreted automatically as task-level intelligence gains.
-      - name: Compare delivered context (diagnostic, no metric threshold)
-        run: venv/bin/python scripts/eval_context_delivery.py
 
-      - name: Compare delivered context (report only; no quality threshold)
-        run: venv/bin/python scripts/benchmark_context_delivery.py --split holdout
+      - name: Compare delivered context (diagnostic, no metric threshold)
+        run: venv/bin/python scripts/benchmark_context_delivery.py --split both
         shell: bash
