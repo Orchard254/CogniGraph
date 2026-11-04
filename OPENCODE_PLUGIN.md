@@ -46,7 +46,11 @@ normal migration command when convenient.
    source file changes (or is edited), CogniGraph refreshes a bounded,
    file-specific briefing at the next model request. Failed tools and arbitrary
    shell output are never used to infer a file path.
-4. The task-wide briefing remains cached. File context is independently cached
+4. The task-wide briefing remains cached but is included in every new model
+   request; prior exposure does not establish current request availability.
+   Re-processing the *same mutable request* replaces CogniGraph's own memory
+   system block rather than adding a duplicate. Other plugins' system parts
+   are preserved. File context is independently cached
    until focus changes or the editor reports an edit. The most recent two
    observed file paths are eligible for refresh.
 5. A new user task resets both caches. Sessions are isolated by ID.
