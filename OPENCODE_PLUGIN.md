@@ -46,7 +46,11 @@ normal migration command when convenient.
    source file changes (or is edited), CogniGraph refreshes a bounded,
    file-specific briefing at the next model request. Failed tools and arbitrary
    shell output are never used to infer a file path.
-4. The task-wide briefing remains cached. File context is independently cached
+4. The task-wide briefing remains cached but is included in every new model
+   request; prior exposure does not establish current request availability.
+   Re-processing the *same mutable request* replaces CogniGraph's own memory
+   system block rather than adding a duplicate. Other plugins' system parts
+   are preserved. File context is independently cached
    until focus changes or the editor reports an edit. The most recent two
    observed file paths are eligible for refresh.
 5. A new user task resets both caches. Sessions are isolated by ID.
@@ -83,6 +87,11 @@ Agents can request a distinct step-specific phase through the MCP tool
 `memory_get_intelligent_context`. Automatic inference of all coding phases
 from tool activity is not yet implemented. See
 [Context Intelligence](docs/CONTEXT_INTELLIGENCE.md).
+
+See [LLM Context Delivery Contract](docs/LLM_CONTEXT_DELIVERY_CONTRACT.md)
+for the request-level trust and repetition policy. Automatic cross-request
+suppression is intentionally not enabled until installed-host input assembly
+and required-fact coverage are verified.
 
 Current limitations: this adapter targets **OpenCode V2**, not V1. Only
 structured source-file paths from the supported editor tools trigger file

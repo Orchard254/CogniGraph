@@ -49,6 +49,14 @@ process.stdin.on('end', () => {
     await hooks.get('context')(second);
     assert.equal(second.system.length, 1);
     assert.equal(fs.readFileSync(countFile, 'utf8').length, 1);
+    // Each new model request needs the cached context; the same mutable
+    // request should not acquire another copy when its hook retries.
+    assert.equal(second.system[0].text, first.system[0].text);
+    second.system.push({type:'text', text:'Independent system instruction'});
+    await hooks.get('context')(second);
+    assert.equal(second.system.length, 2);
+    assert.equal(second.system[1].text, 'Independent system instruction');
+    assert.equal(fs.readFileSync(countFile, 'utf8').length, 1);
 
     hooks.get('prompt')({sessionID: 's1', prompt: {text: 'add cache'}});
     const third = req(); // transcript may be stale until new prompt is admitted
@@ -64,6 +72,9 @@ process.stdin.on('end', () => {
     await hooks.get('context')(focused);
     assert.match(focused.system[0].text, /focused files: src\/auth.ts/);
     assert.equal(fs.readFileSync(countFile, 'utf8').length, 3);
+    await hooks.get('context')(focused);
+    assert.equal(focused.system.length, 1, 'same assembled request has one memory block');
+    assert.equal(fs.readFileSync(countFile, 'utf8').length, 3);
 
     // The same read should not trigger another retrieval.
     toolHook({sessionID:'s1', status:'completed', tool:'read',
@@ -74,7 +85,11 @@ process.stdin.on('end', () => {
     // Edits always refresh the active file briefing, even for the same path.
     toolHook({sessionID:'s1', status:'completed', tool:'edit',
       input:{filePath:'src/auth.ts'}});
-    await hooks.get('context')(req());
+    // Reassembling a prior request after an edit must replace its old
+    // file-focus block, not append another.
+    await hooks.get('context')(focused);
+    assert.equal(focused.system.length, 1);
+    assert.match(focused.system[0].text, /focused files/);
     assert.equal(fs.readFileSync(countFile, 'utf8').length, 4);
 
     // Failed tools and commands without a structured filename cannot focus.
