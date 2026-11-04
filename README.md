@@ -45,6 +45,11 @@ character budget. OpenCode V2 now uses it for the initial task briefing; the
 legacy context tools remain available. See
 [Context Intelligence](docs/CONTEXT_INTELLIGENCE.md).
 
+We now compare actual legacy and phase-aware briefing delivery against the
+existing frozen golden fixture without recording usage or changing rankings.
+This is a **diagnostic of labeled fact delivery, not proof of coding success**.
+See [Context Delivery Benchmark](docs/CONTEXT_DELIVERY_BENCHMARK.md).
+
 ## Source freshness checks
 
 When source-anchored facts have a recorded SHA-256 hash, CogniGraph now checks
