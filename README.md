@@ -43,7 +43,11 @@ components, and flagged knowledge for the current coding step. Retrieval receipt
 contain only the facts actually shown, and the composer respects a strict
 character budget. OpenCode V2 now uses it for the initial task briefing; the
 legacy context tools remain available. See
-[Context Intelligence](docs/CONTEXT_INTELLIGENCE.md).
+[Context Intelligence](docs/CONTEXT_INTELLIGENCE.md) and the
+[LLM Context Delivery Contract](docs/LLM_CONTEXT_DELIVERY_CONTRACT.md).
+Retrieval caching is not proof that a future model request contains the
+knowledge; different requests may require replay. The OpenCode adapter
+maintains a single CogniGraph block within each assembled request.
 
 We now compare actual legacy and phase-aware briefing delivery against the
 existing frozen golden fixture without recording usage or changing rankings.
