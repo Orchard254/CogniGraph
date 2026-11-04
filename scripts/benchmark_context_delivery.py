@@ -52,7 +52,9 @@ def legacy_refs(markdown: str) -> list[str]:
         if not ident:
             continue
         source = "episodic" if label.startswith("EPISODIC/") else "memory"
-        result.append(f"{source}:{ident.group(1)}")
+        ref = f"{source}:{ident.group(1)}"
+        if ref not in result:
+            result.append(ref)
     return result
 
 
