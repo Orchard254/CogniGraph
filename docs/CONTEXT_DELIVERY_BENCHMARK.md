@@ -17,7 +17,7 @@ Use the existing immutable fixture `eval/fixtures/golden_fixture.db`,
 the 36 tuning and 16 holdout query/fact pairs, and the existing
 `golden_expectations.json` fixture hash and pinned recency clock.
 
-Run both composers against the same temporary SQLite snapshot:
+Run both composers against independent temporary SQLite snapshots of the same frozen fixture:
 - Legacy: `MemoryStore.get_context(query, limit=5, max_chars=2900)`
 - Context Intelligence: `MemoryStore.get_intelligent_context(query,
   phase="orient", limit=5, max_chars=2900, log_usage=False)`
@@ -25,8 +25,9 @@ Run both composers against the same temporary SQLite snapshot:
 This compares initial *OpenCode-style* briefings: the new plugin uses
 `orient` at task admission. A precomputed vector lookup from the fixture
 avoids model downloads. Legacy's search calls are wrapped to disable
-usage/access counters without changing ranking. Results alternate execution
-order to reduce simple cache/order bias.
+usage/access counters without changing ranking. The existing harness runs
+legacy first and intelligent second on independent copies, so the latency
+figures remain diagnostic rather than a controlled speed comparison.
 
 The benchmark checks that usage logs and access counters remain unchanged,
 that the source fixture's SHA-256 still matches its committed hash, and that
@@ -63,10 +64,10 @@ Separate source-drift tests cover only the implemented warning mechanism.
 ## Run
 
 ```bash
-python scripts/eval_context_delivery.py
-python scripts/eval_context_delivery.py --json
-python scripts/eval_context_delivery.py --split tuning --max-items 8
-python scripts/eval_context_delivery.py --split holdout --max-chars 2900
+python scripts/benchmark_context_delivery.py --split both
+python scripts/benchmark_context_delivery.py --split both --json
+python scripts/benchmark_context_delivery.py --split tuning
+python scripts/benchmark_context_delivery.py --split holdout --budget-chars 2900
 ```
 
 The existing CI retrieval-quality job runs the full comparison and prints
