@@ -274,3 +274,9 @@ jobs:
       - name: Compare delivered context (diagnostic, no metric threshold)
         run: venv/bin/python scripts/benchmark_context_delivery.py --split both
         shell: bash
+
+      - name: Compare retrieval fusion profiles (diagnostic, no optimization claim)
+        run: |
+          venv/bin/python scripts/benchmark_simplification.py --agent default
+          venv/bin/python scripts/benchmark_simplification.py --agent opencode
+        shell: bash

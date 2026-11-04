@@ -54,6 +54,15 @@ existing frozen golden fixture without recording usage or changing rankings.
 This is a **diagnostic of labeled fact delivery, not proof of coding success**.
 See [Context Delivery Benchmark](docs/CONTEXT_DELIVERY_BENCHMARK.md).
 
+## Retrieval-simplification evidence
+
+An offline ablation compares the existing seven-lane fusion against smaller
+retrieval profiles using the frozen golden fixture. It is **diagnostic only**:
+zeroed fusion weights do not prove lower runtime cost, and no production
+retrieval settings are changed. See
+[Simplification Audit](docs/SIMPLIFICATION_AUDIT.md) and run
+`python scripts/benchmark_simplification.py --agent opencode`.
+
 ## Source freshness checks
 
 When source-anchored facts have a recorded SHA-256 hash, CogniGraph now checks
