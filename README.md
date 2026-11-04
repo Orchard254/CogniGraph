@@ -20,6 +20,49 @@ See [OpenCode Plugin Installation](OPENCODE_PLUGIN.md) and run
 environment. Requires an existing project memory database and a compatible
 OpenCode V2 installation.
 
+## Product thesis and validation
+
+Our goal is measurably better project-aware coding decisions, not tool count or
+memory volume. The existing retrieval gate alone does not measure whether facts
+reach the model or improve coding outcomes. A report-only rendered-context
+benchmark compares legacy and phase-aware briefings on identical frozen
+queries. See [Product Thesis and Validation](docs/PRODUCT_THESIS_AND_VALIDATION.md).
+
+## MCP interface discipline
+
+CogniGraph exposes 31 MCP tools, but most coding tasks should use a small,
+relevant subset. New capabilities should reuse existing tools, plugin hooks,
+or internal methods by default. See [Tool Governance](docs/TOOL_GOVERNANCE.md)
+for the current overlap audit and change-review requirements.
+
+## Context Intelligence Layer
+
+Coding agents can request a phase-aware, concise, source-labeled briefing with
+`memory_get_intelligent_context`. It prioritizes relevant decisions, constraints,
+components, and flagged knowledge for the current coding step. Retrieval receipts
+contain only the facts actually shown, and the composer respects a strict
+character budget. OpenCode V2 now uses it for the initial task briefing; the
+legacy context tools remain available. See
+[Context Intelligence](docs/CONTEXT_INTELLIGENCE.md) and the
+[LLM Context Delivery Contract](docs/LLM_CONTEXT_DELIVERY_CONTRACT.md).
+Retrieval caching is not proof that a future model request contains the
+knowledge; different requests may require replay. The OpenCode adapter
+maintains a single CogniGraph block within each assembled request.
+
+We now compare actual legacy and phase-aware briefing delivery against the
+existing frozen golden fixture without recording usage or changing rankings.
+This is a **diagnostic of labeled fact delivery, not proof of coding success**.
+See [Context Delivery Benchmark](docs/CONTEXT_DELIVERY_BENCHMARK.md).
+
+## Retrieval-simplification evidence
+
+An offline ablation compares the existing seven-lane fusion against smaller
+retrieval profiles using the frozen golden fixture. It is **diagnostic only**:
+zeroed fusion weights do not prove lower runtime cost, and no production
+retrieval settings are changed. See
+[Simplification Audit](docs/SIMPLIFICATION_AUDIT.md) and run
+`python scripts/benchmark_simplification.py --agent opencode`.
+
 ## Source freshness checks
 
 When source-anchored facts have a recorded SHA-256 hash, CogniGraph now checks
@@ -51,13 +94,6 @@ OpenCode V2 can now report observed editor changes to this ledger automatically
 on session idle, without labeling retrieved facts as helpful. See
 [Task Outcome Review](docs/TASK_OUTCOMES.md) and
 [OpenCode Installation](OPENCODE_PLUGIN.md).
-
-## Simplification research
-
-We are evaluating whether a leaner memory interface and fewer retrieval lanes
-can preserve answer quality. The non-destructive offline benchmark compares
-full, core, lexical and FTS-only fusion against the frozen golden split.
-No production lanes are removed. See [Simplification Audit](docs/SIMPLIFICATION_AUDIT.md).
 
 ## Key Capabilities
 
@@ -172,7 +208,7 @@ At the start of every session:
 ## 3. Exposed MCP Tools
 
 <!-- tool-table:start auto-generated -->
-The server registers 30 tools.
+The server registers 31 tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -180,6 +216,7 @@ The server registers 30 tools.
 | `memory_write_batch` | `facts` | Atomic batch form of memory_write for several related facts. |
 | `memory_query` | `text`, `category?`, `tag?`, `limit?`, `expand_graph?`, `session_id?`, `repo_id?`, `intent?`, `agent_type?`, `explain?`, `fields?` | Search project memory — decisions, constraints, components, past failures — via hybrid lexical + semantic + code-structure search. Use when you need project knowledge you don't have. |
 | `memory_get_context` | `query`, `agent_type?`, `max_tokens?`, `limit?`, `intent?` | Token-budgeted Markdown briefing on a topic, formatted for your agent type and token ceiling. Use before working in an unfamiliar area. |
+| `memory_get_intelligent_context` | `task`, `phase?`, `focus_files?`, `seen_refs?`, `max_tokens?`, `limit?`, `agent_type?` | Compose a phase-aware, provenance-labeled, budgeted coding briefing. Reports only shown fact IDs in its retrieval receipt; never changes fact truth or ranking. |
 | `memory_rate_context` | `retrieval_id`, `ratings`, `evidence_type?`, `evidence_ref?`, `verification_evidence?` | Record helpful, irrelevant, or incorrect fact feedback against a retrieval ID. |
 | `memory_relevance_feedback_stats` | — | Summarize relevance feedback counts by evidence type and rating. |
 | `memory_record_task_outcome` | `retrieval_id`, `changed_files`, `test_evidence?` | Log a completed coding task's edited files and optional test metadata, and suggest which retrieved facts need review. Does not alter memory ranking or verify that tests actually ran. |

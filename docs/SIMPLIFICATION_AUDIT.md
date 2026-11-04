@@ -126,8 +126,9 @@ treat a single favorable recall result as sufficient evidence.
 2. **Make retrieval cost observable**: benchmark a truly optimized
    `core` path on a representative corpus, measure p50/p95, peak memory,
    and top-5 quality under comparable caches and hardware.
-3. **Trial an opt-in small MCP facade** while leaving 30 existing tool names
-   available as a compatibility layer.
+3. **Evaluate a smaller documented default workflow**, using the existing
+   Context Intelligence entrypoint and OpenCode hooks. Avoid any new public
+   facade until real routing/overhead evidence justifies it.
 4. **Review episodic activity and memory history** with real active-user
    metrics. Preserve migrations and archived facts until an export and
    rollback plan is proven.

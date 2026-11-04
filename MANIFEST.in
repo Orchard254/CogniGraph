@@ -11,5 +11,6 @@ include OPENCODE_PLUGIN.md
 include docs/FEEDBACK_LEARNING.md
 
 include docs/TASK_OUTCOMES.md
+include docs/CONTEXT_INTELLIGENCE.md
 
 include docs/SOURCE_FRESHNESS.md

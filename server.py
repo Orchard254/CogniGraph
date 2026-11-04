@@ -521,6 +521,33 @@ def memory_get_context(query: str, agent_type: str = "default", max_tokens: int 
 
 
 @mcp.tool()
+def memory_get_intelligent_context(
+    task: str,
+    phase: str = "orient",
+    focus_files: List[str] | None = None,
+    seen_refs: List[str] | None = None,
+    max_tokens: int = 800,
+    limit: int = 8,
+    agent_type: str = "default",
+) -> dict:
+    """Compose a phase-aware, provenance-labeled, budgeted coding briefing. Reports only shown fact IDs in its retrieval receipt; never changes fact truth or ranking."""
+    _ensure_first_time_setup()
+    # Token to char budget is an estimate; the composer enforces a strict
+    # character ceiling and reports the actual size for instrumentation.
+    if type(max_tokens) is not int or not (128 <= max_tokens <= 3000):
+        return {"error": "max_tokens must be an integer between 128 and 3000"}
+    with _store() as store:
+        try:
+            return store.get_intelligent_context(
+                task=task, phase=phase, focus_files=focus_files,
+                seen_refs=seen_refs, max_chars=max_tokens * 4,
+                limit=limit, agent_type=agent_type,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+
+@mcp.tool()
 def memory_rate_context(retrieval_id: int, ratings: List[Dict[str, Any]],
                         evidence_type: str = "agent", evidence_ref: str = "",
                         verification_evidence: dict | None = None) -> dict:

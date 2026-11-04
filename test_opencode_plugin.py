@@ -227,6 +227,41 @@ class OpenCodePluginTests(unittest.TestCase):
                 result = get_plugin_context(d, "token=abcdefghijklmnopqr123456")
             self.assertEqual(result["status"], "sensitive_query")
 
+    def test_bridge_prefers_context_intelligence_when_available(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / ".cognigraph/memory.db"
+            db.parent.mkdir()
+            db.touch()
+            seen = []
+            class FakeStore:
+                def __init__(self, path):
+                    seen.append(("init", path))
+                def get_intelligent_context(self, task, **kwargs):
+                    seen.append(("intelligent", task, kwargs))
+                    return {
+                        "status": "ok",
+                        "context_markdown": "### CogniGraph context: selected knowledge",
+                        "retrieval_id": 117,
+                        "selected": [{"ref": "memory:2", "fact_id": 2}],
+                    }
+                def get_context(self, *args, **kwargs):
+                    raise AssertionError("legacy composer used unexpectedly")
+                def close(self):
+                    seen.append(("closed",))
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False),
+            }):
+                result = get_plugin_context(directory, "fix session", max_chars=1200)
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["retrieval_id"], 117)
+            self.assertIn("selected knowledge", result["context_markdown"])
+            self.assertEqual(seen[1][0], "intelligent")
+            self.assertEqual(seen[1][2]["max_chars"], 1200)
+            self.assertEqual(seen[1][2]["phase"], "orient")
+            self.assertEqual(seen[-1], ("closed",))
+
     def test_bridge_passes_project_path_budget_and_agent(self):
         with tempfile.TemporaryDirectory() as d:
             db = Path(d) / ".cognigraph/memory.db"

@@ -27,6 +27,13 @@ The easiest way to add persistent memory to any AI coding agent:
 
 That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 18 (package.json engines). On first run the wrapper creates venv/, installs requirements.txt (only mcp is hard-required; sqlite-vec/tree-sitter*/fastembed/numpy lanes degrade with a warning), and launches server.py (index.js:98-132,171-232), guarded by a pre-spawn py_compile check and a 5 s startup watchdog (index.js:245-285). postinstall.js is best-effort and leaves a .postinstall-incomplete marker re-verified on next startup (index.js:175-183).
 
+## Context intelligence
+
+Use `memory_get_intelligent_context` for phase-aware, bounded coding
+briefings with source-qualified fact references and explicit provenance
+warnings. The legacy retrieval tools remain available. See
+[Context Intelligence](docs/CONTEXT_INTELLIGENCE.md).
+
 ## Task outcome review
 
 After a coding task, use `memory_record_task_outcome` with a retrieval receipt
@@ -206,15 +213,16 @@ Create `.cognigraph/config.json` in your project root:
 }
 ```
 
-## 🛠️ Available MCP Tools
+## 🛠️ Everyday MCP workflows
 
-The server registers 14 tools.
+The server currently registers **31 MCP tools**. The names below are a **quick-start subset**, not the complete registry. See the [full interface](README.md#3-exposed-mcp-tools) and the [tool governance policy](docs/TOOL_GOVERNANCE.md).
 
 ### Core Memory Operations
 - `memory_write` - Record a new fact with provenance (secrets are refused)
 - `memory_write_batch` - Atomic batch form of `memory_write`
 - `memory_query` - Hybrid lexical + semantic + code-structure search
-- `memory_get_context` - Token-budgeted Markdown briefing on a topic
+- `memory_get_intelligent_context` - Preferred phase-aware coding briefing with relevance, evidence, and budget controls
+- `memory_get_context` - Legacy Markdown briefing for compatibility
 - `memory_stats` - Database health: counts, category breakdown, edges
 
 ### File Operations
@@ -265,7 +273,7 @@ Agent: "I need to modify auth.py"
 ### Before Starting Tasks
 ```
 Agent: "Add caching layer to API"
-→ Agent calls memory_prepare_task("add caching layer", ["api.py"])
+→ Agent requests memory_get_intelligent_context(task="add caching layer", phase="orient", focus_files=["api.py"])
 → System returns: architectural context, prior decisions, risks
 → Agent plans implementation with full context
 ```

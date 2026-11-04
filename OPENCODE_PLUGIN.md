@@ -37,13 +37,20 @@ normal migration command when convenient.
 
 1. `prompt` hook records the submitted task without modifying the user's text.
 2. `context` hook reads the task, invokes `opencode_context.py` in a bounded
-   subprocess and appends the returned Markdown as a system text part.
+   subprocess and appends the returned Markdown as a system text part. The
+   initial task briefing is selected by the Context Intelligence Layer, which
+   prioritizes project knowledge by task phase, file relevance, provenance,
+   and a strict character budget.
 3. The OpenCode V2 `tool.execute.after` hook observes successful structured
    `read`, `edit`, `write`, and `multiedit` calls. When the actively worked-on
    source file changes (or is edited), CogniGraph refreshes a bounded,
    file-specific briefing at the next model request. Failed tools and arbitrary
    shell output are never used to infer a file path.
-4. The task-wide briefing remains cached. File context is independently cached
+4. The task-wide briefing remains cached but is included in every new model
+   request; prior exposure does not establish current request availability.
+   Re-processing the *same mutable request* replaces CogniGraph's own memory
+   system block rather than adding a duplicate. Other plugins' system parts
+   are preserved. File context is independently cached
    until focus changes or the editor reports an edit. The most recent two
    observed file paths are eligible for refresh.
 5. A new user task resets both caches. Sessions are isolated by ID.
@@ -73,6 +80,18 @@ update retrieval-usage counters). Neither
 an unrelated project nor the CogniGraph checkout can be used as a fallback.
 A bounded context payload is marked as **reference data, not instructions**;
 the agent should verify facts against current source code before modifying it.
+
+The Context Intelligence Layer is enabled for **initial task briefings**;
+file-focus refreshes still use the existing structural file-context system.
+Agents can request a distinct step-specific phase through the MCP tool
+`memory_get_intelligent_context`. Automatic inference of all coding phases
+from tool activity is not yet implemented. See
+[Context Intelligence](docs/CONTEXT_INTELLIGENCE.md).
+
+See [LLM Context Delivery Contract](docs/LLM_CONTEXT_DELIVERY_CONTRACT.md)
+for the request-level trust and repetition policy. Automatic cross-request
+suppression is intentionally not enabled until installed-host input assembly
+and required-fact coverage are verified.
 
 Current limitations: this adapter targets **OpenCode V2**, not V1. Only
 structured source-file paths from the supported editor tools trigger file
