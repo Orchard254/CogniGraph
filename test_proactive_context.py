@@ -103,6 +103,22 @@ class ProactiveContextTests(unittest.TestCase):
         self.assertNotIn("src/external.py", [x["file_path"] for x in result["inspection_targets"]])
         self.assertIn("src/session.py", [x["file_path"] for x in result["inspection_targets"]])
 
+    def test_inspection_path_keeps_underscores_exact(self):
+        (self.root / "src" / "auth_flow.py").write_text("pass\n")
+        fact_id = self.store.write(
+            "component", "Authentication flow helper",
+            file_path="src/auth_flow.py", force=True, embed=False,
+        )
+        self.only(fact_id)
+        result = self.store.get_intelligent_context(
+            "authentication flow", max_chars=2600, limit=1, log_usage=False,
+        )
+        self.assertIn(
+            "src/auth_flow.py", [x["file_path"] for x in result["inspection_targets"]],
+        )
+        self.assertIn("`src/auth_flow.py`", result["context_markdown"])
+        self.assertNotIn("`src/authflow.py`", result["context_markdown"])
+
     def test_small_budget_never_appends_unpaid_for_suggestions(self):
         self.only(self.auth)
         report = self.store.get_intelligent_context(
