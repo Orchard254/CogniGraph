@@ -200,6 +200,38 @@ Set the `MEMORY_DB_PATH` environment variable:
 }
 ```
 
+### Routine Startup Snapshot (optional)
+By default, CogniGraph takes one timestamped full-DB snapshot
+(`memory.db.backup-routine-...bak`) during routine startup maintenance, before
+maintenance mutations. To opt out of **only** that routine startup snapshot, set
+the `MEMORY_AUTO_BACKUP` environment variable to a false value in your MCP
+server config:
+
+```json
+{
+  "mcpServers": {
+    "cognigraph": {
+      "command": "npx",
+      "args": ["-y", "cognigraph"],
+      "env": {
+        "MEMORY_AUTO_BACKUP": "0"
+      }
+    }
+  }
+}
+```
+
+Accepted false values (trimmed, case-insensitive): `0`, `false`, `no`, `off`.
+Any other value—including unset, blank, `1`, `true`, `yes`, `on`, `y`, `t`,
+`n`, `f`, or unrecognized text—preserves the historical enabled default.
+This setting applies only to the routine startup snapshot in
+`_auto_maintenance`: explicit `memory_cli.py backup` snapshots, migration
+preflight snapshots, and the rest of auto-maintenance
+(bootstrap/scan/optimize, etc.) are unaffected. It is not a switch that
+disables all automatic snapshots. The `.cognigraph/config.json`
+`auto_maintenance` field documented below is not the runtime control for this
+snapshot; use the `MEMORY_AUTO_BACKUP` environment variable.
+
 ### Project-Specific Configuration
 Create `.cognigraph/config.json` in your project root:
 

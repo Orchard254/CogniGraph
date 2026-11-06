@@ -245,6 +245,22 @@ def _ensure_first_time_setup(db_path: Optional[str] = None):
                 except Exception:
                     pass
 
+def _memory_auto_backup_enabled() -> bool:
+    """Whether routine startup timestamped DB backups run.
+
+    Guard for only the routine snapshot in ``_auto_maintenance``. Reads
+    ``MEMORY_AUTO_BACKUP`` at call time so a changed process environment
+    applies to each startup pass. Unset or any value other than a recognized
+    false token preserves the historical default (enabled). Recognized false
+    tokens are ``0``, ``false``, ``no``, and ``off`` (case-insensitive).
+    Explicit CLI/manual backups and migration snapshots are unaffected.
+    """
+    raw = os.environ.get("MEMORY_AUTO_BACKUP")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
 def _auto_maintenance():
     """Background self-heal: bootstrap 20 + scan auto_heal + backfill + optimize - keeps 99% without manual loop."""
     store = _get_store()
@@ -253,11 +269,12 @@ def _auto_maintenance():
         from pathlib import Path
         root = Path(store.db_path).parent.parent
         # 0. Timestamped full-DB snapshot before any maintenance mutation
-        try:
-            from pm_backup import timestamped_backup
-            timestamped_backup(store.db_path, tag="routine")
-        except Exception as e:
-            logger.debug("auto backup failed: %r", e)
+        if _memory_auto_backup_enabled():
+            try:
+                from pm_backup import timestamped_backup
+                timestamped_backup(store.db_path, tag="routine")
+            except Exception as e:
+                logger.debug("auto backup failed: %r", e)
         # 1. Incremental bootstrap (top 20, no hook/doc drop - just context)
         try:
             bootstrap_project(root, store=store, dry_run=False, full=False, max_facts=20, install_hook=False, drop_protocol=False)
