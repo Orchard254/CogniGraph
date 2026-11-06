@@ -29,15 +29,19 @@ and `handoff`. The aliases `plan`, `read`, `implement`, `fix`,
 
 The result includes a `context_markdown` briefing and structured metadata:
 `selected` (source-qualified fact IDs and confidence), `warnings`,
+`inspection_targets` (only rendered safe inspection leads),
+`knowledge_gaps` (only rendered evidence warnings),
 `phase`, `retrieval_id`, `budget_used_chars`, and `omitted_seen`.
 Source-qualified refs (`memory:42` versus `episodic:42`) prevent
 collisions between the two historical ID spaces.
 
-For OpenCode V2, the initial task briefing now uses this composer
-automatically. File-specific briefings and edit-triggered refreshes continue
-to use the existing context system, avoiding changes to the structural
-call-graph explanation. The new MCP tool supports explicit phase changes.
-Automatic phase detection from every IDE tool step is **not yet implemented**.
+For OpenCode V2, the initial task briefing uses this composer
+automatically. Successful structured file reads request `inspect` and
+file edits request `verify` context, preserving the existing structural
+file briefing. Edits also trigger a read-only recheck of the initial
+source-backed briefing. The existing MCP tool supports explicit phases.
+CogniGraph does **not** infer every coding stage or test success from
+arbitrary IDE activity.
 
 ## How context is selected
 
