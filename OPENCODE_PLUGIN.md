@@ -72,8 +72,12 @@ normal migration command when convenient.
 8. A reported edit is not confirmation the remembered fact helped, and no
    ranking/confidence updates occur. The plugin deliberately does not send
    test logs, terminal output, source content, or an inferred test pass.
-9. If memory is unavailable or retrieval times out, no context is injected;
-   coding continues normally and existing MCP tools still work.
+9. If the active project memory database is absent or retrieval times out,
+   no context is injected and coding continues normally. If the database
+   exists but **no relevant facts are delivered**, CogniGraph supplies a
+   bounded evidence-gap notice and (if available) safe, unverified source
+   candidates from its existing structural index. These are investigative
+   leads, not facts or a new retrieval receipt.
 
 On each refreshed file briefing, source-anchored facts with hashes receive
 read-only freshness checks. When the anchored code changed or disappeared,
