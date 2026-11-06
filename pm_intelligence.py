@@ -86,6 +86,67 @@ def _existing_project_path(root: Any, raw: Any) -> Optional[str]:
     except (ValueError, OSError, RuntimeError):
         return None
 
+
+# The structural index is an imperfect historical observation, not proof of
+# the current code. Use it only as a bounded inspection lead when retrieval
+# delivered no usable facts. No source bytes are read by this method.
+_STRUCTURAL_STOPWORDS = frozenset({
+    "about", "after", "again", "change", "code", "could", "create",
+    "error", "files", "from", "have", "into", "make", "more", "need",
+    "please", "project", "should", "some", "task", "that", "their",
+    "them", "then", "there", "this", "update", "using", "when",
+    "which", "will", "with", "without",
+})
+_SOURCE_EXTENSIONS = (
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java",
+    ".cs", ".c", ".h", ".hpp", ".cpp", ".rb", ".php", ".vue",
+    ".svelte", ".sql",
+)
+
+
+def _structural_inspection_paths(
+    conn: sqlite3.Connection, root: Any, task: str,
+) -> list[str]:
+    """Offer at most three project-local candidates from the existing index.
+
+    All candidates are unverified leads. Query terms and scanned rows are
+    bounded; SQL parameters prevent query-string interpretation as SQL.
+    """
+    words = []
+    for word in re.findall(r"[a-z][a-z0-9_]{3,}", task.lower()):
+        if word not in _STRUCTURAL_STOPWORDS and word not in words:
+            words.append(word)
+        if len(words) >= 6:
+            break
+    if root is None or not words:
+        return []
+    conditions = []
+    params: list[str | int] = []
+    for word in words:
+        literal = word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conditions.append("(lower(name) LIKE ? ESCAPE '\\' OR lower(file_path) LIKE ? ESCAPE '\\')")
+        params.extend((f"%{literal}%", f"%{literal}%"))
+    try:
+        rows = conn.execute(
+            "SELECT name, file_path FROM structural_nodes "
+            "WHERE node_type IN ('function','method','class') AND ("
+            + " OR ".join(conditions) + ") "
+            "ORDER BY name, file_path LIMIT 80", params,
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    rank: dict[str, int] = {}
+    for row in rows:
+        raw = row["file_path"]
+        path = _existing_project_path(root, raw)
+        if not path or not path.lower().endswith(_SOURCE_EXTENSIONS):
+            continue
+        name = str(row["name"]).lower()
+        score = sum(2 * (word in name) + (word in path.lower()) for word in words)
+        rank[path] = max(rank.get(path, 0), score)
+    return [p for p, _ in sorted(rank.items(), key=lambda x: (-x[1], x[0]))[:3]]
+
+
 class IntelligenceMixin:
     def get_intelligent_context(
         self, task: str, phase: str = "orient",
@@ -324,16 +385,28 @@ class IntelligenceMixin:
                     propose(edge["source_path"], f"memory:{edge['target_id']}",
                             "linked_fact", edge["relation"])
 
+        # A zero-hit task is precisely where an agent cannot know which
+        # project facts to request. Fall back to indexed symbol names only;
+        # never claim the symbol is current or read arbitrary project files.
+        if not selected and not seen:
+            for path in _structural_inspection_paths(self.conn, root, query):
+                propose(path, "structural index (unverified)", "structural_lead")
+
         for path in focus:
             if path not in direct_paths and len(knowledge_gaps) < 2:
                 knowledge_gaps.append({
                     "kind": "missing_focused_evidence", "file_path": path,
                     "action": "No displayed fact is anchored to this file; inspect current source.",
                 })
-        if not focus and not inspection_targets:
+        if not selected and len(knowledge_gaps) < 2:
+            knowledge_gaps.append({
+                "kind": "no_delivered_fact", "file_path": "",
+                "action": "No new relevant fact was delivered; check current source and tests before assuming behavior.",
+            })
+        elif not focus and not inspection_targets:
             knowledge_gaps.append({
                 "kind": "no_source_anchor", "file_path": "",
-                "action": "No existing source anchor was identified among displayed facts; locate the implementation in code.",
+                "action": "No source anchor was identified among displayed facts; locate the implementation in code.",
             })
         if phase in ("edit", "debug") and not any(
             item["category"] == "constraint" for item in selected
@@ -347,7 +420,7 @@ class IntelligenceMixin:
         # paths do not silently count as delivered facts or verified memories.
         rendered_targets: list[dict[str, str]] = []
         rendered_gaps: list[dict[str, str]] = []
-        if selected and inspection_targets:
+        if inspection_targets:
             heading = "\n### Suggested source inspection (recorded leads, not verified)\n"
             for target in inspection_targets:
                 relation = (
@@ -362,7 +435,7 @@ class IntelligenceMixin:
                 if len(output) + len(prefix) + len(line) + len(footer) <= max_chars:
                     output += prefix + line
                     rendered_targets.append(target)
-        if selected and knowledge_gaps:
+        if knowledge_gaps:
             heading = "\n### Missing evidence in this briefing\n"
             for gap in knowledge_gaps:
                 path = f" `{gap['file_path']}`:" if gap["file_path"] and "`" not in gap["file_path"] else ""
@@ -373,9 +446,19 @@ class IntelligenceMixin:
                     rendered_gaps.append(gap)
 
         if not selected:
-            output = (header + "No new fitting, relevant facts found for this step.\n" + footer)[:max_chars]
-        else:
-            output += footer
+            # Preserve all already-rendered leads and gaps. Previously this
+            # branch discarded them, so zero-hit tasks reached OpenCode empty.
+            output = output.replace(
+                header, header + "No new fitting, relevant facts were delivered.\n", 1,
+            )
+        output += footer
+        if len(output) > max_chars:
+            # The fixed prefix is short; if a very tight budget is consumed
+            # by guidance, drop the optional no-fact marker, never truncate
+            # a path or return more than the advertised budget.
+            output = output.replace(
+                "No new fitting, relevant facts were delivered.\n", "", 1,
+            )
         memory_ids = [
             item["fact_id"] for item in selected if item["source"] == "memory"
         ]
