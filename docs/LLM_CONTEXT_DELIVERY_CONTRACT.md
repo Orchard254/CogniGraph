@@ -35,8 +35,8 @@ Never infer trust from repeated retrievals, unverified agent claims, or the mere
 |---|---|---|
 | New user task | Brief task-relevant decisions, constraints, components, pitfalls | Initial task-aware briefing |
 | Additional model request in same task | Cached stable briefing, replayed if the host assembles a fresh request | Implemented |
-| Successful structured file read | Current file facts, structure, dependencies, source warnings | Bounded file-context refresh |
-| Successful structured file edit | Fresh file briefing and warnings | File refreshed; task-wide baseline is NOT automatically revalidated |
+| Successful structured file read | Current file facts, structure, dependencies, source warnings | INSPECT-phase bounded intelligence and structural file-context refresh |
+| Successful structured file edit | Fresh file briefing and warnings | VERIFY-phase focused intelligence; task-wide baseline rechecked without new receipt |
 | New task or session | New relevance and scoped focus; persisted project knowledge remains | Session-scoped reset |
 | Agent explicitly needs deeper detail | Existing focused memory/graph retrieval, not an automatic large dump | Existing MCP tools |
 | No relevant memory | No fabricated facts | Existing no-match behavior |
@@ -63,7 +63,7 @@ Gaps:
 
 - The actual installed OpenCode V2 host has not yet been validated end to end; hook simulations are not a substitute.
 - There is no reliable mechanism for identifying semantically equivalent facts already present in host-transmitted messages.
-- After source edits, the file brief refreshes, but the task-wide cached briefing can contain source-anchored claims that have since drifted.
+- After an observed structured edit, task-wide and focused memory is rechecked at the next model request. However, edits made outside the IDE's structured editor tools are not observed, and code-hash freshness alone does not prove semantic correctness.
 - No empirical basis yet exists for suppressing stable context between distinct model requests, choosing alternate request cadences, or claiming the LLM used a delivered fact.
 - There is no complete relevance-judged set for detecting harmful or misleading extra context.
 

@@ -262,6 +262,196 @@ class OpenCodePluginTests(unittest.TestCase):
             self.assertEqual(seen[1][2]["phase"], "orient")
             self.assertEqual(seen[-1], ("closed",))
 
+    def test_bridge_ide_focus_composes_phase_without_new_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / ".cognigraph/memory.db"
+            db.parent.mkdir()
+            db.touch()
+            src = root / "src/auth.py"
+            src.parent.mkdir()
+            src.write_text("def login(): return True\n")
+            calls = []
+
+            class FakeStore:
+                def __init__(self, path):
+                    calls.append(("opened", path))
+
+                def get_intelligent_context(self, task, **kwargs):
+                    calls.append(("composed", task, kwargs))
+                    return {
+                        "status": "ok", "context_markdown": "Evidence to inspect before verification",
+                        "retrieval_id": 999,
+                    }
+
+                def get_file_context(self, path):
+                    calls.append(("file", path))
+                    return "Structural dependencies for " + path
+
+                def get_context(self, *args, **kwargs):
+                    raise AssertionError("legacy context should not be called")
+
+                def close(self):
+                    calls.append(("closed",))
+
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False),
+            }):
+                result = get_plugin_context(
+                    directory, "fix login", max_chars=1500,
+                    file_paths=["../unsafe.py", "src/auth.py"], phase="verify",
+                )
+            self.assertEqual(result["status"], "ok")
+            self.assertIsNone(result["retrieval_id"])
+            self.assertIn("Evidence to inspect", result["context_markdown"])
+            self.assertIn("Structural dependencies", result["context_markdown"])
+            self.assertLessEqual(len(result["context_markdown"]), 1500)
+            _, task, options = next(x for x in calls if x[0] == "composed")
+            self.assertEqual(task, "fix login")
+            self.assertEqual(options["phase"], "verify")
+            self.assertEqual(options["focus_files"], ["src/auth.py"])
+            self.assertEqual(options["limit"], 3)
+            self.assertEqual(options["max_chars"], 900)
+            self.assertFalse(options["log_usage"])
+            self.assertEqual([x for x in calls if x[0] == "file"],
+                             [("file", "src/auth.py")])
+            self.assertEqual(calls[-1], ("closed",))
+
+    def test_refresh_rechecks_task_without_new_attribution_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / ".cognigraph/memory.db"
+            db.parent.mkdir()
+            db.touch()
+            seen = []
+
+            class FakeStore:
+                def __init__(self, path):
+                    pass
+
+                def get_intelligent_context(self, task, **kwargs):
+                    seen.append((task, kwargs))
+                    return {
+                        "status": "ok", "context_markdown": "Source rechecked",
+                        "retrieval_id": 100,
+                    }
+
+                def get_context(self, *args, **kwargs):
+                    raise AssertionError("refresh must not use legacy logging")
+
+                def close(self):
+                    pass
+
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False),
+            }):
+                result = get_plugin_context(directory, "fix login", refresh=True)
+            self.assertEqual(result["status"], "ok")
+            self.assertIsNone(result["retrieval_id"])
+            self.assertFalse(seen[0][1]["log_usage"])
+            self.assertEqual(seen[0][1]["phase"], "orient")
+
+    def test_ide_focus_rejects_missing_and_outside_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            db = root / ".cognigraph/memory.db"
+            db.parent.mkdir()
+            db.touch()
+            external = Path(directory) / "outside.py"
+            external.write_text("TOP_SECRET = 1\n")
+            observed = []
+
+            class FakeStore:
+                def __init__(self, path):
+                    observed.append("opened")
+
+                def get_intelligent_context(self, *args, **kwargs):
+                    raise AssertionError("no untrusted file should reach composer")
+
+                def close(self):
+                    observed.append("closed")
+
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False),
+            }):
+                result = get_plugin_context(
+                    str(root), "fix login", file_paths=["../outside.py"],
+                    phase="inspect",
+                )
+            self.assertEqual(result["status"], "no_matches")
+            self.assertEqual(observed, ["opened", "closed"])
+            self.assertNotIn("outside", result["context_markdown"])
+
+    def test_real_source_edit_invalidates_cached_freshness_without_new_receipt(self):
+        import hashlib
+        from memory_store import MemoryStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / ".cognigraph" / "memory.db"
+            db.parent.mkdir()
+            src = root / "src/auth.py"
+            src.parent.mkdir()
+            original = b"def login():\n    return True\n"
+            src.write_bytes(original)
+            store = MemoryStore(str(db))
+            try:
+                store.write(
+                    "component", "Session login authentication is restored here",
+                    file_path="src/auth.py", line_start=1, line_end=2,
+                    code_hash=hashlib.sha256(original).hexdigest(),
+                    confidence="confirmed", force=True, embed=False,
+                )
+                store.conn.commit()
+            finally:
+                store.close()
+
+            class NoVectorStore(MemoryStore):
+                def _query_encode(self, text):
+                    return None
+
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=NoVectorStore),
+            }):
+                before = get_plugin_context(
+                    directory, "session login authentication", max_chars=1800,
+                )
+                self.assertEqual(before["status"], "ok")
+                self.assertIsNotNone(before["retrieval_id"])
+                self.assertIn("source_freshness=current", before["context_markdown"])
+
+                src.write_bytes(b"def login():\n    return False\n")
+                after = get_plugin_context(
+                    directory, "session login authentication", max_chars=1800,
+                    refresh=True,
+                )
+
+            self.assertEqual(after["status"], "ok")
+            self.assertIsNone(after["retrieval_id"])
+            self.assertIn("source_freshness=possibly_stale", after["context_markdown"])
+            self.assertIn("source changed", after["context_markdown"])
+            self.assertNotIn("source_freshness=current", after["context_markdown"])
+
+            store = MemoryStore(str(db))
+            try:
+                self.assertEqual(
+                    store.conn.execute(
+                        "SELECT COUNT(*) FROM memory_usage_log"
+                    ).fetchone()[0], 1,
+                )
+            finally:
+                store.close()
+
+    def test_unsupported_phase_and_refresh_type_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError):
+                get_plugin_context(directory, "fix login", phase="invent")
+            with self.assertRaises(ValueError):
+                get_plugin_context(directory, "fix login", refresh="true")
+
     def test_bridge_passes_project_path_budget_and_agent(self):
         with tempfile.TemporaryDirectory() as d:
             db = Path(d) / ".cognigraph/memory.db"

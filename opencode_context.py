@@ -43,7 +43,18 @@ def _safe_project_file(root: Path, candidate: str) -> str | None:
 def get_plugin_context(
     project_root: str, query: str, max_chars: int = 4500,
     file_paths: list[str] | None = None,
+    *, phase: str = "orient", refresh: bool = False,
 ) -> dict:
+    """Compose automatic initial or IDE-focused context.
+
+    Phase is derived from structured IDE observations, NOT an agent-reported
+    plan. A refresh may re-check sources, but does not create a new receipt
+    that could incorrectly attribute earlier edits to newly delivered facts.
+    """
+    if phase not in ("orient", "inspect", "verify"):
+        raise ValueError("unsupported IDE context phase")
+    if type(refresh) is not bool:
+        raise ValueError("refresh must be a boolean")
     root = Path(project_root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError("Project root is not a directory")
@@ -74,20 +85,47 @@ def get_plugin_context(
     try:
         parts = []
         retrieval_id = None
-        if task:
+        valid_focus = []
+        for candidate in reversed(requested_files[-2:]):
+            relative = _safe_project_file(root, candidate)
+            if relative and relative not in valid_focus:
+                valid_focus.append(relative)
+
+        focused_mode = phase in ("inspect", "verify")
+        if focused_mode and not valid_focus:
+            return {"context_markdown": "", "status": "no_matches"}
+        composer = getattr(store, "get_intelligent_context", None)
+
+        if focused_mode and callable(composer) and cap >= 512:
+            # Preserve room for the established structural file briefing.
+            # The phase composer contributes only already-grounded facts and
+            # inspection leads; it does not log another attribution receipt.
+            attention_budget = min(900, max(512, cap - 500))
+            briefing = composer(
+                task or " ".join(valid_focus),
+                phase=phase, focus_files=valid_focus,
+                max_chars=attention_budget, limit=3,
+                agent_type="opencode", log_usage=False,
+            )
+            if briefing.get("status") == "ok":
+                parts.append(briefing["context_markdown"][:attention_budget])
+
+        if task and not focused_mode:
             # Prefer the bounded Context Intelligence Layer for the initial
             # task briefing. Keep legacy compatibility for prior installations,
             # constrained budgets, and isolated bridge mocks.
-            composer = getattr(store, "get_intelligent_context", None)
             if callable(composer) and cap >= 512:
                 briefing = composer(
                     task, phase="orient", max_chars=cap, limit=6,
-                    agent_type="opencode",
+                    agent_type="opencode", log_usage=not refresh,
                 )
-                retrieval_id = briefing.get("retrieval_id")
+                if not refresh:
+                    retrieval_id = briefing.get("retrieval_id")
                 if briefing.get("status") == "ok":
                     parts.append(briefing["context_markdown"][:cap])
-            else:
+            elif not refresh:
+                # An older composer may not support read-only rechecks;
+                # never create a second possibly misleading usage receipt.
                 markdown = store.get_context(
                     task, limit=5, max_chars=cap, agent_type="opencode"
                 )
@@ -97,12 +135,7 @@ def get_plugin_context(
 
         # File focus comes only from structured successful IDE tool calls,
         # not arbitrary text scraped from shell output. Re-validate here.
-        visited = set()
-        for candidate in reversed(requested_files[-2:]):
-            relative = _safe_project_file(root, candidate)
-            if not relative or relative in visited:
-                continue
-            visited.add(relative)
+        for relative in valid_focus:
             brief = store.get_file_context(relative)
             if "UNMAPPED in memory" in brief:
                 continue
@@ -182,6 +215,8 @@ def main(argv=None) -> int:
             response = get_plugin_context(
                 args.project_root, request["query"], args.max_chars,
                 file_paths=request.get("file_paths"),
+                phase=request.get("phase", "orient"),
+                refresh=request.get("refresh", False),
             )
         sys.stdout.write(json.dumps(response) + "\n")
         return 0

@@ -19,11 +19,15 @@ const fs = require('node:fs');
 let input = '';
 process.stdin.on('data', c => input += c);
 process.stdin.on('end', () => {
-  fs.appendFileSync(process.env.COGNIGRAPH_TEST_CALLS, '1');
   const req = JSON.parse(input);
-  process.stdout.write(JSON.stringify({context_markdown: req.file_paths?.length
-    ? 'focused files: ' + req.file_paths.join(',')
-    : 'context for ' + req.query}));
+  const phase = req.refresh ? 'R' : ({orient: 'O', inspect: 'I', verify: 'V'}[req.phase] ?? '?');
+  fs.appendFileSync(process.env.COGNIGRAPH_TEST_CALLS, phase);
+  process.stdout.write(JSON.stringify({
+    context_markdown: req.file_paths?.length
+      ? 'focused ' + req.phase + ' files: ' + req.file_paths.join(',')
+      : 'context for ' + req.query + (req.refresh ? ' refreshed' : ''),
+    retrieval_id: req.refresh || req.file_paths?.length ? null : 41,
+  }));
 });
 `);
     let code = fs.readFileSync(template, 'utf8')
@@ -70,7 +74,7 @@ process.stdin.on('end', () => {
       input:{filePath:'src/auth.ts'}});
     const focused = req();
     await hooks.get('context')(focused);
-    assert.match(focused.system[0].text, /focused files: src\/auth.ts/);
+    assert.match(focused.system[0].text, /focused inspect files: src\/auth.ts/);
     assert.equal(fs.readFileSync(countFile, 'utf8').length, 3);
     await hooks.get('context')(focused);
     assert.equal(focused.system.length, 1, 'same assembled request has one memory block');
@@ -89,8 +93,11 @@ process.stdin.on('end', () => {
     // file-focus block, not append another.
     await hooks.get('context')(focused);
     assert.equal(focused.system.length, 1);
-    assert.match(focused.system[0].text, /focused files/);
-    assert.equal(fs.readFileSync(countFile, 'utf8').length, 4);
+    assert.match(focused.system[0].text, /focused verify files/);
+    assert.match(focused.system[0].text, /focused verify files/);
+    assert.match(focused.system[0].text, /context for add cache refreshed/);
+    assert.doesNotMatch(focused.system[0].text, /CogniGraph retrieval ID: 41/);
+    assert.equal(fs.readFileSync(countFile, 'utf8'), 'OOIRV');
 
     // Failed tools and commands without a structured filename cannot focus.
     toolHook({sessionID:'s1', status:'error', tool:'read',
@@ -98,14 +105,21 @@ process.stdin.on('end', () => {
     toolHook({sessionID:'s1', status:'completed', tool:'bash',
       input:{command:'cat src/passwords.ts'}});
     await hooks.get('context')(req());
-    assert.equal(fs.readFileSync(countFile, 'utf8').length, 4);
+    assert.equal(fs.readFileSync(countFile, 'utf8'), 'OOIRV');
+
+    // Reading again returns to INSPECT even if it is the same focused file;
+    // the request must not retain an obsolete post-edit VERIFY briefing.
+    toolHook({sessionID:'s1', status:'completed', tool:'read',
+      input:{filePath:'src/auth.ts'}});
+    await hooks.get('context')(req());
+    assert.equal(fs.readFileSync(countFile, 'utf8'), 'OOIRVI');
 
     hooks.get('prompt')({sessionID: 's2', prompt: {text: 'fix login'}});
     const other = {sessionID: 's2', messages: [], system:[]};
     await hooks.get('context')(other);
     assert.match(other.system[0].text, /context for fix login/);
-    assert.equal(fs.readFileSync(countFile, 'utf8').length, 5);
-    assert.doesNotMatch(other.system[0].text, /focused files/);
+    assert.equal(fs.readFileSync(countFile, 'utf8'), 'OOIRVIO');
+    assert.doesNotMatch(other.system[0].text, /focused .* files/);
   } finally {
     if (originalCountPath === undefined) delete process.env.COGNIGRAPH_TEST_CALLS;
     else process.env.COGNIGRAPH_TEST_CALLS = originalCountPath;

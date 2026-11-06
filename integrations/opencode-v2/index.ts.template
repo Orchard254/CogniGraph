@@ -36,7 +36,7 @@ function latestUserText(messages) {
   return ""
 }
 
-function fetchContext(projectRoot, query, filePaths = [], maxChars = BASE_CONTEXT_CHARS, onReceipt = null) {
+function fetchContext(projectRoot, query, filePaths = [], maxChars = BASE_CONTEXT_CHARS, onReceipt = null, options = {}) {
   return new Promise((resolve) => {
     const child = spawn(PYTHON, [BRIDGE, "--project-root", projectRoot, "--max-chars", String(maxChars)], {
       cwd: projectRoot,
@@ -82,7 +82,10 @@ function fetchContext(projectRoot, query, filePaths = [], maxChars = BASE_CONTEX
       }
     })
     child.stdin.on("error", () => done(""))
-    child.stdin.end(JSON.stringify({ query: query.slice(0, MAX_QUERY), file_paths: filePaths }))
+    child.stdin.end(JSON.stringify({
+      query: query.slice(0, MAX_QUERY), file_paths: filePaths,
+      phase: options.phase ?? "orient", refresh: options.refresh === true,
+    }))
   })
 }
 
@@ -182,6 +185,7 @@ export default Plugin.define({
       const state = {
         query: normalized, response: null, focus: [], focusResponse: null,
         retrievalId: null, edits: new Set(), reportedFingerprint: null, reporting: null,
+        focusPhase: "inspect", revision: 0, focusEpoch: 0, baseNeedsRefresh: false,
       }
       sessions.set(sessionID, state)
       if (sessions.size > MAX_SESSIONS) sessions.delete(sessions.keys().next().value)
@@ -207,12 +211,25 @@ export default Plugin.define({
       const index = state.focus.indexOf(normalized)
       const changed = index === -1 || index !== state.focus.length - 1
       const edited = OBSERVED_EDIT_TOOLS.has(event.tool)
+      // Only observed successful editor events may set a phase. An edit
+      // means the next briefing should emphasize verification, not assume
+      // the tests passed or that the model followed a particular plan.
+      const nextPhase = edited ? "verify" : "inspect"
+      const phaseChanged = state.focusPhase !== nextPhase
+      state.focusPhase = nextPhase
       if (edited) {
+        state.revision += 1
+        // The cached task briefing may label source bytes CURRENT from
+        // *before* this edit. Recheck without creating a new fact receipt:
+        // recorded outcomes still belong to the original task retrieval.
+        state.baseNeedsRefresh = true
+        state.response = null
         state.edits.delete(normalized)
         state.edits.add(normalized)
         if (state.edits.size > 20) state.edits.delete(state.edits.values().next().value)
       }
-      if (!changed && !edited) return
+      if (!changed && !edited && !phaseChanged) return
+      state.focusEpoch += 1
       if (index >= 0) state.focus.splice(index, 1)
       state.focus.push(normalized)
       if (state.focus.length > 2) state.focus.shift()
@@ -225,23 +242,34 @@ export default Plugin.define({
       const prior = sessions.get(event.sessionID)
       const state = remember(event.sessionID, prior?.query || fromTranscript)
       if (!state) return
+      const revision = state.revision
+      const focusEpoch = state.focusEpoch
       if (!state.response) {
-        state.response = fetchContext(projectRoot, state.query, [], BASE_CONTEXT_CHARS, (retrievalId) => {
-          if (sessions.get(event.sessionID) === state) state.retrievalId = retrievalId
-        })
+        const refresh = state.baseNeedsRefresh
+        state.response = fetchContext(
+          projectRoot, state.query, [], BASE_CONTEXT_CHARS,
+          refresh ? null : (retrievalId) => {
+            if (sessions.get(event.sessionID) === state && state.revision === revision) {
+              state.retrievalId = retrievalId
+            }
+          },
+          { phase: "orient", refresh },
+        )
       }
       const base = await state.response
       let focused = ""
       if (state.focus.length > 0) {
         if (!state.focusResponse) {
           state.focusResponse = fetchContext(
-            projectRoot, "", [...state.focus], FILE_CONTEXT_CHARS,
+            projectRoot, state.query, [...state.focus], FILE_CONTEXT_CHARS,
+            null, { phase: state.focusPhase },
           )
         }
         focused = await state.focusResponse
       }
       // A new user task can replace a state while this hook is awaiting IO.
-      if (sessions.get(event.sessionID) !== state) return
+      if (sessions.get(event.sessionID) !== state ||
+          state.revision !== revision || state.focusEpoch !== focusEpoch) return
       if (!base && !focused) return
       const chunks = []
       if (base) chunks.push(base)
