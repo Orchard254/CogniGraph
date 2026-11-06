@@ -86,9 +86,10 @@ def seed_task_db(db_path: Path, seed_facts: list[dict]) -> int:
         store.close()
 
 
-def build_task_sandbox(base: Path, task: dict, arm: str) -> Path:
-    """Create a sandbox for one task/arm. arm is 'treated' or 'control'."""
-    sandbox = Path(base) / f"{task['id']}-{arm}"
+def build_task_sandbox(base: Path, task: dict, arm: str,
+                       trial: int = 1) -> Path:
+    """Create a sandbox for one task/arm/trial. arm is 'treated'/'control'."""
+    sandbox = Path(base) / f"{task['id']}-{arm}-t{trial}"
     sandbox.mkdir(parents=True, exist_ok=True)
     for relpath, content in task["starter_files"].items():
         target = sandbox / relpath
@@ -182,7 +183,8 @@ def run_task_arm(cli: str | None, sandbox: Path, task: dict, arm: str,
         record["bridge"] = {k: check[k] for k in (
             "status", "delivered_chars", "retrieval_id")}
         record["bridge_markdown"] = check["markdown"]
-        seed_text = task["seed_facts"][0]["content"][:40]
+        # Briefings may strip backticks; check a punctuation-stable head.
+        seed_text = task["seed_facts"][0]["content"][:25]
         record["bridge_delivered_seed"] = seed_text in check["markdown"]
         if check["status"] != "ok" or not record["bridge_delivered_seed"]:
             record["outcome"] = "bridge_unavailable"
@@ -199,9 +201,14 @@ def run_task_arm(cli: str | None, sandbox: Path, task: dict, arm: str,
     assert cli is not None
     run = run_opencode(cli, sandbox, task["prompt"], model, timeout)
     record["run"] = run
-    if run.get("timed_out") or run.get("error"):
+    if run.get("timed_out") or run.get("error") or \
+            run.get("exit_code") not in (0, None):
+        # Infrastructure failures (provider rate limits, CLI errors) must
+        # never be scored as model failures.
         record["outcome"] = "run_failed"
-        record["reason"] = run.get("error") or "timeout"
+        record["reason"] = run.get("error") or (
+            f"opencode exited {run.get('exit_code')} with "
+            f"{run.get('tokens_in', 0)} input tokens")
         return record
     record["files"] = list_agent_files(sandbox, task)
     record["check"] = run_hidden_check(sandbox, task)
@@ -210,15 +217,21 @@ def run_task_arm(cli: str | None, sandbox: Path, task: dict, arm: str,
 
 
 def run_compare(cli: str | None, workdir: Path, tasks: list[dict],
-                model: str, timeout: int, *, dry_run: bool) -> dict:
+                model: str, timeout: int, *, dry_run: bool,
+                trials: int = 1) -> dict:
+    if trials < 1:
+        raise ValueError("trials must be >= 1")
     workdir.mkdir(parents=True, exist_ok=True)
     results = []
     for task in tasks:
         for arm in ("treated", "control"):
-            sandbox = build_task_sandbox(workdir, task, arm)
-            results.append(run_task_arm(
-                cli, sandbox, task, arm, model, timeout,
-                dry_run=dry_run))
+            for trial in range(1, trials + 1):
+                sandbox = build_task_sandbox(workdir, task, arm, trial)
+                record = run_task_arm(
+                    cli, sandbox, task, arm, model, timeout,
+                    dry_run=dry_run)
+                record["trial"] = trial
+                results.append(record)
     summary: dict[str, dict[str, int]] = {}
     for task in tasks:
         summary[task["id"]] = {}
@@ -232,11 +245,12 @@ def run_compare(cli: str | None, workdir: Path, tasks: list[dict],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "dry_run": dry_run,
         "model": model,
+        "trials": trials,
         "tasks": [t["id"] for t in tasks],
         "results": results,
         "passed_summary": summary,
-        "note": ("n=1 per task/arm: signal only, not statistics. Scoring "
-                 "is deterministic hidden checks; no LLM judge."),
+        "note": (f"n={trials} per task/arm: signal only, not statistics. "
+                 "Scoring is deterministic hidden checks; no LLM judge."),
     }
 
 
@@ -249,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workdir", default=None)
     parser.add_argument("--report", default=None)
     parser.add_argument("--timeout", type=int, default=420)
+    parser.add_argument("--trials", type=int, default=1,
+                        help="Repeated trials per task/arm (default: 1)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Build sandboxes + bridge check only; no model")
     args = parser.parse_args(argv)
@@ -276,9 +292,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print(f"Model: {args.model}  Workdir: {workdir}  "
-          f"dry_run={args.dry_run}")
+          f"trials={args.trials}  dry_run={args.dry_run}")
     report = run_compare(cli, workdir, tasks, args.model, args.timeout,
-                         dry_run=args.dry_run)
+                         dry_run=args.dry_run, trials=args.trials)
     report_path = Path(args.report) if args.report else workdir / "report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -290,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
             extra = (f" bridge_status={result['bridge']['status']} "
                      f"delivered_seed={result.get('bridge_delivered_seed')}")
         print(f"  {result['task_id']:16s} {result['arm']:8s} "
-              f"{result['outcome']}{extra}")
+              f"t{result.get('trial', 1)} {result['outcome']}{extra}")
     print(f"Passed summary: {report['passed_summary']}")
     print(f"Report: {report_path}")
     if args.dry_run:

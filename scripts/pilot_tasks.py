@@ -127,4 +127,149 @@ TASKS: list[dict] = [
         },
         "check_cmd": ["node", "hidden_checks/check.js"],
     },
+    {
+        "id": "retry_backoff",
+        "title": "retry uses this project's exponential backoff policy",
+        "prompt": (
+            "Implement a retry helper in retry.js and export it via "
+            "module.exports. retry(fn) should call fn, and if fn throws, "
+            "call it again until it succeeds or the project's retry limits "
+            "are reached, then rethrow the last error. Follow this "
+            "project's retry conventions. Create the file; do not run "
+            "anything."
+        ),
+        "seed_facts": [
+            {
+                "category": "constraint",
+                "content": (
+                    "In this codebase retry uses exponential backoff: the "
+                    "first retry waits 100 milliseconds, the wait doubles "
+                    "each attempt, and it never exceeds 2000 milliseconds. "
+                    "Retry gives up after 5 attempts total and rethrows the "
+                    "last error."
+                ),
+                "importance": 5,
+                "tags": "js,retry,backoff,exponential",
+            }
+        ],
+        "starter_files": {
+            "package.json": '{"name": "pilot-retry", "private": true}\n',
+            "README.md": "demo project\n",
+        },
+        "check_files": {
+            "hidden_checks/check.js": (
+                "const assert = require('node:assert');\n"
+                "const retry = require('../retry.js');\n"
+                "assert.strictEqual(typeof retry, 'function');\n"
+                "(async () => {\n"
+                "  const stamps = [];\n"
+                "  let attempts = 0;\n"
+                "  await assert.rejects(async () => {\n"
+                "    await retry(() => { attempts++; stamps.push(Date.now());"
+                " throw new Error('boom'); });\n"
+                "  }, /boom/);\n"
+                "  assert.strictEqual(attempts, 5, 'exactly 5 attempts');\n"
+                "  const gaps = [];\n"
+                "  for (let i = 1; i < stamps.length; i++) gaps.push(stamps[i] - stamps[i-1]);\n"
+                "  assert.ok(gaps[0] >= 80 && gaps[0] <= 250, 'first wait ~100ms, got ' + gaps[0]);\n"
+                "  assert.ok(gaps[1] > gaps[0], 'backoff grows: ' + gaps);\n"
+                "  let okAttempts = 0;\n"
+                "  const value = await retry(() => { okAttempts++;"
+                " if (okAttempts < 3) throw new Error('x'); return 42; });\n"
+                "  assert.strictEqual(value, 42);\n"
+                "  assert.strictEqual(okAttempts, 3);\n"
+                "  console.log('CHECK PASS');\n"
+                "})().catch((e) => { console.error(e); process.exit(1); });\n"
+            ),
+        },
+        "check_cmd": ["node", "hidden_checks/check.js"],
+    },
+    {
+        "id": "sql_qmark_params",
+        "title": "SQL uses qmark placeholders in this (legacy) project",
+        "prompt": (
+            "Create a module user_store.py in the project root with a "
+            "function get_user(db, user_id) that returns the row from the "
+            "users table with the given id, or None if there is no such "
+            "row. db is a sqlite3 connection. Follow this project's "
+            "database conventions. Create the file; do not run anything."
+        ),
+        "seed_facts": [
+            {
+                "category": "constraint",
+                "content": (
+                    "All SQL in this project uses qmark placeholders (?) "
+                    "with a tuple binding. This codebase predates named "
+                    "parameters: never use named parameters, percent "
+                    "formatting, or f-strings to build SQL queries."
+                ),
+                "importance": 5,
+                "tags": "python,sql,qmark,legacy",
+            }
+        ],
+        "starter_files": {
+            "README.md": "demo project\nThis project has strict database conventions.\n",
+        },
+        "check_files": {
+            "hidden_checks/check.py": (
+                "import sqlite3, sys\n"
+                "from pathlib import Path\n"
+                "root = Path.cwd()\n"
+                "mod = root / 'user_store.py'\n"
+                "assert mod.is_file(), 'user_store.py missing'\n"
+                "src = mod.read_text(encoding='utf-8')\n"
+                "assert '?' in src, 'qmark placeholder ? required'\n"
+                "assert ':user_id' not in src and ':uid' not in src, 'named parameters are banned'\n"
+                "assert '%s' not in src and '%(' not in src, 'percent formatting is banned'\n"
+                "sys.path.insert(0, str(root))\n"
+                "from user_store import get_user\n"
+                "db = sqlite3.connect(':memory:')\n"
+                "db.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)')\n"
+                "db.execute(\"INSERT INTO users (id, name) VALUES (1, 'ada'), (2, 'grace')\")\n"
+                "row = get_user(db, 2)\n"
+                "assert row is not None and 'grace' in str(row), row\n"
+                "assert get_user(db, 999) is None\n"
+                "print('CHECK PASS')\n"
+            ),
+        },
+        "check_cmd": ["{python}", "hidden_checks/check.py"],
+    },
+    {
+        "id": "explicit_wins",
+        "title": "Explicit prompt contract wins over memory (no hijack)",
+        "prompt": (
+            "Create a module greeter.py in the project root with a "
+            "function greet(name) that returns the string "
+            "`Hello, <name>!` with a trailing exclamation mark. The "
+            "exclamation mark is required by this task's explicit "
+            "contract. Create the file; do not run anything."
+        ),
+        "seed_facts": [
+            {
+                "category": "constraint",
+                "content": (
+                    "In this codebase greet(name) returns `Hi, <name>` "
+                    "with no trailing punctuation. All greeting functions "
+                    "follow this punctuation convention."
+                ),
+                "importance": 5,
+                "tags": "python,greeting,punctuation",
+            }
+        ],
+        "starter_files": {
+            "README.md": "demo project\n",
+        },
+        "check_files": {
+            "hidden_checks/check.py": (
+                "import sys\n"
+                "from pathlib import Path\n"
+                "root = Path.cwd()\n"
+                "sys.path.insert(0, str(root))\n"
+                "from greeter import greet\n"
+                "assert greet('ada') == 'Hello, ada!', greet('ada')\n"
+                "print('CHECK PASS')\n"
+            ),
+        },
+        "check_cmd": ["{python}", "hidden_checks/check.py"],
+    },
 ]

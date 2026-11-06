@@ -78,6 +78,7 @@ setup.
 ```bash
 python scripts/pilot_compare.py --dry-run          # sandboxes + bridge check only
 python scripts/pilot_compare.py --tasks future_import,debounce_this
+python scripts/pilot_compare.py --trials 3         # repeated trials per task/arm
 ```
 
 Current tasks:
@@ -86,6 +87,9 @@ Current tasks:
 |---|---|---|
 | `future_import` | New Python modules start with `from __future__ import annotations`, lines ≤ 88 chars | First line, line length, `load_config` round-trip |
 | `debounce_this` | `debounce` is leading-edge (immediate first call, then suppress until quiet), `function` keyword to preserve `this` | Node check: immediate first call, suppression within wait, re-arm after quiet |
+| `retry_backoff` | `retry` waits 100ms doubling per attempt (cap 2000ms), gives up after 5 attempts | Node check: exactly 5 attempts, growing gaps, success on 3rd attempt returns value |
+| `sql_qmark_params` | Legacy SQL uses qmark placeholders (`?`) with tuple binding; named params banned (named is the model's modern default, so the task was flipped after a 3/3–3/3 tie) | Source-style assertions + functional sqlite round-trip |
+| `explicit_wins` | **Hijack-resistance:** memory says `greet` returns `Hi, <name>` (no punctuation) but the prompt explicitly requires `Hello, <name>!`. Correct outcome is the prompt's contract. | `greet('ada') == 'Hello, ada!'` |
 
 ### Reading the results honestly
 
@@ -153,13 +157,41 @@ are labelled reference data to verify, and the seed was
 seed to `confirmed`; the treated agent then followed it. Prompt/memory
 conflicts are a first-class test dimension, not noise.
 
+### Repeated trials, n=3 (2026-11-06, crouton-alpha-free)
+
+| task | treated | control | reading |
+|---|---|---|---|
+| `future_import` | 3/3 | 0/3 | Strong, consistent |
+| `retry_backoff` | 3/3 | 0/3 | Strong, consistent |
+| `debounce_this` | 2/3 | 1/3 | Noisy: one treated run distrusted the anchorless note; one control guessed leading-edge |
+| `sql_named_params` | 3/3 | 3/3 | Non-discriminating — named params are the model's default; task flipped to legacy qmark |
+| `explicit_wins` | 3/3 | run_failed ×3 | Treated followed the prompt (no hijack). Controls hit the provider free-usage limit; data missing |
+
+Aggregate across the three discriminating tasks: treated 8/9, control
+1/9. Still small-n and single-model, but the direction is consistent
+with the delivery pilot.
+
+A follow-up batch (`sql_qmark_params`, `explicit_wins` on
+`glm-5.3-flash-free`) produced `run_failed` for every arm: the free-model
+quota is account-wide across OpenCode free models (~12.4h retry window
+at time of writing), so those two tasks' live rates are **pending
+quota**, not zero. The harness now records provider/CLI exits as
+`run_failed` instead of scoring them as model failures. Dry-run bridge
+delivery is verified for both tasks; re-run them when quota returns
+(or with a non-free model):
+
+```bash
+python scripts/pilot_compare.py --tasks sql_qmark_params,explicit_wins --trials 3
+```
+
 ## Tests
 
 ```bash
 python -m pytest test_pilot_harness.py -q
 ```
 
-Fifteen tests cover CLI discovery, sandbox construction (plugin install,
-fixture copy, never the live DB, no DB in control sandboxes), run-event
-parsing, verdict logic, task definition validity, and — through the real
-bridge — that each task's seed fact is actually delivered for its prompt.
+Twenty-one tests cover CLI discovery, sandbox construction (plugin install,
+fixture copy, never the live DB, no DB in control sandboxes), repeated
+trial sandboxes, run-event parsing, verdict logic, task definition
+validity, and — through the real bridge — that each task's seed fact is
+actually delivered for its prompt.

@@ -154,7 +154,8 @@ def test_task_sandbox_bridge_delivers_seed_fact(tmp_path, task):
     sandbox = build_task_sandbox(tmp_path, task, "treated")
     result = bridge_check(sandbox, task["prompt"])
     assert result["status"] == "ok", result
-    seed_head = task["seed_facts"][0]["content"][:40]
+    # Check a punctuation-stable phrase: briefings may strip backticks.
+    seed_head = task["seed_facts"][0]["content"][:25]
     assert seed_head in result["markdown"]
 
 
@@ -189,3 +190,41 @@ def test_list_agent_files_detects_only_real_changes(tmp_path):
     files = list_agent_files(sandbox, task)
     assert files["created"] == ["new.py"]
     assert files["modified"] == ["README.md"]
+
+
+def test_compare_trials_repeats_each_arm_in_fresh_sandboxes(tmp_path):
+    report = run_compare(None, tmp_path, TASKS[:1], "test-model", 60,
+                         dry_run=True, trials=2)
+    assert report["trials"] == 2
+    assert len(report["results"]) == 4  # 2 arms x 2 trials
+    sandboxes = [r["sandbox"] for r in report["results"]]
+    assert len(set(sandboxes)) == 4
+    assert all(r["trial"] in (1, 2) for r in report["results"])
+    assert report["passed_summary"][TASKS[0]["id"]] == {
+        "treated": 0, "control": 0}
+
+
+def test_compare_rejects_zero_trials(tmp_path):
+    with pytest.raises(ValueError):
+        run_compare(None, tmp_path, TASKS[:1], "test-model", 60,
+                    dry_run=True, trials=0)
+
+
+def test_cli_failure_is_run_failed_not_model_failure(tmp_path, monkeypatch):
+    """Provider/CLI errors (e.g. rate limits) must not count as failures."""
+    import pilot_compare
+
+    def fake_run(*args, **kwargs):
+        return {"exit_code": 1, "timed_out": False, "error": None,
+                "tokens_in": 0, "tokens_out": 0, "cost": 0.0,
+                "session_id": "ses_x", "seconds": 1.0,
+                "assistant_text": "", "plugin_loaded": False,
+                "stdout_tail": "", "stderr_tail": ""}
+
+    monkeypatch.setattr(pilot_compare, "run_opencode", fake_run)
+    task = TASKS[0]
+    sandbox = build_task_sandbox(tmp_path, task, "control")
+    record = pilot_compare.run_task_arm(
+        "fake-cli", sandbox, task, "control", "m", 60, dry_run=False)
+    assert record["outcome"] == "run_failed"
+    assert "exited 1" in record["reason"]
