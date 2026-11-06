@@ -41,6 +41,21 @@ class IntelligenceContextTests(unittest.TestCase):
         self.store.close()
         self.tmp.cleanup()
 
+    def test_delivered_source_identifiers_are_not_silently_rewritten(self):
+        self.store.write(
+            "component", "restore_session in auth_flow.py restores user login",
+            file_path="src/auth.py", force=True, embed=False,
+        )
+        report = self.store.get_intelligent_context(
+            "restore_session auth_flow login", phase="inspect",
+            focus_files=["src/auth.py"], max_chars=3000,
+            limit=8, log_usage=False,
+        )
+        self.assertIn("restore_session", report["context_markdown"])
+        self.assertIn("auth_flow.py", report["context_markdown"])
+        self.assertNotIn("restoresession", report["context_markdown"])
+        self.assertNotIn("authflow.py", report["context_markdown"])
+
     def test_phase_briefing_cites_only_displayed_facts(self):
         result = self.store.get_intelligent_context(
             "fix login session authentication", phase="edit",

@@ -124,8 +124,24 @@ for learning.
 ## Tests
 
 ```bash
-python -m unittest -v test_opencode_plugin.py
+python -m unittest -v test_opencode_plugin.py test_unknown_first_discovery.py
+npm test
 ```
+
+The `test-js/opencode-real-bridge.test.js` integration check drives the
+**generated plugin adapter through the real `opencode_context.py` subprocess
+and a real, isolated SQLite project**. It verifies the exact model-facing
+context: initial source-backed memory, inspection after a completed read,
+source-drift warnings after a completed edit, read-only receipt handling,
+and zero-fact structural inspection guidance. It disables the embedding
+backend only inside the test subprocess to avoid network/model downloads.
+CI must provide its project virtualenv: the integration test does not silently
+skip an absent Python interpreter on CI runners.
+
+**Boundary:** These are full bridge/adapter integration tests with a simulated
+hook host, **not** proof that a currently installed OpenCode V2 release
+supports every event contract. A real installed-host pilot and controlled
+coding-outcome comparison are still required.
 
 Official API reference: https://opencode.ai/v2/docs/build/plugins/server
 
