@@ -40,6 +40,16 @@ def _safe_project_file(root: Path, candidate: str) -> str | None:
         return None
 
 
+def _is_deliverable_briefing(briefing: dict) -> bool:
+    """Allow explicit no-fact investigation guidance, but never safety rejections."""
+    status = briefing.get("status")
+    if status == "ok":
+        return True
+    if status != "no_new_context":
+        return False
+    return bool(briefing.get("inspection_targets") or briefing.get("knowledge_gaps"))
+
+
 def get_plugin_context(
     project_root: str, query: str, max_chars: int = 4500,
     file_paths: list[str] | None = None,
@@ -107,7 +117,7 @@ def get_plugin_context(
                 max_chars=attention_budget, limit=3,
                 agent_type="opencode", log_usage=False,
             )
-            if briefing.get("status") == "ok":
+            if _is_deliverable_briefing(briefing):
                 parts.append(briefing["context_markdown"][:attention_budget])
 
         if task and not focused_mode:
@@ -121,7 +131,7 @@ def get_plugin_context(
                 )
                 if not refresh:
                     retrieval_id = briefing.get("retrieval_id")
-                if briefing.get("status") == "ok":
+                if _is_deliverable_briefing(briefing):
                     parts.append(briefing["context_markdown"][:cap])
             elif not refresh:
                 # An older composer may not support read-only rechecks;
