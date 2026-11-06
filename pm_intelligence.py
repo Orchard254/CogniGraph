@@ -348,25 +348,25 @@ class IntelligenceMixin:
         rendered_targets: list[dict[str, str]] = []
         rendered_gaps: list[dict[str, str]] = []
         if selected and inspection_targets:
-            heading = "\\n### Suggested source inspection (recorded leads, not verified)\\n"
+            heading = "\n### Suggested source inspection (recorded leads, not verified)\n"
             for target in inspection_targets:
                 relation = (
                     f" via stored {_text(target['relation'], 24)} relationship"
                     if target["kind"] == "linked_fact" else ""
                 )
                 line = (
-                    f"- \\u0060{_text(target['file_path'], 170)}\\u0060 "
-                    f"({_text(target['basis'], 40)}{relation}); verify against current code.\\n"
+                    f"- `{_text(target['file_path'], 170)}` "
+                    f"({_text(target['basis'], 40)}{relation}); verify against current code.\n"
                 )
                 prefix = heading if not rendered_targets else ""
                 if len(output) + len(prefix) + len(line) + len(footer) <= max_chars:
                     output += prefix + line
                     rendered_targets.append(target)
         if selected and knowledge_gaps:
-            heading = "\\n### Missing evidence in this briefing\\n"
+            heading = "\n### Missing evidence in this briefing\n"
             for gap in knowledge_gaps:
-                path = f" \\u0060{_text(gap['file_path'], 170)}\\u0060:" if gap["file_path"] else ""
-                line = f"-{path} {_text(gap['action'], 220)}\\n"
+                path = f" `{_text(gap['file_path'], 170)}`:" if gap["file_path"] else ""
+                line = f"-{path} {_text(gap['action'], 220)}\n"
                 prefix = heading if not rendered_gaps else ""
                 if len(output) + len(prefix) + len(line) + len(footer) <= max_chars:
                     output += prefix + line
