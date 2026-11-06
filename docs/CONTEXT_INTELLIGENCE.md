@@ -76,8 +76,8 @@ without asking the LLM to discover or invoke a memory tool:
 - Symlink escapes, missing files, hidden paths, dependency directories and
   suspicious paths are excluded from proactive inspection targets.
 - Suggestions and gaps appear only when their **entire line fits** the same
-  character budget; \`inspection_targets\` and \`knowledge_gaps\` report only
-  rendered entries. The \`selected\` list and retrieval receipts still count
+  character budget; `inspection_targets` and `knowledge_gaps` report only
+  rendered entries. The `selected` list and retrieval receipts still count
   only displayed memory facts, never neighboring graph facts.
 - No new tool, model, table, writable state, ranking weight or retrieval
   candidate set is introduced. The OpenCode initial task briefing already
