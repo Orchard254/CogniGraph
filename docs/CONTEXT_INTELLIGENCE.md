@@ -89,6 +89,34 @@ dependencies, or infer source truth from an old graph edge. The next phase
 should validate relevance on labeled tasks and only then consider improved
 IDE event-phase delivery and incremental gap resolution.
 
+## Unknown-first discovery when no fact matches
+
+CogniGraph must not go silent just because no memory fact matches a task.
+If **no facts are delivered**, the composer now supplies an explicit
+`no_delivered_fact` knowledge-gap notice with the instruction to inspect
+current source and tests instead of guessing. It keeps the existing
+`status=no_new_context` for MCP compatibility, with **no retrieval receipt**.
+
+When a project's existing `structural_nodes` index is available, it also
+matches up to six non-generic task terms against indexed Python/JavaScript/etc.
+function, method, or class names and source paths. The search is bounded
+to 80 indexed rows and up to three recommended source files. Suggested files
+must exist *inside the active project* and pass the same path/symlink safety
+checks as other inspection targets. These are **unverified symbol-index
+leads**, never current-code facts; no source content is read during search.
+
+The OpenCode bridge now delivers a bounded no-fact briefing when there are
+actually rendered gaps or inspection targets; it does **not** deliver
+`sensitive_query`, `empty_query`, or other safety-rejected results.
+Both the zero-hit and ordinary paths preserve existing character budgets
+and receipt accounting, including the rule that no suggestions count as
+retrieved facts. It does not create facts or automatically trust an index.
+
+**Known limit:** matching old index names is not knowledge-requirement
+understanding, and it can miss files when the codebase was never indexed or
+task wording differs. More comprehensive task-specific knowledge discovery
+needs labeled cases and real coding outcome comparisons.
+
 ## Evidence and trust
 
 For each selected memory the briefing labels category, source, declared
