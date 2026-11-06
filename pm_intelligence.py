@@ -76,7 +76,7 @@ def _existing_project_path(root: Any, raw: Any) -> Optional[str]:
         return None
     try:
         relative = _relative_source_path(raw)
-        if looks_like_secret(relative):
+        if looks_like_secret(relative) or "`" in relative:
             return None
         canonical_root = root.resolve()
         candidate = (canonical_root / relative).resolve()
@@ -355,7 +355,7 @@ class IntelligenceMixin:
                     if target["kind"] == "linked_fact" else ""
                 )
                 line = (
-                    f"- `{_text(target['file_path'], 170)}` "
+                    f"- `{target['file_path']}` "
                     f"({_text(target['basis'], 40)}{relation}); verify against current code.\n"
                 )
                 prefix = heading if not rendered_targets else ""
@@ -365,7 +365,7 @@ class IntelligenceMixin:
         if selected and knowledge_gaps:
             heading = "\n### Missing evidence in this briefing\n"
             for gap in knowledge_gaps:
-                path = f" `{_text(gap['file_path'], 170)}`:" if gap["file_path"] else ""
+                path = f" `{gap['file_path']}`:" if gap["file_path"] and "`" not in gap["file_path"] else ""
                 line = f"-{path} {_text(gap['action'], 220)}\n"
                 prefix = heading if not rendered_gaps else ""
                 if len(output) + len(prefix) + len(line) + len(footer) <= max_chars:
