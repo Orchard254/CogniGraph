@@ -351,7 +351,7 @@ class IntelligenceMixin:
             heading = "\n### Suggested source inspection (recorded leads, not verified)\n"
             for target in inspection_targets:
                 relation = (
-                    f" via stored {_text(target['relation'], 24)} relationship"
+                    f" via stored `{target['relation']}` relationship"
                     if target["kind"] == "linked_fact" else ""
                 )
                 line = (
