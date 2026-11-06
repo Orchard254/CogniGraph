@@ -94,6 +94,9 @@ class ProactiveContextTests(unittest.TestCase):
             "UPDATE memory SET file_path=? WHERE id=?",
             ("src/external.py", self.auth),
         )
+        # Recreate the retrieved row after the mutation so the test really
+        # exercises the hostile symlink rather than the prior safe anchor.
+        self.only(self.auth)
         result = self.store.get_intelligent_context(
             "fix login", max_chars=3000, limit=1, log_usage=False,
         )
