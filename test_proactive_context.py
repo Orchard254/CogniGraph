@@ -98,7 +98,7 @@ class ProactiveContextTests(unittest.TestCase):
             "fix login", max_chars=3000, limit=1, log_usage=False,
         )
         self.assertNotIn("src/external.py", [x["file_path"] for x in result["inspection_targets"]])
-        self.assertIn("no_source_anchor", {x["kind"] for x in result["knowledge_gaps"]})
+        self.assertIn("src/session.py", [x["file_path"] for x in result["inspection_targets"]])
 
     def test_small_budget_never_appends_unpaid_for_suggestions(self):
         self.only(self.auth)
