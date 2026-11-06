@@ -69,6 +69,23 @@ def _normalize_seen(refs: Optional[list[str]]) -> set[str]:
     return found
 
 
+
+def _existing_project_path(root: Any, raw: Any) -> Optional[str]:
+    """Accept only existing, in-project anchors; never follow symlinks outside."""
+    if root is None or not isinstance(raw, str):
+        return None
+    try:
+        relative = _relative_source_path(raw)
+        if looks_like_secret(relative):
+            return None
+        canonical_root = root.resolve()
+        candidate = (canonical_root / relative).resolve()
+        if not candidate.is_relative_to(canonical_root) or not candidate.is_file():
+            return None
+        return relative
+    except (ValueError, OSError, RuntimeError):
+        return None
+
 class IntelligenceMixin:
     def get_intelligent_context(
         self, task: str, phase: str = "orient",
@@ -198,6 +215,7 @@ class IntelligenceMixin:
         footer = "\nVerify any relevant claim against current code and tests."
         output = header
         selected: list[dict[str, Any]] = []
+        selected_sources: list[tuple[str, dict[str, Any]]] = []
         warnings = []
         omitted_seen = 0
         seen_content: set[str] = set()
@@ -251,8 +269,108 @@ class IntelligenceMixin:
                 "confidence": fact.get("confidence"),
                 "review_required": bool(note),
             })
+            selected_sources.append((label, fact))
             if note:
                 warnings.append({"ref": label, "reason": note})
+
+        # The agent cannot request project facts it does not know exist.
+        # Propose bounded investigation targets from *displayed* facts and
+        # their explicitly stored one-hop relationships. These are leads to
+        # inspect, never proof that the current implementation still matches.
+        inspection_targets: list[dict[str, str]] = []
+        knowledge_gaps: list[dict[str, str]] = []
+        direct_paths: set[str] = set()
+
+        def propose(raw_path: Any, basis: str, kind: str, relation: str = "") -> None:
+            path = _existing_project_path(root, raw_path)
+            if path is None or any(x["file_path"] == path for x in inspection_targets):
+                return
+            if len(inspection_targets) < 3:
+                inspection_targets.append({
+                    "file_path": path, "basis": basis, "kind": kind,
+                    "relation": relation,
+                })
+
+        for ref, fact in selected_sources:
+            path = _existing_project_path(root, fact.get("file_path"))
+            if path:
+                direct_paths.add(path)
+                propose(path, ref, "source_anchor")
+
+        live_ids = [item["fact_id"] for item in selected if item["source"] == "memory"]
+        if live_ids and len(inspection_targets) < 3:
+            placeholders = ",".join("?" for _ in live_ids)
+            edges = self.conn.execute(
+                f"""SELECT e.source_id, e.target_id, e.relation,
+                           source.file_path AS source_path, target.file_path AS target_path
+                    FROM memory_edges e
+                    JOIN memory source ON source.id=e.source_id
+                    JOIN memory target ON target.id=e.target_id
+                    WHERE (e.source_id IN ({placeholders})
+                           OR e.target_id IN ({placeholders}))
+                      AND source.deprecated_at IS NULL
+                      AND target.deprecated_at IS NULL
+                    ORDER BY e.id DESC LIMIT 40""",
+                (*live_ids, *live_ids),
+            ).fetchall()
+            selected_set = set(live_ids)
+            for edge in edges:
+                if len(inspection_targets) >= 3:
+                    break
+                if edge["source_id"] in selected_set:
+                    propose(edge["target_path"], f"memory:{edge['source_id']}",
+                            "linked_fact", edge["relation"])
+                else:
+                    propose(edge["source_path"], f"memory:{edge['target_id']}",
+                            "linked_fact", edge["relation"])
+
+        for path in focus:
+            if path not in direct_paths and len(knowledge_gaps) < 2:
+                knowledge_gaps.append({
+                    "kind": "missing_focused_evidence", "file_path": path,
+                    "action": "No displayed fact is anchored to this file; inspect current source.",
+                })
+        if not focus and not inspection_targets:
+            knowledge_gaps.append({
+                "kind": "no_source_anchor", "file_path": "",
+                "action": "No existing source anchor was identified among displayed facts; locate the implementation in code.",
+            })
+        if phase in ("edit", "debug") and not any(
+            item["category"] == "constraint" for item in selected
+        ) and len(knowledge_gaps) < 2:
+            knowledge_gaps.append({
+                "kind": "no_delivered_constraint", "file_path": "",
+                "action": "No constraint was delivered in this briefing; check code and tests for restrictions.",
+            })
+
+        # Keep the existing source-qualified receipt exact: suggested linked
+        # paths do not silently count as delivered facts or verified memories.
+        rendered_targets: list[dict[str, str]] = []
+        rendered_gaps: list[dict[str, str]] = []
+        if selected and inspection_targets:
+            heading = "\\n### Suggested source inspection (recorded leads, not verified)\\n"
+            for target in inspection_targets:
+                relation = (
+                    f" via stored {_text(target['relation'], 24)} relationship"
+                    if target["kind"] == "linked_fact" else ""
+                )
+                line = (
+                    f"- \\u0060{_text(target['file_path'], 170)}\\u0060 "
+                    f"({_text(target['basis'], 40)}{relation}); verify against current code.\\n"
+                )
+                prefix = heading if not rendered_targets else ""
+                if len(output) + len(prefix) + len(line) + len(footer) <= max_chars:
+                    output += prefix + line
+                    rendered_targets.append(target)
+        if selected and knowledge_gaps:
+            heading = "\\n### Missing evidence in this briefing\\n"
+            for gap in knowledge_gaps:
+                path = f" \\u0060{_text(gap['file_path'], 170)}\\u0060:" if gap["file_path"] else ""
+                line = f"-{path} {_text(gap['action'], 220)}\\n"
+                prefix = heading if not rendered_gaps else ""
+                if len(output) + len(prefix) + len(line) + len(footer) <= max_chars:
+                    output += prefix + line
+                    rendered_gaps.append(gap)
 
         if not selected:
             output = (header + "No new fitting, relevant facts found for this step.\n" + footer)[:max_chars]
@@ -272,4 +390,6 @@ class IntelligenceMixin:
             "selected": selected, "retrieval_id": self._last_retrieval_id,
             "budget_used_chars": len(output), "omitted_seen": omitted_seen,
             "warnings": warnings,
+            "inspection_targets": rendered_targets,
+            "knowledge_gaps": rendered_gaps,
         }
