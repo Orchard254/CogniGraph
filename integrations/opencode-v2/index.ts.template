@@ -185,7 +185,7 @@ export default Plugin.define({
       const state = {
         query: normalized, response: null, focus: [], focusResponse: null,
         retrievalId: null, edits: new Set(), reportedFingerprint: null, reporting: null,
-        focusPhase: "inspect", revision: 0, baseNeedsRefresh: false,
+        focusPhase: "inspect", revision: 0, focusEpoch: 0, baseNeedsRefresh: false,
       }
       sessions.set(sessionID, state)
       if (sessions.size > MAX_SESSIONS) sessions.delete(sessions.keys().next().value)
@@ -229,6 +229,7 @@ export default Plugin.define({
         if (state.edits.size > 20) state.edits.delete(state.edits.values().next().value)
       }
       if (!changed && !edited && !phaseChanged) return
+      state.focusEpoch += 1
       if (index >= 0) state.focus.splice(index, 1)
       state.focus.push(normalized)
       if (state.focus.length > 2) state.focus.shift()
@@ -242,6 +243,7 @@ export default Plugin.define({
       const state = remember(event.sessionID, prior?.query || fromTranscript)
       if (!state) return
       const revision = state.revision
+      const focusEpoch = state.focusEpoch
       if (!state.response) {
         const refresh = state.baseNeedsRefresh
         state.response = fetchContext(
@@ -266,7 +268,8 @@ export default Plugin.define({
         focused = await state.focusResponse
       }
       // A new user task can replace a state while this hook is awaiting IO.
-      if (sessions.get(event.sessionID) !== state || state.revision !== revision) return
+      if (sessions.get(event.sessionID) !== state ||
+          state.revision !== revision || state.focusEpoch !== focusEpoch) return
       if (!base && !focused) return
       const chunks = []
       if (base) chunks.push(base)
