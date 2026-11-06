@@ -385,6 +385,66 @@ class OpenCodePluginTests(unittest.TestCase):
             self.assertEqual(observed, ["opened", "closed"])
             self.assertNotIn("outside", result["context_markdown"])
 
+    def test_real_source_edit_invalidates_cached_freshness_without_new_receipt(self):
+        import hashlib
+        from memory_store import MemoryStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / ".cognigraph" / "memory.db"
+            db.parent.mkdir()
+            src = root / "src/auth.py"
+            src.parent.mkdir()
+            original = b"def login():\n    return True\n"
+            src.write_bytes(original)
+            store = MemoryStore(str(db))
+            try:
+                store.write(
+                    "component", "Session login authentication is restored here",
+                    file_path="src/auth.py", line_start=1, line_end=2,
+                    code_hash=hashlib.sha256(original).hexdigest(),
+                    confidence="confirmed", force=True, embed=False,
+                )
+                store.conn.commit()
+            finally:
+                store.close()
+
+            class NoVectorStore(MemoryStore):
+                def _query_encode(self, text):
+                    return None
+
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=NoVectorStore),
+            }):
+                before = get_plugin_context(
+                    directory, "session login authentication", max_chars=1800,
+                )
+                self.assertEqual(before["status"], "ok")
+                self.assertIsNotNone(before["retrieval_id"])
+                self.assertIn("source_freshness=current", before["context_markdown"])
+
+                src.write_bytes(b"def login():\n    return False\n")
+                after = get_plugin_context(
+                    directory, "session login authentication", max_chars=1800,
+                    refresh=True,
+                )
+
+            self.assertEqual(after["status"], "ok")
+            self.assertIsNone(after["retrieval_id"])
+            self.assertIn("source_freshness=possibly_stale", after["context_markdown"])
+            self.assertIn("source changed", after["context_markdown"])
+            self.assertNotIn("source_freshness=current", after["context_markdown"])
+
+            store = MemoryStore(str(db))
+            try:
+                self.assertEqual(
+                    store.conn.execute(
+                        "SELECT COUNT(*) FROM memory_usage_log"
+                    ).fetchone()[0], 1,
+                )
+            finally:
+                store.close()
+
     def test_unsupported_phase_and_refresh_type_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(ValueError):
