@@ -93,7 +93,7 @@ process.stdin.on('end', () => {
     // file-focus block, not append another.
     await hooks.get('context')(focused);
     assert.equal(focused.system.length, 1);
-    assert.match(focused.system[0].text, /focused files/);
+    assert.match(focused.system[0].text, /focused verify files/);
     assert.match(focused.system[0].text, /focused verify files/);
     assert.match(focused.system[0].text, /context for add cache refreshed/);
     assert.doesNotMatch(focused.system[0].text, /CogniGraph retrieval ID: 41/);
