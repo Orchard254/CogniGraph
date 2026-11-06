@@ -110,9 +110,12 @@ structured source-file paths from the supported editor tools trigger file
 refreshes; a shell command, file watcher, or external Git change does not.
 File memory is not independently verified against the latest source; the
 briefing explicitly instructs the agent to check the code. Database-backed
-context retrieval does not run a filesystem indexing pass. The integration
-still needs a live installed-OpenCode end-to-end test; hook simulations and
-Python bridge tests do not establish full product compatibility.
+context retrieval does not run a filesystem indexing pass. A live
+installed-OpenCode pilot has now passed (OpenCode v2.2.5, retrieval receipt
+delivered to the model, control reported NO_CONTEXT); see
+[Live OpenCode pilot](docs/PILOT_OPENCODE.md). Controlled coding-task
+comparisons exist there too, but are at n=1 per task — signal, not
+statistics.
 
 The bridge only permits existing source files inside the active project,
 rejects files outside the project (including symlink escapes), and excludes
@@ -138,10 +141,13 @@ backend only inside the test subprocess to avoid network/model downloads.
 CI must provide its project virtualenv: the integration test does not silently
 skip an absent Python interpreter on CI runners.
 
-**Boundary:** These are full bridge/adapter integration tests with a simulated
-hook host, **not** proof that a currently installed OpenCode V2 release
-supports every event contract. A real installed-host pilot and controlled
-coding-outcome comparison are still required.
+**Boundary:** The hook-simulated tests above are full bridge/adapter
+integration tests, **not** proof that a currently installed OpenCode V2
+release supports every event contract. The first real installed-host pilot
+(OpenCode v2.2.5) and the initial controlled coding-task comparisons are
+recorded in [Live OpenCode pilot](docs/PILOT_OPENCODE.md); the comparisons
+are still early (n=1 per task) and need repeated trials before they support
+a benefit claim.
 
 Official API reference: https://opencode.ai/v2/docs/build/plugins/server
 
