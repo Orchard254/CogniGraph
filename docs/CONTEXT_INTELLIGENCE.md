@@ -60,6 +60,35 @@ No-feedback behavior of the underlying hybrid retriever is unchanged.
 The new composer has its own output selection policy, which must be evaluated
 separately against task-level relevance judgments.
 
+## Proactive inspection leads (first increment)
+
+The existing task briefing now proactively identifies **where to inspect next**,
+without asking the LLM to discover or invoke a memory tool:
+
+- From facts **actually included** in the briefing, it proposes up to three
+  existing, project-local source anchors or one-hop linked files. Links are
+  explicitly described as *stored relationships*, not verified code dependencies.
+- With a known IDE file focus, it flags when no **displayed** fact is directly
+  anchored to that file. This is a gap in the **delivered briefing**, never a
+  claim that the project has no relevant knowledge.
+- In edit/debug phases, it can flag when no constraint fact was delivered.
+  It does not infer that no constraints exist in source code or archived memory.
+- Symlink escapes, missing files, hidden paths, dependency directories and
+  suspicious paths are excluded from proactive inspection targets.
+- Suggestions and gaps appear only when their **entire line fits** the same
+  character budget; \`inspection_targets\` and \`knowledge_gaps\` report only
+  rendered entries. The \`selected\` list and retrieval receipts still count
+  only displayed memory facts, never neighboring graph facts.
+- No new tool, model, table, writable state, ranking weight or retrieval
+  candidate set is introduced. The OpenCode initial task briefing already
+  uses this composer, so this first increment reaches the LLM automatically.
+
+This is *bounded evidence-guided discovery*, not a complete project-wide
+planner. It cannot prove which files a task needs, reason about unseen
+dependencies, or infer source truth from an old graph edge. The next phase
+should validate relevance on labeled tasks and only then consider improved
+IDE event-phase delivery and incremental gap resolution.
+
 ## Evidence and trust
 
 For each selected memory the briefing labels category, source, declared
