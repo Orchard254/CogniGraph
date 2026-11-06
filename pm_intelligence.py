@@ -36,8 +36,10 @@ _MAX_CANDIDATES = 40
 def _text(value: Any, max_chars: int = 250) -> str:
     """Use plain single-line data in generated Markdown, not stored markup."""
     cleaned = re.sub(r"\s+", " ", str(value or "")).strip()
-    # Strip Markdown controls that could turn retrieved content into headings.
-    cleaned = re.sub(r"[#\`*_<>]", "", cleaned)
+    # Remove Markdown structure controls, but preserve underscores: they are
+    # meaningful bytes in code identifiers (e.g. restore_session). Removing
+    # them would silently mislead a coding agent about the actual symbol.
+    cleaned = re.sub(r"[#\`*<>]", "", cleaned)
     if len(cleaned) > max_chars:
         return cleaned[:max_chars - 1].rstrip() + "…"
     return cleaned
