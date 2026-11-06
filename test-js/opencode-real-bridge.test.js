@@ -65,7 +65,10 @@ async function hostFixture(project) {
 
 test('actual Python bridge delivers source freshness and refreshes after observed edits',
   {timeout: 90000}, async (t) => {
-    if (!fs.existsSync(PYTHON)) return t.skip('installed CI project Python unavailable')
+    if (!fs.existsSync(PYTHON)) {
+      assert.ok(!process.env.CI, 'CI must provide the tested virtualenv interpreter')
+      return t.skip('local installed Python virtualenv unavailable')
+    }
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'cg-real-bridge-'))
     const previous = process.env.PYTHONPATH
     let host
@@ -121,7 +124,10 @@ test('actual Python bridge delivers source freshness and refreshes after observe
 
 test('actual bridge delivers unknown-first source leads with zero stored facts',
   {timeout: 60000}, async (t) => {
-    if (!fs.existsSync(PYTHON)) return t.skip('installed CI project Python unavailable')
+    if (!fs.existsSync(PYTHON)) {
+      assert.ok(!process.env.CI, 'CI must provide the tested virtualenv interpreter')
+      return t.skip('local installed Python virtualenv unavailable')
+    }
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'cg-unknown-bridge-'))
     const previous = process.env.PYTHONPATH
     let host
