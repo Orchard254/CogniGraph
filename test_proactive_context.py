@@ -51,7 +51,7 @@ class ProactiveContextTests(unittest.TestCase):
             [(x["file_path"], x["kind"]) for x in result["inspection_targets"]],
             [("src/auth.py", "source_anchor"), ("src/session.py", "linked_fact")],
         )
-        self.assertIn("stored depends_on relationship", result["context_markdown"])
+        self.assertIn("stored `depends_on` relationship", result["context_markdown"])
         self.assertIn("Suggested source inspection", result["context_markdown"])
         self.assertNotIn(f"[memory:{self.session}]", result["context_markdown"])
         self.assertIsNone(result["retrieval_id"])
