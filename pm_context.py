@@ -413,6 +413,49 @@ class ContextMixin:
         lines.append("")
         return lines
 
+    def _file_context_candidates(self, clean_path: str) -> List[Dict[str, Any]]:
+        """Active facts whose stored file_path shares clean_path's canonical basename.
+
+        A SQL prefilter that supersets the Python suffix rule in
+        _paths_match/_canonical_path: any stored path whose canonical
+        basename equals the query's canonical basename must carry that
+        basename as a raw '/'-delimited segment (normpath only deletes
+        '.'/'..' segments and segments popped by '..', never invents a
+        surviving segment), so matching the basename as a first/middle/
+        final segment (or the whole path) catches every true match,
+        including stored trailing-slash/dot-segment forms such as
+        'src/target.py/', 'src/target.py/.', 'src/target.py//' and
+        'src/foo/..' for query 'src'. _paths_match stays the arbiter.
+        Same ordering as get_state(limit=None) (created_at DESC, no LIMIT:
+        briefings must see every fact). Falls back to the full scan when
+        SQLite's ASCII-only lower() could miss a match -- a non-ASCII
+        canonical basename, an empty basename, or a dot basename
+        ('.'/'..' after canonicalisation, e.g. a query that canonicalises
+        to '..'). The canonical basename is derived first ('src/foo/..'
+        canonicalises to 'src', basename 'src'), so trailing '..' in the
+        query does not produce a bogus dot basename.
+        """
+
+        canonical_path = self._canonical_path(clean_path)
+        filename = Path(canonical_path).name if canonical_path else ""
+        if not filename or filename in (".", "..") or any(ord(c) > 127 for c in filename):
+            return self.get_state(limit=None)
+        escaped = filename.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        rows = self.conn.execute(
+            "SELECT * FROM memory "
+            "WHERE deprecated_at IS NULL "
+            "AND file_path IS NOT NULL AND trim(file_path) <> '' "
+            "AND ("
+            "lower(trim(replace(file_path, char(92), '/'))) = ? "
+            "OR lower(trim(replace(file_path, char(92), '/'))) = ? "
+            "OR lower(trim(replace(file_path, char(92), '/'))) LIKE ? ESCAPE '\\' "
+            "OR lower(trim(replace(file_path, char(92), '/'))) LIKE ? ESCAPE '\\' "
+            "OR lower(trim(replace(file_path, char(92), '/'))) LIKE ? ESCAPE '\\'"
+            ") ORDER BY created_at DESC",
+            (canonical_path, filename, f"{escaped}/%", f"%/{escaped}", f"%/{escaped}/%"),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
     def get_file_context(self, file_path: str) -> str:
         """
         File-Centric Impact Analysis Briefing:
@@ -429,12 +472,15 @@ class ContextMixin:
         via query_hybrid/get_context, not via file path.
         """
         clean_path = file_path.strip().replace("\\", "/").lower()
-        # limit=None: the briefing must see EVERY active fact. Clamping to
-        # MAX_LIMIT hid facts about the target file entirely once the corpus
-        # passed 200 facts. The fact #498 standing rule (do not uncap the
-        # STRUCTURAL lane without a retrieval re-tuning pass) does not apply
-        # here: this read feeds no ranking, only the pre-edit briefing.
-        all_active = self.get_state(limit=None)
+        # No-clamping contract (formerly get_state(limit=None)): the briefing
+        # must see EVERY active fact. Clamping to MAX_LIMIT hid facts about
+        # the target file entirely once the corpus passed 200 facts. The
+        # fact #498 standing rule (do not uncap the STRUCTURAL lane without a
+        # retrieval re-tuning pass) does not apply here: this read feeds no
+        # ranking, only the pre-edit briefing. _file_context_candidates keeps
+        # that contract (no LIMIT, created_at DESC) with a SQL basename
+        # prefilter; Python _paths_match remains the final arbiter.
+        all_active = self._file_context_candidates(clean_path)
 
         direct_facts = []
         for f in all_active:
