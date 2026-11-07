@@ -43,7 +43,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: |
+            requirements.txt
+            pyproject.toml
 
       - name: Set up Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
@@ -58,7 +60,7 @@ jobs:
           path: |
             ~/.cache/pip
             venv
-          key: ${{ runner.os }}-venv-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-venv-${{ matrix.python-version }}-${{ hashFiles('requirements.txt', 'pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-venv-${{ matrix.python-version }}-
 
@@ -105,10 +107,16 @@ jobs:
           "$PYTHON" - <<'PY'
           from pathlib import Path
           from zipfile import ZipFile
+          import tomllib
 
           wheel_path = next((Path(__import__("os").environ["RUNNER_TEMP"]) / "cognigraph-wheel").glob("*.whl"))
+          with open("pyproject.toml", "rb") as fh:
+              declared_modules = tomllib.load(fh)["tool"]["setuptools"]["py-modules"]
           with ZipFile(wheel_path) as wheel:
               names = set(wheel.namelist())
+              missing_modules = sorted({f"{module}.py" for module in declared_modules} - names)
+              if missing_modules:
+                  raise SystemExit(f"Wheel is missing declared py-modules: {missing_modules}")
               required = {
                   "memory_cli.py",
                   "memory_store.py",
@@ -224,7 +232,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: |
+            requirements.txt
+            pyproject.toml
 
       - name: Install package
         run: |
@@ -257,7 +267,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: |
+            requirements.txt
+            pyproject.toml
 
       - name: Install package
         # fastembed installs as a library only; the gate reads precomputed
