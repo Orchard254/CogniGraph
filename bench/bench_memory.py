@@ -109,7 +109,7 @@ def find_500_line_python_file() -> Path:
     """Find a real ~500-line Python file in the repo."""
     for py_file in REPO_ROOT.glob("*.py"):
         try:
-            lines = py_file.read_text(encoding="utf-8", errors="replace").count('\n') + 1
+            lines = len(py_file.read_text(encoding="utf-8", errors="replace").splitlines())
             if 400 <= lines <= 600:
                 return py_file
         except Exception:
