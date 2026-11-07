@@ -140,7 +140,7 @@ def scan_file_tree(root: Path, full: bool = False, store: MemoryStore = None, dr
                 if p.stat().st_size < 1_000_000:
                     data = p.read_bytes()
                     h = hashlib.sha256(data).hexdigest()
-                    lines = data.decode('utf-8', errors='replace').count('\n') + 1
+                    lines = len(data.decode('utf-8', errors='replace').splitlines())
                     facts.append({
                         "category": "other",
                         "content": f"Source file: {str(rel).replace(os.sep, '/')} ({CODE_LANGS[p.suffix.lower()]}, {lines} lines, hash {h[:8]})",

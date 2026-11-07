@@ -156,7 +156,7 @@ def _sync_file(file_path: Path, root: Path, store: MemoryStore):
         try:
             data = file_path.read_bytes()
             h = hashlib.sha256(data).hexdigest()
-            lines = data.decode('utf-8', errors='replace').count('\n') + 1
+            lines = len(data.decode('utf-8', errors='replace').splitlines())
             content = f"Source file: {rel} (python, {lines} lines, hash {h[:8]})" if file_path.suffix.lower()==".py" else f"Source file: {rel} ({lines} lines, hash {h[:8]})"
             # Only rows whose content is already a stub template are upserted:
             # a curated fact anchored to this file must never be clobbered by
