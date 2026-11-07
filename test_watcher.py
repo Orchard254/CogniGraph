@@ -547,6 +547,18 @@ def test_stop_watcher_with_handle_and_without(monkeypatch):
 # --------------------------------------------------------------------------
 # watchdog observer branch (runs only when watchdog is installed)
 # --------------------------------------------------------------------------
+# Per-test skip (NOT module-level importorskip): a module-level
+# pytest.importorskip("watchdog") here would collapse the whole watcher
+# module to a single skipped node on watchdog-free runs, hiding the
+# polling-fallback coverage and miscounting skips. Decorating each
+# observer test individually means watchdog-less runs report exactly
+# 3 skips and still run the remaining 25 tests.
+import importlib.util
+
+requires_watchdog = pytest.mark.skipif(
+    importlib.util.find_spec("watchdog") is None, reason="watchdog not installed"
+)
+
 
 # --------------------------------------------------------------------------
 # lifecycle: handed-in store is closed after start
@@ -578,9 +590,7 @@ def test_start_closes_handed_store_polling(root, pyfile, monkeypatch):
     assert thread_store.writes[0]["file_path"] == "svc.py"
 
 
-watchdog = pytest.importorskip("watchdog")
-
-
+@requires_watchdog
 def test_observer_detects_change_and_stop(root, monkeypatch):
     """End-to-end through the real Observer: file change → sync → stop."""
     store = FakeStore()
@@ -607,6 +617,7 @@ def test_observer_detects_change_and_stop(root, monkeypatch):
     assert closed == ["D"]
 
 
+@requires_watchdog
 def test_observer_ignores_unwatched_extensions(root, monkeypatch):
     store = FakeStore()
     monkeypatch.setattr(watcher, "_thread_store", lambda db: store)
@@ -620,6 +631,7 @@ def test_observer_ignores_unwatched_extensions(root, monkeypatch):
         stop_watcher(handle)
 
 
+@requires_watchdog
 def test_observer_start_closes_handed_store(root, monkeypatch):
     """start_watcher releases the handed store even on the watchdog path."""
     handed = FakeStore()
