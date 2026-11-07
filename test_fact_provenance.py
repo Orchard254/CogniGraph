@@ -170,3 +170,26 @@ def test_verify_provenance_no_code_hash_unverified(tmp_path):
     finally:
         store.close()
 
+
+# 7. scan_provenance auto-heal fixes a >2KB no-range low-importance file so
+#    verify_provenance reports VERIFIED rather than DRIFT_DETECTED.
+def test_scan_provenance_auto_heal_no_range_large_file(tmp_path):
+    root = tmp_path
+    (root / "big.txt").write_text("x" * 2048, encoding="utf-8")
+    from memory_store import MemoryStore
+    store = MemoryStore(db_path=str(root / "mem.db"))
+    store._current_git_commit = lambda: None
+    try:
+        (root / "big.txt").write_text("x" * 3000, encoding="utf-8")
+        fid = store.write(category="other", content="big coverage",
+                         file_path="big.txt", importance=1,
+                         code_hash="0" * 64, embed=False, force=True)
+        # change the file so the stored hash is stale
+        (root / "big.txt").write_text("y" * 3001, encoding="utf-8")
+        rep = store.scan_provenance(project_root=str(root), auto_heal=True)
+        assert rep["healed"] and rep["healed"][0]["id"] == fid
+        out = store.verify_provenance(fid, project_root=str(root))
+        assert out["status"] == "VERIFIED", out
+    finally:
+        store.close()
+

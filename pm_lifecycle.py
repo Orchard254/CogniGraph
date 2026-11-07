@@ -902,23 +902,21 @@ class LifecycleMixin:
                 report["ok"].append({"id": row["id"], "file_path": row["file_path"], "note": "is_dir"})
                 continue
             try:
-                # Use same snippet logic as verify_provenance for consistency
-
-                # Read file bytes once to avoid double-read
-                file_bytes = full_path.read_bytes()
-                if row["line_start"] and row["line_end"]:
-                    file_lines = file_bytes.decode("utf-8", errors="replace").splitlines(keepends=True)
-                    l_start = max(0, (row["line_start"] or 1) - 1)
-                    l_end = min(len(file_lines), row["line_end"] or len(file_lines))
-                    snippet = "".join(file_lines[l_start:l_end])
-                else:
-                    # Whole-file hash: use raw bytes to match bootstrap's hashlib.sha256(data).hexdigest()
-                    actual_hash = hashlib.sha256(file_bytes).hexdigest()
-                    if actual_hash == row["code_hash"]:
-                        report["ok"].append({"id": row["id"], "file_path": row["file_path"]})
-                        continue
-                    # Fallback to text snippet hash for cross-platform newline tolerance
-                    snippet = file_bytes.decode("utf-8", errors="replace")[:2000]
+                # Match verify_provenance exactly: splitlines(keepends=True) over the
+                # same line range (None => whole file). No truncation fallback.
+                file_text = full_path.read_text(encoding="utf-8", errors="replace")
+                file_lines = file_text.splitlines(keepends=True)
+                eff_start = row["line_start"] if row["line_start"] is not None else 1
+                eff_end = row["line_end"] if row["line_end"] is not None else len(file_lines)
+                if eff_start > eff_end:
+                    report["drifted"].append({
+                        "id": row["id"], "file_path": row["file_path"],
+                        "reason": "invalid_line_range",
+                    })
+                    continue
+                l_start = max(0, (row["line_start"] or 1) - 1)
+                l_end = min(len(file_lines), row["line_end"] or len(file_lines))
+                snippet = "".join(file_lines[l_start:l_end])
                 actual_hash = hashlib.sha256(snippet.encode("utf-8")).hexdigest()
                 if actual_hash == row["code_hash"]:
                     report["ok"].append({"id": row["id"], "file_path": row["file_path"]})
