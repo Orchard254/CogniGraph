@@ -51,6 +51,29 @@ def test_backup_refuses_missing_or_empty(tmp_path):
         timestamped_backup(empty)
 
 
+def test_backup_rejects_keep_zero_and_creates_no_backup(tmp_path):
+    db = tmp_path / "memory.db"
+    _make_db(db)
+    seed = tmp_path / "memory.db.backup-routine-20260101-000000.bak"
+    seed.write_bytes(b"x")
+    before = sorted(p.name for p in tmp_path.iterdir())
+    with pytest.raises(ValueError):
+        timestamped_backup(db, keep=0)
+    after = sorted(p.name for p in tmp_path.iterdir())
+    assert after == before
+    assert seed.exists()
+
+
+def test_prune_backups_rejects_negative_keep(tmp_path):
+    db = tmp_path / "memory.db"
+    _make_db(db)
+    seed = tmp_path / "memory.db.backup-routine-20260101-000000.bak"
+    seed.write_bytes(b"x")
+    with pytest.raises(ValueError):
+        pm_backup._prune_backups(tmp_path, db.name, keep=-1)
+    assert seed.exists()
+
+
 def test_backup_prunes_beyond_keep(tmp_path):
     db = tmp_path / "memory.db"
     _make_db(db)

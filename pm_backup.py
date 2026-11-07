@@ -56,9 +56,11 @@ def timestamped_backup(db_path: str | Path, tag: str = "",
     beyond `keep` are pruned.
 
     Returns {"backup_path", "bytes", "kept", "pruned"}. Raises ValueError if
-    the source is missing/empty; a failed snapshot or integrity check removes
-    only the newly reserved destination before raising.
+    the source is missing/empty or keep < 1; a failed snapshot or integrity
+    check removes only the newly reserved destination before raising.
     """
+    if keep < 1:
+        raise ValueError(f"keep must be >= 1, got {keep!r}")
     src = Path(db_path)
     if not src.is_file() or src.stat().st_size == 0:
         raise ValueError(f"nothing to back up: {src} does not exist or is empty")
@@ -135,7 +137,10 @@ def _prune_backups(directory: Path, db_name: str, keep: int = DEFAULT_KEEP):
     sweep removes dangling sidecars whose parent `.bak` is already gone
     (legacy orphans from before sibling-aware pruning).
     Returns (kept_paths_newest_first, pruned_paths_oldest_first).
+    Raises ValueError if keep < 1.
     """
+    if keep < 1:
+        raise ValueError(f"keep must be >= 1, got {keep!r}")
     # Match names literally rather than via glob syntax: database filenames may
     # legally contain wildcard characters such as '?' or '[' on POSIX.
     prefix = f"{db_name}.backup-"
