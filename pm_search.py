@@ -683,7 +683,7 @@ class SearchMixin:
         episodic_fts_results: List[Dict[str, Any]] = []
         try:
             # Build FTS query like query() does
-            cleaned = __import__('re').sub(r'[^\w\s]', ' ', text.strip())
+            cleaned = re.sub(r'[^\w\s]', ' ', text.strip())
             terms = cleaned.split()
             safe_terms = [t.replace('"', '') for t in terms if t.strip()]
             fts_q = " ".join(f'"{t}"*' for t in safe_terms if t) if safe_terms else ""

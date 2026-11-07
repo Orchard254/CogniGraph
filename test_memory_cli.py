@@ -368,6 +368,24 @@ def test_query_bad_field_exits_nonzero(cli, capsys):
     assert "unknown result field" in capsys.readouterr().err
 
 
+def test_query_degenerate_fields_plain_no_projection(cli, capsys):
+    # Whitespace/comma-only field lists parse to None and must not crash the
+    # projection banner (they behave as "no projection").
+    for value in ("   ", ",,,", " , , "):
+        cli("query", "hello", "--fields", value)
+        out = capsys.readouterr().out
+        assert "Found 1 matching facts:" in out
+        assert "projected onto" not in out
+
+
+def test_query_degenerate_fields_hybrid_no_projection(cli, capsys):
+    for value in ("   ", ",,,", " , , "):
+        cli("query", "hello", "--hybrid", "--fields", value)
+        out = capsys.readouterr().out
+        assert "Found 0 matching facts:" in out
+        assert "projected onto" not in out
+
+
 def test_prune_stubs_dry_run_is_the_default(cli, capsys):
     s = cli("prune-stubs")
     assert _call(s, "prune_stale_stubs")[0][2]["dry_run"] is True

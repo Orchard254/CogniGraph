@@ -342,6 +342,7 @@ def main():
         elif args.command == "query":
             limit = max(1, min(100, args.limit or 10))
             fields = getattr(args, "fields", None)
+            parsed_fields = parse_fields(fields)
             if args.hybrid:
                 # Deliberately logs usage (default log_usage=True): a CLI
                 # query is user-initiated retrieval, exactly what usage
@@ -358,14 +359,14 @@ def main():
                     raise SystemExit(2)
             else:
                 results = store.query(args.text, category=args.category, tag=args.tag, limit=limit)
-                if fields:
+                if parsed_fields:
                     try:
-                        results = project_fields(results, fields)
+                        results = project_fields(results, parsed_fields)
                     except ProjectFieldError as e:
                         print(f"Field projection error: {e}", file=sys.stderr)
                         raise SystemExit(2)
-            if fields:
-                print(f"(projected onto: {', '.join(parse_fields(fields))}, "
+            if parsed_fields:
+                print(f"(projected onto: {', '.join(parsed_fields)}, "
                       f"plus id — other keys are not present in this output)")
             print(f"Found {len(results)} matching facts:")
             for r in results:
