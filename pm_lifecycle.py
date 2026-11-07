@@ -571,6 +571,11 @@ class LifecycleMixin:
         # call/import graph, so tests that indirectly exercise changed code are
         # surfaced in addition to the one-hop candidates above. Cycle-safe and
         # bounded; depth is reported honestly (dynamic calls are not captured).
+        # BOUND: the reverse BFS stops expanding at depth 6, so a test file
+        # whose only path from the changed files is longer than 6 hops is
+        # NOT reported. affected_tests_truncated / *_beyond_limit_frontier
+        # flag when that bound actually cut off a frontier (see below); the
+        # bound itself is always surfaced in known_limitations.
         from collections import defaultdict, deque
         affected_test_map = {}  # canonical test path -> {depth, edge_types}
         original_path_for = {}
@@ -586,13 +591,24 @@ class LifecycleMixin:
         for cp in clean_paths:
             canonical_cp = _canonical_path(cp)
             original_path_for.setdefault(canonical_cp, cp)
+        affected_tests_max_depth = 6
+        affected_tests_truncated = False
+        _beyond_limit_frontier_canon = set()
         visited = set(_canonical_path(cp) for cp in clean_paths)
         queue = deque()
         for cp in clean_paths:
             queue.append((_canonical_path(cp), 0))
         while queue:
             current, depth = queue.popleft()
-            if depth >= 6:
+            if depth >= affected_tests_max_depth:
+                # Do not expand past the bound, but record any immediate
+                # dependent we therefore never reach. A dependent already
+                # visited via a shorter path is not truncated, and a chain
+                # that ends exactly at the bound is not truncated either.
+                for dependent in dependents.get(current, {}):
+                    if dependent not in visited:
+                        affected_tests_truncated = True
+                        _beyond_limit_frontier_canon.add(dependent)
                 continue
             for dependent, edge_types in dependents.get(current, {}).items():
                 if dependent in visited:
@@ -619,6 +635,18 @@ class LifecycleMixin:
                 "edge_types": meta["edge_types"],
             })
         affected_tests.sort(key=lambda x: (x["depth"], x["test_file"]))
+        affected_tests_beyond_limit_frontier = sorted(
+            original_path_for.get(c, c) for c in _beyond_limit_frontier_canon
+        )
+        known_limitations.append(
+            "affected-test reverse BFS is capped at 6 hops "
+            "(affected_tests_max_depth=6): test files reachable only via a "
+            "path longer than 6 hops from the changed files are omitted from "
+            "affected_tests/likely_relevant_tests; "
+            "affected_tests_truncated=True and "
+            "affected_tests_beyond_limit_frontier flag when that bound cut "
+            "off a frontier"
+        )
 
         # Test-aware projection for likely_relevant_tests: merge direct
         # external candidates with transitive affected tests.
@@ -702,6 +730,12 @@ class LifecycleMixin:
             "likely_relevant_tests": external_test_candidates,
             "affected_tests": affected_tests,
             "affected_tests_count": len(affected_tests),
+            "affected_tests_max_depth": affected_tests_max_depth,
+            "affected_tests_truncated": affected_tests_truncated,
+            "affected_tests_truncated_at_depth": (
+                affected_tests_max_depth if affected_tests_truncated else None
+            ),
+            "affected_tests_beyond_limit_frontier": affected_tests_beyond_limit_frontier,
             "impact_scope": ("incomplete" if external_dependency_scan_failed else ("batch_plus_external_callers" if external_dependencies else "batch_only")),
             "known_limitations": known_limitations,
             "structural_index_freshness": ("verified" if structural_index_freshness_verified else "not_verified"),

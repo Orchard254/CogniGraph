@@ -950,3 +950,63 @@ def test_security_resolves_relative_path_against_routed_project(tmp_path, monkey
     assert out["scanned_files"] == 1
     assert any("secret.py" in str(h.get("file_path", "")) for h in out["hits"])
 
+
+# --- Observability: startup / routing failures log without changing returns ---
+
+def test_resolve_db_helpers_log_and_return_none_on_bad_input(monkeypatch, caplog):
+    import logging
+
+    with caplog.at_level(logging.DEBUG, logger="server"):
+        assert server._resolve_db_from_root(123) is None
+        assert server._find_enclosing_project(123) is None
+        assert server._resolve_db_for_path(123) is None
+    assert any(
+        "resolve_db_from_root skipped" in r.message for r in caplog.records
+    )
+    assert any(
+        "find_enclosing_project skipped" in r.message for r in caplog.records
+    )
+    assert any(
+        "resolve_db_for_path skipped" in r.message for r in caplog.records
+    )
+
+
+def test_uri_to_path_logs_and_returns_none_on_bad_input(caplog):
+    import logging
+
+    class _BadStr:
+        def __str__(self):
+            raise RuntimeError("bad uri")
+
+    with caplog.at_level(logging.DEBUG, logger="server"):
+        assert server._uri_to_path(_BadStr()) is None
+    assert any("uri_to_path conversion skipped" in r.message for r in caplog.records)
+
+
+def test_start_background_services_logs_thread_start_failure_without_raising(
+    monkeypatch, caplog
+):
+    import logging
+
+    class _FailingThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("no threads")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("no store")
+
+    monkeypatch.setattr("threading.Thread", _FailingThread)
+    monkeypatch.setattr(server, "_get_store", _boom)
+    with caplog.at_level(logging.DEBUG, logger="server"):
+        server._start_background_services()  # must not raise
+    assert any(
+        "auto_maintenance thread failed to start" in r.message
+        for r in caplog.records
+    )
+    assert any(
+        "file watcher failed to start" in r.message for r in caplog.records
+    )
+

@@ -1221,6 +1221,20 @@ class StructuralMixin:
                     f"{file_detail} has no affected symbols in this blast radius.")
         return result
 
+    def _project_root_from_db(self) -> Optional[str]:
+        """Derive the project root from ``db_path`` (database grandparent).
+
+        Shared by blast-radius estimation and the scoped-line reader so the
+        derivation stays identical (explicit roots are handled by callers).
+
+        Returns None when the derived directory does not exist.
+        """
+        try:
+            root = Path(getattr(self, "db_path", "") or "").resolve().parent.parent
+            return str(root) if root.is_dir() else None
+        except Exception:
+            return None
+
     def _blast_unresolved(self, seeds: List[Dict[str, Any]],
                           nodes: Dict[int, Dict[str, Any]],
                           project_root: Optional[str]) -> Tuple[int, List[str]]:
@@ -1234,11 +1248,7 @@ class StructuralMixin:
         skipped and reported, never silently counted as zero.
         """
         if project_root is None:
-            try:
-                root = Path(getattr(self, "db_path", "") or "").resolve().parent.parent
-                project_root = str(root) if root.is_dir() else None
-            except Exception:
-                project_root = None
+            project_root = self._project_root_from_db()
         if not project_root:
             return 0, ["project root unavailable — estimate skipped"]
 
@@ -1304,14 +1314,10 @@ class StructuralMixin:
     ]
 
     def _read_project_root(self, project_root: Optional[str]) -> Optional[str]:
-        """Derive the containment root the same way _blast_unresolved does."""
+        """Return the explicit root, else derive it from the database path."""
         if project_root:
             return project_root
-        try:
-            root = Path(getattr(self, "db_path", "") or "").resolve().parent.parent
-            return str(root) if root.is_dir() else None
-        except Exception:
-            return None
+        return self._project_root_from_db()
 
     @staticmethod
     def _read_contained_path(file_path: str, project_root: str) -> Optional[Path]:

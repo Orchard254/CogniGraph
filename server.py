@@ -54,7 +54,8 @@ def _uri_to_path(uri: str) -> Optional[Path]:
         if path.startswith("/") and len(path) > 2 and path[2] == ":":
             path = path[1:]
         return Path(path)
-    except Exception:
+    except Exception as e:
+        logger.debug("uri_to_path conversion skipped: %r", e)
         return None
 
 
@@ -83,8 +84,8 @@ def _resolve_db_from_root(root_dir: Path) -> Optional[str]:
             return str(root_dir / LEGACY_DATA_DIR_NAME / "memory.db")
         if root_dir.is_dir():
             return str(root_dir / DATA_DIR_NAME / "memory.db")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("resolve_db_from_root skipped: %r", e)
     return None
 
 
@@ -108,8 +109,8 @@ def _find_enclosing_project(start_path: Path) -> Optional[Path]:
             for marker in _PROJECT_MARKERS:
                 if (parent / marker).exists():
                     return parent
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("find_enclosing_project skipped: %r", e)
     return None
 
 
@@ -126,7 +127,8 @@ def _resolve_db_for_path(file_arg: str) -> Optional[str]:
     """
     try:
         target = Path(file_arg).resolve()
-    except Exception:
+    except Exception as e:
+        logger.debug("resolve_db_for_path skipped: %r", e)
         return None
     existing = find_project_root(target)
     if existing:
@@ -278,8 +280,8 @@ def _ensure_first_time_setup(db_path: Optional[str] = None):
             if store is not None:
                 try:
                     store.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("first-time setup store close failed: %r", e)
 
 def _memory_auto_backup_enabled() -> bool:
     """Whether routine startup timestamped DB backups run.
@@ -337,8 +339,8 @@ def _auto_maintenance():
     finally:
         try:
             store.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("auto_maintenance store close failed: %r", e)
 
 def _start_background_services():
     """Start auto-maintenance and file watcher threads. Called from main block."""
@@ -346,8 +348,8 @@ def _start_background_services():
     try:
         import threading
         threading.Thread(target=_auto_maintenance, daemon=True).start()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("auto_maintenance thread failed to start: %r", e)
 
     # Start real-time file watcher (watchdog or polling) for C:/Ai and other roots
     try:
