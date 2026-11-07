@@ -340,6 +340,16 @@ def start_watcher(project_root: Optional[Path] = None, store: Optional[MemorySto
             observer.daemon = True
             observer.start()
             logger.info("watcher started (watchdog) for %s", root)
+            # The original handle is only needed to supply db_path to
+            # callbacks; those obtain a thread-local store before any DB work.
+            # Release it best-effort so the main thread does not leak a handle.
+            try:
+                if store is not None:
+                    closer = getattr(store, "close", None)
+                    if callable(closer):
+                        closer()
+            except Exception:
+                pass
             return observer
         else:
             # Polling fallback every 30s
@@ -400,6 +410,13 @@ def start_watcher(project_root: Optional[Path] = None, store: Optional[MemorySto
             t = threading.Thread(target=poll_loop, daemon=True)
             t.start()
             logger.info("watcher started (polling) for %s", root)
+            try:
+                if store is not None:
+                    closer = getattr(store, "close", None)
+                    if callable(closer):
+                        closer()
+            except Exception:
+                pass
             return t
     except Exception as e:
         logger.warning("watcher failed to start: %r", e)

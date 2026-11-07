@@ -548,6 +548,36 @@ def test_stop_watcher_with_handle_and_without(monkeypatch):
 # watchdog observer branch (runs only when watchdog is installed)
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# lifecycle: handed-in store is closed after start
+# --------------------------------------------------------------------------
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_start_closes_handed_store_polling(root, pyfile, monkeypatch):
+    """start_watcher releases the handed-in store; later syncs use thread-local."""
+    monkeypatch.setattr(watcher, "_WATCHDOG_AVAILABLE", False)
+    sleeps = []
+
+    def fake_sleep(s):
+        sleeps.append(s)
+        if len(sleeps) == 1:
+            os.utime(pyfile, (time.time() + 5, time.time() + 5))
+            return
+        raise SystemExit
+
+    monkeypatch.setattr(time, "sleep", fake_sleep)
+    handed = FakeStore()
+    thread_store = FakeStore()
+    monkeypatch.setattr(watcher, "_thread_store", lambda db: thread_store)
+    monkeypatch.setattr(watcher, "extract_structures", lambda p: [])
+    t = start_watcher(project_root=root, store=handed)
+    assert t is not None and t.daemon is True
+    t.join(timeout=10)
+    assert not t.is_alive()
+    assert handed.closed is True
+    assert len(thread_store.writes) == 1
+    assert thread_store.writes[0]["file_path"] == "svc.py"
+
+
 watchdog = pytest.importorskip("watchdog")
 
 
@@ -588,3 +618,27 @@ def test_observer_ignores_unwatched_extensions(root, monkeypatch):
         assert store.writes == []
     finally:
         stop_watcher(handle)
+
+
+def test_observer_start_closes_handed_store(root, monkeypatch):
+    """start_watcher releases the handed store even on the watchdog path."""
+    handed = FakeStore()
+    thread_store = FakeStore()
+    monkeypatch.setattr(watcher, "_thread_store", lambda db: thread_store)
+    monkeypatch.setattr(watcher, "extract_structures", lambda p: [])
+    handle = start_watcher(project_root=root, store=handed)
+    assert handle is not None
+    assert handed.closed is True
+    try:
+        target = root / "live.py"
+        target.write_text("x = 1\n")
+        deadline = time.time() + 10
+        while not thread_store.writes and time.time() < deadline:
+            time.sleep(0.1)
+        assert len(thread_store.writes) == 1
+        time.sleep(2.5)
+    finally:
+        closed = []
+        monkeypatch.setattr(watcher, "close_thread_stores", lambda db=None: closed.append(db))
+        stop_watcher(handle, db_path="D")
+    assert not handle.is_alive()
