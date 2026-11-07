@@ -47,6 +47,7 @@ opencode.json
 .zcode/config.json
 # Local dev-orchestrator run state (branches/state/reviews; never commit)
 .orchestra/
+.orchestrator/
 
 # Coverage artifacts
 .coverage
