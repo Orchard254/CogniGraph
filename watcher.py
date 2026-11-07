@@ -349,28 +349,35 @@ def start_watcher(project_root: Optional[Path] = None, store: Optional[MemorySto
                 first_scan = True
                 while True:
                     try:
-                        for ext in WATCHED_EXTS:
+                        # Single recursive walk: rglob with a lowercase
+                        # extension pattern (*{ext} == *.py) never matches
+                        # uppercase/mixed-case names on case-sensitive stores,
+                        # even though _should_watch lowercases the suffix.
+                        # Filtering the suffix here covers every case variant
+                        # while preserving ignore/size gates applied later.
+                        try:
+                            candidates = [p for p in root.rglob("*")
+                                          if p.is_file()
+                                          and p.suffix.lower() in WATCHED_EXTS]
+                        except OSError as e:
+                            logger.debug("watcher poll rglob failed: %r", e)
+                            candidates = []
+                        for p in candidates:
                             try:
-                                candidates = list(root.rglob(f"*{ext}"))
-                            except OSError as e:
-                                logger.debug("watcher poll rglob failed %s: %r", ext, e)
-                                continue
-                            for p in candidates:
-                                try:
-                                    if not _should_watch(p, root):
-                                        if not p.exists():
-                                            seen.pop(str(p), None)
-                                        continue
-                                    mtime = p.stat().st_mtime
-                                except (OSError, FileNotFoundError) as e:
-                                    logger.debug("watcher poll stat failed %s: %r", p, e)
-                                    seen.pop(str(p), None)
+                                if not _should_watch(p, root):
+                                    if not p.exists():
+                                        seen.pop(str(p), None)
                                     continue
-                                key = str(p)
-                                if key not in seen or seen[key] != mtime:
-                                    if not first_scan:
-                                        _sync_file(p, root, store)
-                                    seen[key] = mtime
+                                mtime = p.stat().st_mtime
+                            except (OSError, FileNotFoundError) as e:
+                                logger.debug("watcher poll stat failed %s: %r", p, e)
+                                seen.pop(str(p), None)
+                                continue
+                            key = str(p)
+                            if key not in seen or seen[key] != mtime:
+                                if not first_scan:
+                                    _sync_file(p, root, store)
+                                seen[key] = mtime
                         # Evict deleted paths so `seen` stays bounded, and prune
                         # their structural rows (same as on_deleted: sync never
                         # revisits a path with nothing on disk).

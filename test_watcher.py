@@ -491,6 +491,33 @@ def test_poll_deletion_prunes_structural_rows(root, pyfile, monkeypatch):
     assert store.deleted == ["svc.py"]
 
 
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_poll_uppercase_extension_discovered(root, monkeypatch):
+    """Polling fallback must discover case-variant extensions (.PY etc)."""
+    monkeypatch.setattr(watcher, "_WATCHDOG_AVAILABLE", False)  # force polling path
+    uf = root / "upper.PY"
+    uf.write_bytes(b"def helper():\n    return 1\n")
+    sleeps = []
+
+    def fake_sleep(s):
+        sleeps.append(s)
+        if len(sleeps) == 1:
+            os.utime(uf, (time.time() + 5, time.time() + 5))  # touch after first scan
+            return
+        raise SystemExit  # silently ends the daemon thread
+
+    monkeypatch.setattr(time, "sleep", fake_sleep)
+    store = FakeStore()
+    monkeypatch.setattr(watcher, "_thread_store", lambda db: store)
+    monkeypatch.setattr(watcher, "extract_structures", lambda p: [])
+    t = start_watcher(project_root=root, store=store)
+    assert t is not None and t.daemon is True
+    t.join(timeout=10)
+    assert not t.is_alive()
+    assert sleeps == [30, 30]
+    assert len(store.writes) == 1 and store.writes[0]["file_path"] == "upper.PY"
+
+
 def test_stop_watcher_with_handle_and_without(monkeypatch):
     calls = []
 
