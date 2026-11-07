@@ -137,9 +137,45 @@ def _resolve_db_for_path(file_arg: str) -> Optional[str]:
     return None
 
 
+# Original class reference, captured at import time, so a later monkeypatch on
+# either `server.MemoryStore` or `memory_store.MemoryStore` can be detected.
+_ORIGINAL_MEMORY_STORE = MemoryStore
+
+
 def _get_store(*args, **kwargs):
-    from memory_store import MemoryStore
-    db_path = kwargs.get("db_path_override") or _active_db_path.get() or default_db_path()
+    # Hostr ordering: explicit override > positional db_path > keyword db_path
+    # > active ContextVar > default path. Positional args historically got
+    # dropped here, which made `_ensure_first_time_setup(target_db)` open the
+    # wrong database; that is the regression fixed by this function.
+    db_path = kwargs.get("db_path_override")
+    if not db_path and args:
+        db_path = args[0]
+    if not db_path:
+        db_path = kwargs.get("db_path")
+    if not db_path:
+        db_path = _active_db_path.get()
+    if not db_path:
+        db_path = default_db_path()
+
+    # Resolve MemoryStore through the live module objects so tests that patch
+    # `memory_store.MemoryStore` or `server.MemoryStore` are honored (the local
+    # `from memory_store import MemoryStore` above shadowed patches).
+    import sys
+
+    import memory_store as _ms_mod
+
+    _server_mod = sys.modules.get(__name__)
+    mod_cls = getattr(_ms_mod, "MemoryStore", None)
+    server_cls = getattr(_server_mod, "MemoryStore", None) if _server_mod is not None else None
+    # Prefer a patched (non-original) class when one is visible.
+    if server_cls is not None and server_cls is not _ORIGINAL_MEMORY_STORE:
+        MemoryStore = server_cls
+    elif mod_cls is not None and mod_cls is not _ORIGINAL_MEMORY_STORE:
+        MemoryStore = mod_cls
+    elif mod_cls is not None:
+        MemoryStore = mod_cls
+    else:
+        MemoryStore = globals().get("MemoryStore", _ORIGINAL_MEMORY_STORE)
     return MemoryStore(db_path)
 
 

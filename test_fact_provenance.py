@@ -122,3 +122,51 @@ def test_migration_adds_evidence_columns_and_allows_convention(tmp_path):
         assert fid > 0
     finally:
         store.close()
+
+
+# 5. reversed line range in verify_provenance is UNVERIFIED, never healed/mutated.
+def test_verify_provenance_reversed_line_range_unverified(tmp_path):
+    root = tmp_path
+    (root / "svc.py").write_text("a\nb\nc\n", encoding="utf-8")
+    from memory_store import MemoryStore
+    store = MemoryStore(db_path=str(root / "mem.db"))
+    store._current_git_commit = lambda: None
+    try:
+        fid = store.write(category="other", content="reversed",
+                         file_path="svc.py", line_start=3, line_end=1,
+                         code_hash="0" * 64, embed=False, force=True)
+        before = store.get_by_id(fid)
+        out = store.verify_provenance(fid, project_root=str(root))
+        assert out["status"] == "UNVERIFIED"
+        assert out["reason"] == "invalid_line_range"
+        after = store.get_by_id(fid)
+        assert after["line_start"] == before["line_start"]
+        assert after["line_end"] == before["line_end"]
+        assert after["confidence"] == before["confidence"]
+    finally:
+        store.close()
+
+
+# 6. missing code_hash in verify_provenance is UNVERIFIED, never DRIFT.
+def test_verify_provenance_no_code_hash_unverified(tmp_path):
+    root = tmp_path
+    (root / "svc.py").write_text("a\nb\nc\n", encoding="utf-8")
+    from memory_store import MemoryStore
+    store = MemoryStore(db_path=str(root / "mem.db"))
+    store._current_git_commit = lambda: None
+    try:
+        fid = store.write(category="other", content="nohash",
+                         file_path="svc.py", line_start=1, line_end=2,
+                         code_hash=None, confidence="confirmed",
+                         embed=False, force=True)
+        before = store.get_by_id(fid)
+        out = store.verify_provenance(fid, project_root=str(root))
+        assert out["status"] == "UNVERIFIED"
+        assert out["reason"] == "no_provenance_hash"
+        after = store.get_by_id(fid)
+        assert after["line_start"] == before["line_start"]
+        assert after["line_end"] == before["line_end"]
+        assert after["confidence"] == before["confidence"] == "confirmed"
+    finally:
+        store.close()
+

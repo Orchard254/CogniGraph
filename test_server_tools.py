@@ -53,8 +53,9 @@ def real_db(tmp_path, monkeypatch):
     """
     db = str(tmp_path / "rt" / "memory.db")
 
-    def _factory():
-        return MemoryStore(db)
+    def _factory(*args, **kwargs):
+        requested = args[0] if args and args[0] else kwargs.get("db_path") or kwargs.get("db_path_override")
+        return MemoryStore(requested or db)
 
     monkeypatch.setattr(server, "_get_store", _factory)
     return db
@@ -117,7 +118,7 @@ class FakeStore:
             explain=explain,
             fields=fields,
         )
-        from pm_common import ProjectFieldError, project_fields
+        from pm_common import project_fields
         if fields:
             project_fields([{"id": 2, "content": "canned-hybrid"}], fields)
         return [{"id": 2, "content": "canned-hybrid"}]
@@ -171,7 +172,7 @@ class FakeStore:
 def fake_store(monkeypatch):
     """Route server._get_store at a shared FakeStore (close() is a no-op)."""
     fake = FakeStore()
-    monkeypatch.setattr(server, "_get_store", lambda: fake)
+    monkeypatch.setattr(server, "_get_store", lambda *a, **k: fake)
     return fake
 
 
@@ -549,6 +550,87 @@ def test_import_is_side_effect_safe():
         if isinstance(value, MemoryStore)
     ]
     assert holders == []
+
+
+# ---------------------------------------------------------------------------
+# _get_store positional db_path regression tests
+# ---------------------------------------------------------------------------
+
+
+class _CapturingMemoryStore:
+    instances = []
+
+    def __init__(self, db_path=None):
+        self.db_path = db_path
+        _CapturingMemoryStore.instances.append(self)
+
+    def close(self):
+        pass
+
+
+def test_get_store_honors_positional_db_path(monkeypatch, tmp_path):
+    _CapturingMemoryStore.instances.clear()
+    monkeypatch.setattr("memory_store.MemoryStore", _CapturingMemoryStore)
+    path = str(tmp_path / "positional.db")
+    store = server._get_store(path)
+    assert _CapturingMemoryStore.instances
+    assert _CapturingMemoryStore.instances[-1].db_path == path
+    store.close()
+
+
+def test_get_store_positional_overrides_active_context(monkeypatch, tmp_path):
+    _CapturingMemoryStore.instances.clear()
+    monkeypatch.setattr("memory_store.MemoryStore", _CapturingMemoryStore)
+    path = str(tmp_path / "positional.db")
+    active = str(tmp_path / "active.db")
+    token = server._active_db_path.set(active)
+    try:
+        store = server._get_store(path)
+    finally:
+        server._active_db_path.reset(token)
+    assert _CapturingMemoryStore.instances[-1].db_path == path
+    store.close()
+
+
+def test_get_store_override_beats_positional_and_active(monkeypatch, tmp_path):
+    _CapturingMemoryStore.instances.clear()
+    monkeypatch.setattr("memory_store.MemoryStore", _CapturingMemoryStore)
+    token = server._active_db_path.set(str(tmp_path / "active.db"))
+    try:
+        store = server._get_store(
+            str(tmp_path / "positional.db"),
+            db_path_override=str(tmp_path / "override.db"),
+        )
+    finally:
+        server._active_db_path.reset(token)
+    assert _CapturingMemoryStore.instances[-1].db_path == str(tmp_path / "override.db")
+    store.close()
+
+
+def test_get_store_active_context_overrides_default(monkeypatch, tmp_path):
+    _CapturingMemoryStore.instances.clear()
+    monkeypatch.setattr("memory_store.MemoryStore", _CapturingMemoryStore)
+    active = str(tmp_path / "active.db")
+    token = server._active_db_path.set(active)
+    try:
+        store = server._get_store()
+    finally:
+        server._active_db_path.reset(token)
+    assert _CapturingMemoryStore.instances[-1].db_path == active
+    store.close()
+
+
+def test_get_store_default_fallback(monkeypatch, tmp_path):
+    _CapturingMemoryStore.instances.clear()
+    monkeypatch.setattr("memory_store.MemoryStore", _CapturingMemoryStore)
+    # Ensure no active path is set
+    token = server._active_db_path.set(None)
+    try:
+        store = server._get_store()
+    finally:
+        server._active_db_path.reset(token)
+    assert _CapturingMemoryStore.instances[-1].db_path == default_db_path()
+    store.close()
 
 
 # ---------------------------------------------------------------------------

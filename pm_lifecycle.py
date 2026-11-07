@@ -253,6 +253,13 @@ class LifecycleMixin:
             return {"status": "DEPRECATED_FILE_DELETED", "fact_id": fact_id, "file_path": row["file_path"]}
 
         file_lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        # Detect reversed/malformed line ranges before any hash or heal work:
+        # None is treated with the same defaults used below (start=1, end=len).
+        eff_start = row["line_start"] if row["line_start"] is not None else 1
+        eff_end = row["line_end"] if row["line_end"] is not None else len(file_lines)
+        if eff_start > eff_end:
+            return {"status": "UNVERIFIED", "reason": "invalid_line_range", "fact_id": fact_id}
+
         l_start = max(0, (row["line_start"] or 1) - 1)
         l_end = min(len(file_lines), row["line_end"] or len(file_lines))
         snippet = "".join(file_lines[l_start:l_end])
@@ -260,6 +267,11 @@ class LifecycleMixin:
 
         if row["code_hash"] and curr_hash == row["code_hash"]:
             return {"status": "VERIFIED", "fact_id": fact_id, "file_path": row["file_path"]}
+
+        # Facts carrying a file_path but no code_hash cannot be drift-checked:
+        # surface as unverified instead of relabeling confidence as uncertain.
+        if not row["code_hash"]:
+            return {"status": "UNVERIFIED", "reason": "no_provenance_hash", "fact_id": fact_id}
 
         # Neighborhood search (±30 lines shift)
         if row["code_hash"]:
