@@ -16,6 +16,9 @@ const os = require('os');
 
 // ---------------------------------------------------------------------------
 // Constants (single source of truth; values copied from index.js/postinstall.js)
+// PACKAGE_VERSION must stay equal to package.json "version", package-lock.json,
+// and pyproject.toml [project] version — enforced by the parity checker in
+// test-js/lib.test.js. Bump all four together.
 // ---------------------------------------------------------------------------
 
 const PACKAGE_VERSION = '1.0.0';
@@ -30,6 +33,10 @@ const PYTHON_CANDIDATES = [
 ];
 
 // Must mirror the package.json "files" list (python sources, schemas, hooks).
+// Parity checker in test-js/lib.test.js enforces:
+// - every REQUIRED_FILES entry is listed in package.json "files";
+// - every setup.py _SCHEMA_FILES entry is in REQUIRED_FILES;
+// - every pyproject.toml py-module maps to a REQUIRED_FILES .py entry.
 const REQUIRED_FILES = [
   'server.py', 'memory_store.py', 'corpus_hygiene.py', 'pm_backup.py', 'pm_common.py', 'pm_search.py',
   'pm_feedback.py', 'pm_intelligence.py', 'pm_outcomes.py', 'pm_freshness.py', 'pm_context.py', 'pm_lifecycle.py', 'pm_structural.py', 'bootstrap.py',
@@ -82,6 +89,24 @@ function resolveDefaultDbPath(projectRoot, fsMod = fs) {
   if (hasCurrent) return path.join(current, 'memory.db');
   if (hasLegacy) return path.join(legacy, 'memory.db');
   return path.join(current, 'memory.db');
+}
+
+/**
+ * Infer a project root from a (possibly custom) MEMORY_DB_PATH.
+ * Returns the root only when dbPath sits directly inside a known data dir
+ * (<root>/.cognigraph/memory.db or <root>/.project-memory/memory.db);
+ * otherwise returns null — a custom path has no implied project root.
+ * Replaces the old `dirname(dirname(dbPath))` guess, which mis-derived
+ * e.g. "/data/memory.db" -> "/" and "/custom/dir/my.db" -> "/custom".
+ */
+function deriveProjectRootFromDbPath(dbPath) {
+  if (!dbPath) return null;
+  const dir = path.dirname(dbPath);
+  const base = path.basename(dir);
+  if (base === DATA_DIR_NAME || base === LEGACY_DATA_DIR_NAME) {
+    return path.dirname(dir);
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +351,7 @@ module.exports = {
   DATA_DIR_NAME,
   LEGACY_DATA_DIR_NAME,
   resolveDefaultDbPath,
+  deriveProjectRootFromDbPath,
   parsePythonVersion,
   parseMinVersion,
   isPythonVersionSupported,

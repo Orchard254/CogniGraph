@@ -345,3 +345,125 @@ describe('findPythonCommand (python3.14 alias)', () => {
   });
 });
 
+describe('manifest/version parity (single-source checker)', () => {
+  const root = path.join(__dirname, '..');
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
+  const lockJson = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf-8'));
+  const pyproject = fs.readFileSync(path.join(root, 'pyproject.toml'), 'utf-8');
+  const setupPy = fs.readFileSync(path.join(root, 'setup.py'), 'utf-8');
+
+  const pyprojectVersion = (/^version\s*=\s*"([^"]+)"/m.exec(pyproject) || [])[1];
+  const pyprojectRequiresPython = (/^requires-python\s*=\s*"([^"]+)"/m.exec(pyproject) || [])[1];
+  const pyModulesMatch = /py-modules\s*=\s*\[([^\]]+)\]/s.exec(pyproject);
+  const pyModQuoted = pyModulesMatch ? [...pyModulesMatch[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : [];
+  const schemaMatch = /_SCHEMA_FILES\s*=\s*\(([^)]+)\)/s.exec(setupPy);
+  const schemaFiles = schemaMatch ? [...schemaMatch[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : [];
+
+  it('exposes a semver-like package version from lib', () => {
+    assert.match(lib.PACKAGE_VERSION, /^\d+\.\d+\.\d+$/);
+  });
+
+  it('keeps lib PACKAGE_VERSION in sync with package.json, package-lock.json and pyproject.toml', () => {
+    assert.strictEqual(lib.PACKAGE_VERSION, pkgJson.version, 'lib PACKAGE_VERSION must equal package.json version');
+    assert.strictEqual(pkgJson.version, lockJson.version, 'package.json version must equal package-lock.json top-level version');
+    assert.strictEqual(lockJson.version, lockJson.packages[''].version, 'package-lock.json top-level version must equal packages[""].version');
+    assert.ok(pyprojectVersion, 'pyproject.toml [project] version must be present');
+    assert.strictEqual(pkgJson.version, pyprojectVersion, 'package.json version must equal pyproject.toml version');
+  });
+
+  it('keeps PYTHON_MIN_VERSION in sync with pyproject.toml requires-python', () => {
+    assert.ok(pyprojectRequiresPython, 'pyproject.toml requires-python must be present');
+    assert.ok(
+      pyprojectRequiresPython.includes(lib.PYTHON_MIN_VERSION),
+      `requires-python "${pyprojectRequiresPython}" must include PYTHON_MIN_VERSION "${lib.PYTHON_MIN_VERSION}"`
+    );
+  });
+
+  it('keeps every REQUIRED_FILES entry in package.json "files"', () => {
+    assert.ok(Array.isArray(pkgJson.files) && pkgJson.files.length > 0);
+    for (const file of lib.getRequiredFiles()) {
+      assert.ok(pkgJson.files.includes(file), `REQUIRED_FILES entry missing from package.json "files": ${file}`);
+    }
+  });
+
+  it('ships the JS runtime entry points in package.json "files"', () => {
+    for (const file of ['index.js', 'postinstall.js', 'lib.js']) {
+      assert.ok(pkgJson.files.includes(file), `package.json "files" missing JS runtime entry: ${file}`);
+    }
+  });
+
+  it('keeps every setup.py _SCHEMA_FILES entry in REQUIRED_FILES and package.json "files"', () => {
+    assert.ok(schemaFiles.length > 0, 'setup.py _SCHEMA_FILES must be non-empty and parseable');
+    const required = lib.getRequiredFiles();
+    for (const file of schemaFiles) {
+      assert.ok(required.includes(file), `setup.py _SCHEMA_FILES entry missing from REQUIRED_FILES: ${file}`);
+      assert.ok(pkgJson.files.includes(file), `setup.py _SCHEMA_FILES entry missing from package.json "files": ${file}`);
+    }
+  });
+
+  it('keeps every pyproject.toml py-module in REQUIRED_FILES', () => {
+    assert.ok(pyModQuoted.length > 0, 'pyproject.toml py-modules must be non-empty and parseable');
+    const required = lib.getRequiredFiles();
+    for (const mod of pyModQuoted) {
+      assert.ok(required.includes(`${mod}.py`), `pyproject py-module missing from REQUIRED_FILES: ${mod}.py`);
+      assert.ok(pkgJson.files.includes(`${mod}.py`), `pyproject py-module missing from package.json "files": ${mod}.py`);
+    }
+  });
+
+  it('has every REQUIRED_FILES entry on disk', () => {
+    for (const file of lib.getRequiredFiles()) {
+      assert.ok(fs.existsSync(path.join(root, file)), `REQUIRED_FILES entry missing on disk: ${file}`);
+    }
+  });
+
+  it('has every package.json "files" entry on disk', () => {
+    for (const file of pkgJson.files) {
+      assert.ok(fs.existsSync(path.join(root, file)), `package.json "files" entry missing on disk: ${file}`);
+    }
+  });
+});
+
+describe('deriveProjectRootFromDbPath (MEMORY_DB_PATH regression)', () => {
+  it('recovers the root for the standard .cognigraph layout', () => {
+    const root = path.join(os.tmpdir(), 'cg-root');
+    assert.strictEqual(
+      lib.deriveProjectRootFromDbPath(path.join(root, '.cognigraph', 'memory.db')),
+      root
+    );
+  });
+
+  it('recovers the root for the legacy .project-memory layout', () => {
+    const root = path.join(os.tmpdir(), 'cg-root');
+    assert.strictEqual(
+      lib.deriveProjectRootFromDbPath(path.join(root, '.project-memory', 'memory.db')),
+      root
+    );
+  });
+
+  it('returns null for a custom absolute path instead of a bogus dirname(dirname) root', () => {
+    // Regression: old dirname(dirname("/data/memory.db")) gave "/" and
+    // dirname(dirname("/custom/dir/my.db")) gave "/custom" — both misleading.
+    assert.strictEqual(lib.deriveProjectRootFromDbPath('/data/memory.db'), null);
+    assert.strictEqual(lib.deriveProjectRootFromDbPath('/custom/dir/my.db'), null);
+    assert.strictEqual(lib.deriveProjectRootFromDbPath(path.join(os.tmpdir(), 'my.db')), null);
+  });
+
+  it('returns null for nested or non-standard layouts', () => {
+    const root = path.join(os.tmpdir(), 'cg-root');
+    assert.strictEqual(
+      lib.deriveProjectRootFromDbPath(path.join(root, '.cognigraph', 'subdir', 'memory.db')),
+      null
+    );
+    assert.strictEqual(
+      lib.deriveProjectRootFromDbPath(path.join(root, 'custom', 'memory.db')),
+      null
+    );
+  });
+
+  it('returns null for missing input', () => {
+    assert.strictEqual(lib.deriveProjectRootFromDbPath(''), null);
+    assert.strictEqual(lib.deriveProjectRootFromDbPath(null), null);
+    assert.strictEqual(lib.deriveProjectRootFromDbPath(undefined), null);
+  });
+});
+

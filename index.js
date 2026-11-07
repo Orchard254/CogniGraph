@@ -25,11 +25,13 @@ async function main() {
     // Step 1: Determine project root and database path.
   // MEMORY_DB_PATH is the single source of truth when set (e.g. by the
   // caller or tests); otherwise fall back to CWD-based project detection.
+  // projectRoot is derived only for the standard .cognigraph/.project-memory
+  // layout and stays null for custom paths (no implied project root).
   let projectRoot;
   let dbPath;
   if (process.env.MEMORY_DB_PATH) {
     dbPath = process.env.MEMORY_DB_PATH;
-    projectRoot = path.dirname(path.dirname(dbPath));
+    projectRoot = lib.deriveProjectRootFromDbPath(dbPath);
   } else {
     projectRoot = await findProjectRoot();
     // .cognigraph when present, legacy .project-memory passed through for the
