@@ -1,7 +1,9 @@
 """Regression coverage for the one-time legacy-to-episodic genesis migration."""
 
+import re
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -226,3 +228,55 @@ def test_genesis_migration_refuses_a_second_execution_without_mutation(tmp_path,
     ) == before_revision
     assert _scalar(db_path, "SELECT count(*) FROM episodic_memories") == before_episodic
     assert _scalar(db_path, "SELECT count(*) FROM legacy_provenance") == before_provenance
+
+
+def _normalize_trigger_sql(sql: str) -> str:
+    collapsed = " ".join(sql.split())
+    collapsed = re.sub(r"IF NOT EXISTS", "", collapsed, flags=re.IGNORECASE)
+    return " ".join(collapsed.split()).rstrip(";").strip()
+
+
+def _canonical_trigger_sql_map(trigger_names) -> dict:
+    root = Path(__file__).resolve().parent
+    conn = sqlite3.connect(":memory:")
+    try:
+        for filename in ("phase0_schema.sql", "phase1_episodic.sql"):
+            conn.executescript((root / filename).read_text(encoding="utf-8"))
+        rows = conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='trigger'"
+        ).fetchall()
+        return {name: sql for name, sql in rows if name in trigger_names}
+    finally:
+        conn.close()
+
+
+def test_genesis_recreated_triggers_match_canonical_phase1_definition(tmp_path, monkeypatch):
+    """Genesis drops and recreates two triggers; the recreations must stay
+    statement-equivalent (after SQLite's own normalization: IF NOT EXISTS
+    stripping and whitespace) to phase1_episodic.sql. The other two episodic
+    triggers are never dropped and must also remain canonical."""
+    _disable_external_work(monkeypatch)
+    db_path, _repo_id, _root_id, _active_id, _closed_id, _closed_at = _legacy_database(tmp_path)
+
+    genesis_migrate(db_path)
+
+    trigger_names = (
+        "trg_episodic_insert_revision",
+        "trg_episodic_update_revision",
+        "trg_episodic_repo_isolation",
+        "trg_episodic_immutable_delete",
+    )
+    canonical = _canonical_trigger_sql_map(set(trigger_names))
+    assert set(canonical) == set(trigger_names)
+    stored = {
+        row["name"]: row["sql"]
+        for row in _rows(
+            db_path,
+            "SELECT name, sql FROM sqlite_master WHERE type='trigger'",
+        )
+    }
+    for trigger_name in trigger_names:
+        assert trigger_name in stored, f"trigger {trigger_name} missing after genesis"
+        assert _normalize_trigger_sql(stored[trigger_name]) == _normalize_trigger_sql(
+            canonical[trigger_name]
+        ), f"genesis trigger {trigger_name} diverges from phase1_episodic.sql"

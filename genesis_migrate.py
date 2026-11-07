@@ -311,7 +311,7 @@ def genesis_migrate(db_path: str | Path, inject_failure_after: int | None = None
 
         # Recreate triggers dropped for genesis closed inserts (must be inside same transaction so rollback restores them)
         conn.execute("""
-        CREATE TRIGGER trg_episodic_insert_revision
+        CREATE TRIGGER IF NOT EXISTS trg_episodic_insert_revision
         BEFORE INSERT ON episodic_memories
         BEGIN
             SELECT CASE
@@ -327,20 +327,22 @@ def genesis_migrate(db_path: str | Path, inject_failure_after: int | None = None
         END;
         """)
         conn.execute("""
-        CREATE TRIGGER trg_episodic_update_revision
+        CREATE TRIGGER IF NOT EXISTS trg_episodic_update_revision
         BEFORE UPDATE ON episodic_memories
         BEGIN
             SELECT CASE
                 WHEN OLD.closed_revision IS NOT NULL THEN
                     RAISE(ABORT, 'immutable: record already closed, no further updates permitted')
-                WHEN NEW.repo_id != OLD.repo_id
-                  OR NEW.branch_id != OLD.branch_id
-                  OR NEW.anchor_id != OLD.anchor_id
-                  OR NEW.content != OLD.content
-                  OR NEW.category != OLD.category
-                  OR NEW.confidence != OLD.confidence
-                  OR NEW.created_revision != OLD.created_revision
-                  OR NEW.created_at != OLD.created_at THEN
+                WHEN NEW.repo_id IS NOT OLD.repo_id
+                  OR NEW.branch_id IS NOT OLD.branch_id
+                  OR NEW.anchor_id IS NOT OLD.anchor_id
+                  OR NEW.content IS NOT OLD.content
+                  OR NEW.category IS NOT OLD.category
+                  OR NEW.confidence IS NOT OLD.confidence
+                  OR NEW.created_revision IS NOT OLD.created_revision
+                  OR NEW.created_at IS NOT OLD.created_at
+                  OR NEW.importance IS NOT OLD.importance
+                  OR NEW.tags IS NOT OLD.tags THEN
                     RAISE(ABORT, 'immutable-field mutation: identity/provenance fields cannot change')
                 WHEN OLD.status != 'ACTIVE' THEN
                     RAISE(ABORT, 'invalid update: only ACTIVE memories may transition')
