@@ -146,7 +146,7 @@ The `MemoryStore` class is composed from focused mixins, one per architectural l
 .\venv\Scripts\python.exe memory_cli.py bootstrap --root C:\path\to\your\project --apply
 ```
 
-Setup detail: setup.ps1 creates venv/, installs requirements.txt, then runs the full suite (setup.ps1:16-29). Re-run manually with .\venv\Scripts\python.exe -m pytest -q --ignore=scratch. The collected test modules at repo root include test_llm_priming, test_memory_cli, test_phase3_priming, test_server_tools, test_watcher and test_wire_bootstrap; pytest --collect-only -q --ignore=scratch collected 778 tests as of 2026-11-07 (scratch/ holds a live-watcher probe excluded from the suite).
+Setup detail: setup.ps1 creates venv/, installs requirements.txt, then runs the full suite (setup.ps1:16-29). Re-run manually with .\venv\Scripts\python.exe -m pytest -q --ignore=scratch. The collected test modules at repo root include test_llm_priming, test_memory_cli, test_phase3_priming, test_server_tools, test_watcher and test_wire_bootstrap; pytest --collect-only -q --ignore=scratch collected 789 tests as of 2026-11-07 (scratch/ holds a live-watcher probe excluded from the suite).
 
 Restart your coding agent. It now starts every session with full project context.
 
@@ -156,7 +156,7 @@ Restart your coding agent. It now starts every session with full project context
 
 > **Recommended:** run `memory_cli.py wire <agent> --root <project>` — it generates the correct config automatically. The manual JSON below is the fallback.
 
-Point your AI agent's MCP configuration at `server.py`. Prefer `memory_cli.py wire <agent> --root <project>` - it generates the config automatically and pins MEMORY_DB_PATH to <project-root>/.cognigraph/memory.db (created in wire.py:142-149).
+Point your AI agent's MCP configuration at `server.py`. Prefer `memory_cli.py wire <agent> --root <project>` - it generates the config automatically and pins MEMORY_DB_PATH to <project-root>/.cognigraph/memory.db (created in wire.py:435-448).
 
 Standard agents (`mcpServers`):
 
@@ -174,7 +174,7 @@ Standard agents (`mcpServers`):
 }
 ```
 
-Zed (`.zed/settings.json`, `context_servers` - `env` is a sibling of `command`/`args` inside the server entry, not nested under `settings`; `settings.env` never reaches the process - wire.py:180-185):
+Zed (`.zed/settings.json`, `context_servers` - `env` is a sibling of `command`/`args` inside the server entry, not nested under `settings`; `settings.env` never reaches the process - wire.py:578-583):
 
 ```jsonc
 {
@@ -276,7 +276,7 @@ python memory_cli.py export-ui --out memory_graph.html
 # Bulk provenance health check (read-only unless --auto-deprecate)
 python memory_cli.py scan-provenance --root C:\path\to\your\repo
 
-# Backfill semantic embeddings for historical facts (batched single-model-load pass; bootstrap itself writes with embed=False then backfills in one batch - bootstrap.py:432-487)
+# Backfill semantic embeddings for historical facts (batched single-model-load pass; bootstrap itself writes with embed=False then backfills in one batch - bootstrap.py:525-591)
 python memory_cli.py backfill
 
 # Preview stale-fact pruning (add --apply to execute)
@@ -293,12 +293,12 @@ python memory_cli.py backup --tag manual --keep 8
 
 ## 4b. Reliability notes (verified against current code)
 
-- wire report schema (wire.py:207-222): status is WIRED, or WIRED_WITH_ERRORS when config_errors is non-empty; report carries config_files, backups (rotating .bak/.bak.1/.bak.2), config_errors, agents_md (created/up_to_date/updated_clean/skipped_customized_update_available/...), mcp_snippet, and next_steps (bootstrap dry-run, --apply, restart, plus Fix config errors first lines when errors exist). On WIRED_WITH_ERRORS, fix config_errors first - the listed config was not written.
-- Corrupt-config refusal (wire.py:64-90): an existing config that is not valid JSON is preserved as <name>.corrupt-<timestamp>.bak and reported in config_errors; it is never silently overwritten (atomic tmp + fsync + os.replace).
-- --root DB binding (memory_cli.py:163-174): without explicit --db, any command with --root binds to <root>/.cognigraph/memory.db so facts never land in the CWD fallback store; wire never touches the DB (store is constructed lazily for other commands).
-- Concurrency (memory_store.py:48,1095-1123; server.py:25-40): SQLite PRAGMA journal_mode=WAL + busy_timeout=5000; get_store() returns a per-thread MemoryStore (one connection per thread on the same WAL DB); each MCP tool call gets a fresh store that is always closed (no leaked fd/WAL handles).
-- Git probes (bootstrap.py:309-327; wire.py:26-43; hooks/git_hook.py:29-30): every git/python child probe runs with stdin=subprocess.DEVNULL and a timeout (15 s) so an inherited stdio pipe under the MCP server cannot stall indefinitely.
-- Input clamps (server.py:42-71; mirrored in memory_cli.py:218-234): limit 1..100 (context/prepare-task paths cap at 50, graph depth at 10, bootstrap max_facts at 1000), lock ttl_seconds 1..86400 (default 60), fact importance 1..5 (default 3); non-numeric input falls back to the default instead of raising. Secrets are refused (pm_common.py:104-117; memory_store.py:474,682).
+- wire report schema (wire.py:672-687): status is WIRED, or WIRED_WITH_ERRORS when config_errors is non-empty; report carries config_files, backups (rotating .bak/.bak.1/.bak.2), config_errors, agents_md (created/up_to_date/updated_clean/skipped_customized_update_available/...), mcp_snippet, and next_steps (bootstrap dry-run, --apply, restart, plus Fix config errors first lines when errors exist). On WIRED_WITH_ERRORS, fix config_errors first - the listed config was not written.
+- Corrupt-config refusal (wire.py:144-163): an existing config that is not valid JSON is preserved as <name>.corrupt-<timestamp>.bak and reported in config_errors; it is never silently overwritten (atomic tmp + fsync + os.replace).
+- --root DB binding (memory_cli.py:232-237): without explicit --db, any command with --root binds to <root>/.cognigraph/memory.db so facts never land in the CWD fallback store; wire never touches the DB (store is constructed lazily for other commands).
+- Concurrency (memory_store.py:158-160,1905-1931; server.py:184-199): SQLite PRAGMA journal_mode=WAL + busy_timeout=5000; get_store() returns a per-thread MemoryStore (one connection per thread on the same WAL DB); each MCP tool call gets a fresh store that is always closed (no leaked fd/WAL handles).
+- Git probes (bootstrap.py:355-362; wire.py:67-84; hooks/git_hook.py:29-30): every git/python child probe runs with stdin=subprocess.DEVNULL and a timeout (15 s) so an inherited stdio pipe under the MCP server cannot stall indefinitely.
+- Input clamps (server.py:202-231; mirrored in memory_cli.py:343,392,414,507,511): limit 1..100 (context/prepare-task paths cap at 50, graph depth at 10, bootstrap max_facts at 1000), lock ttl_seconds 1..86400 (default 60), fact importance 1..5 (default 3); non-numeric input falls back to the default instead of raising. Secrets are refused (pm_common.py:221-248; memory_store.py:950-973).
 - Timestamped DB backups (pm_backup.py): weekly auto-maintenance takes a WAL-safe snapshot via the SQLite backup API before any mutation, and corpus_hygiene --apply / genesis_migrate snapshot first; backups named memory.db.backup-<tag>-<ts>.bak are integrity-checked and pruned to the newest 8 (keep configurable), historical ad-hoc *.bak files untouched (test_backup.py).
 
 ## 5. Automated Git Commit Hook Integration

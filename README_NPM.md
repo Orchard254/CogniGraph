@@ -25,7 +25,7 @@ The easiest way to add persistent memory to any AI coding agent:
 }
 ```
 
-That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 18 (package.json engines). On first run the wrapper creates venv/, installs requirements.txt (only mcp is hard-required; sqlite-vec/tree-sitter*/fastembed/numpy lanes degrade with a warning), and launches server.py (index.js:98-132,171-232), guarded by a pre-spawn py_compile check and a 5 s startup watchdog (index.js:245-285). postinstall.js is best-effort and leaves a .postinstall-incomplete marker re-verified on next startup (index.js:175-183).
+That's it! Prerequisites below apply: Python 3.12+ on PATH and Node.js >= 18 (package.json engines). On first run the wrapper creates venv/, installs requirements.txt (only mcp is hard-required; sqlite-vec/tree-sitter*/fastembed/numpy lanes degrade with a warning), and launches server.py (index.js:101-141,206-208; lib.js:273-341), guarded by a pre-spawn py_compile check and a 5 s startup watchdog (lib.js:288-295,309-334). postinstall.js is best-effort and leaves a .postinstall-incomplete marker re-verified on next startup (index.js:151-163).
 
 ## Context intelligence
 
@@ -179,9 +179,9 @@ evidence influence future ranking. See
 
 ### Wire report + safety notes (current code)
 
-- wire pins MEMORY_DB_PATH to <project>/.cognigraph/memory.db (wire.py:142-149) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md/next_steps (wire.py:207-222) - on WIRED_WITH_ERRORS, fix config_errors first.
-- Corrupt existing configs are preserved as .corrupt-<timestamp>.bak, never overwritten (wire.py:64-90).
-- Without --db, --root commands bind to <root>/.cognigraph/memory.db (memory_cli.py:163-174); limit/ttl/importance inputs are clamped (server.py:42-71). Zed env is a sibling of command/args inside the server entry, not nested under settings (settings.env never reaches the process - wire.py:180-185).
+- wire pins MEMORY_DB_PATH to <project>/.cognigraph/memory.db (wire.py:435-448) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md/next_steps (wire.py:672-687) - on WIRED_WITH_ERRORS, fix config_errors first.
+- Corrupt existing configs are preserved as .corrupt-<timestamp>.bak, never overwritten (wire.py:144-163).
+- Without --db, --root commands bind to <root>/.cognigraph/memory.db (memory_cli.py:232-237); limit/ttl/importance inputs are clamped (server.py:202-231). Zed env is a sibling of command/args inside the server entry, not nested under settings (settings.env never reaches the process - wire.py:578-583).
 
 ### Custom Database Location
 Set the `MEMORY_DB_PATH` environment variable:

@@ -2,7 +2,7 @@
 
 ## Installation
 
-Prerequisites: Python 3.12+ on PATH (setup.ps1:9-13 enforces this; index.js/postinstall.js probe python3 -> python for 3.12+) and Node.js >= 18 for the npx wrapper (package.json engines). On first run the wrapper creates venv/ inside the package, runs pip install -r requirements.txt, and launches server.py (index.js:98-132,171-232). Only mcp is hard-required - missing sqlite-vec/tree-sitter*/fastembed/numpy lanes degrade with a warning, not a failure. A pre-spawn py_compile gate plus a 5 s startup watchdog fail fast on broken installs (index.js:245-285); postinstall.js is best-effort and leaves a .postinstall-incomplete marker that index.js:175-183 re-verifies on next startup.
+Prerequisites: Python 3.12+ on PATH (setup.ps1:9-13 enforces this; index.js/postinstall.js probe python3/python/python3.12/python3.13/python3.14 via lib.js:27-33,233-247) and Node.js >= 18 for the npx wrapper (package.json engines). On first run the wrapper creates venv/ inside the package, runs pip install -r requirements.txt, and launches server.py (index.js:101-141 creates venv and checks server.py, index.js:206-208 delegates launch to lib.js:273-341). Only mcp is hard-required - missing sqlite-vec/tree-sitter*/fastembed/numpy lanes degrade with a warning, not a failure. A pre-spawn py_compile gate plus a 5 s startup watchdog fail fast on broken installs (lib.js:288-295,309-334); postinstall.js is best-effort and leaves a .postinstall-incomplete marker that index.js:151-163 re-verifies on next startup.
 
 ## Setup (30 seconds)
 
@@ -35,7 +35,7 @@ Prerequisites: Python 3.12+ on PATH (setup.ps1:9-13 enforces this; index.js/post
 }
 ```
 
-Zed note: env is a sibling of command/args inside the server entry, not nested under settings (settings.env never reaches the process - wire.py:180-185). wire pins MEMORY_DB_PATH to <project-root>/.cognigraph/memory.db (wire.py:142-149); or set MEMORY_DB_PATH yourself - index.js honors it as the single source of truth (index.js:31-33).
+Zed note: env is a sibling of command/args inside the server entry, not nested under settings (settings.env never reaches the process - wire.py:578-583). wire pins MEMORY_DB_PATH to <project-root>/.cognigraph/memory.db (wire.py:435-448); or set MEMORY_DB_PATH yourself - index.js honors it as the single source of truth (index.js:32-34).
 
 ### 2. Restart your IDE
 
@@ -92,9 +92,9 @@ You should see database statistics indicating the system is working.
 
 ## Wire report + safety notes (current code)
 
-- wire pins MEMORY_DB_PATH to <project>/.cognigraph/memory.db (wire.py:142-149) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md (created/up_to_date/updated_clean/skipped_customized_update_available/...)/next_steps (wire.py:207-222) - on WIRED_WITH_ERRORS, fix config_errors first.
-- Corrupt existing configs are preserved as .corrupt-<timestamp>.bak, never overwritten (wire.py:64-90).
-- Without --db, --root commands bind to <root>/.cognigraph/memory.db (memory_cli.py:163-174); limit/ttl/importance inputs are clamped (server.py:42-71).
+- wire pins MEMORY_DB_PATH to <project>/.cognigraph/memory.db (wire.py:435-448) and returns WIRED or WIRED_WITH_ERRORS with config_errors/backups/agents_md (created/up_to_date/updated_clean/skipped_customized_update_available/...)/next_steps (wire.py:672-687) - on WIRED_WITH_ERRORS, fix config_errors first.
+- Corrupt existing configs are preserved as .corrupt-<timestamp>.bak, never overwritten (wire.py:144-163).
+- Without --db, --root commands bind to <root>/.cognigraph/memory.db (memory_cli.py:232-237); limit/ttl/importance inputs are clamped (server.py:202-231).
 
 ## Support
 
