@@ -57,6 +57,7 @@ describe('getCandidatePythonCommands', () => {
     assert.ok(Array.isArray(cmds) && cmds.length > 0);
     assert.ok(cmds.includes('python3'));
     assert.ok(cmds.includes('python'));
+    assert.ok(cmds.includes('python3.14'));
   });
 });
 
@@ -331,6 +332,16 @@ describe('launchMCPServer exit status propagation', () => {
     const child = await launchWithFakeChild((code) => exitCodes.push(code));
     emitExit(child, null, null);
     assert.deepStrictEqual(exitCodes, [1]);
+  });
+});
+
+describe('findPythonCommand (python3.14 alias)', () => {
+  it('selects python3.14 when only that alias reports a supported version', async () => {
+    const fakeRun = async (cmd) => {
+      if (cmd === 'python3.14') return { stdout: 'Python 3.14.0', stderr: '' };
+      throw new Error(`not found: ${cmd}`);
+    };
+    assert.strictEqual(await lib.findPythonCommand(fakeRun), 'python3.14');
   });
 });
 

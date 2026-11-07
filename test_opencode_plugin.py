@@ -477,5 +477,42 @@ class OpenCodePluginTests(unittest.TestCase):
             self.assertEqual(calls[-1], "closed")
 
 
+    def test_max_chars_validation_rejects_malformed_and_accepts_numeric_string(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / ".cognigraph" / "memory.db"
+            db.parent.mkdir()
+            db.touch()
+            seen = []
+
+            class FakeStore:
+                def __init__(self, path):
+                    seen.append(("init", path))
+
+                def get_intelligent_context(self, task, **kwargs):
+                    seen.append(("intelligent", task, kwargs))
+                    return {
+                        "status": "ok",
+                        "context_markdown": "bounded " + ("x" * 100),
+                        "retrieval_id": 7,
+                    }
+
+                def close(self):
+                    seen.append(("closed",))
+
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+                "pm_common": types.SimpleNamespace(looks_like_secret=lambda _: False),
+            }):
+                with self.assertRaises(ValueError):
+                    get_plugin_context(str(root), "fix session", max_chars="not-a-number")
+                with self.assertRaises(ValueError):
+                    get_plugin_context(str(root), "fix session", max_chars=1.5)
+                result = get_plugin_context(str(root), "fix session", max_chars="1200")
+            self.assertEqual(result["status"], "ok")
+            self.assertLessEqual(len(result["context_markdown"]), 1200)
+            self.assertEqual(seen[1][2]["max_chars"], 1200)
+            self.assertEqual(seen[-1], ("closed",))
+
 if __name__ == "__main__":
     unittest.main()

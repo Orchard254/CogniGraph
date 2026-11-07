@@ -65,6 +65,15 @@ def get_plugin_context(
         raise ValueError("unsupported IDE context phase")
     if type(refresh) is not bool:
         raise ValueError("refresh must be a boolean")
+    # Validate before conversion so malformed values fail fast as a clear
+    # ValueError instead of an unhandled int() error.
+    try:
+        _max_chars = int(max_chars)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("max_chars must be an integer-like number")
+    if not isinstance(max_chars, str) and max_chars != _max_chars:
+        raise ValueError("max_chars must be an integer-like number")
+    max_chars = _max_chars
     root = Path(project_root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError("Project root is not a directory")
@@ -90,7 +99,7 @@ def get_plugin_context(
 
     from memory_store import MemoryStore
 
-    cap = max(256, min(int(max_chars), MAX_CONTEXT_CHARS))
+    cap = max(256, min(max_chars, MAX_CONTEXT_CHARS))
     store = MemoryStore(str(db))
     try:
         parts = []

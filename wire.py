@@ -77,7 +77,7 @@ def _python_exe(pm_root: Path) -> str:
                                           stdin=subprocess.DEVNULL, timeout=15)
             import re
             m = re.search(r"Python\s+(\d+)\.(\d+)", out or "")
-            if m and (int(m.group(1)) > 3 or (int(m.group(1)) == 3 and int(m.group(2)) >= 8)):
+            if m and (int(m.group(1)) > 3 or (int(m.group(1)) == 3 and int(m.group(2)) >= 12)):
                 return cmd
         except Exception:
             continue

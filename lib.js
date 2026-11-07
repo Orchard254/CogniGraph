@@ -26,6 +26,7 @@ const PYTHON_CANDIDATES = [
   'python',
   'python3.12',
   'python3.13',
+  'python3.14',
 ];
 
 // Must mirror the package.json "files" list (python sources, schemas, hooks).

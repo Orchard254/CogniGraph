@@ -169,6 +169,41 @@ def test_python_exe_fallback_is_usable():
     assert isinstance(got, str) and got  # version-checked cmd or sys.executable
 
 
+def test_python_exe_rejects_3_11(tmp_path, monkeypatch):
+    pm = tmp_path / "pm"
+    pm.mkdir()
+    calls = []
+
+    def fake_check_output(cmd, *args, **kwargs):
+        calls.append(list(cmd) if isinstance(cmd, (list, tuple)) else cmd)
+        # Every probed interpreter reports 3.11 -> all candidates rejected.
+        return "Python 3.11.9"
+
+    monkeypatch.setattr(wire.subprocess, "check_output", fake_check_output)
+    got = _python_exe(pm)
+    assert got == sys.executable.replace("\\", "/")
+    # At least one probe happened (python3 and/or python).
+    assert calls
+
+
+def test_python_exe_accepts_3_12(tmp_path, monkeypatch):
+    pm = tmp_path / "pm"
+    pm.mkdir()
+
+    def fake_check_output(cmd, *args, **kwargs):
+        name = cmd[0] if isinstance(cmd, (list, tuple)) else cmd
+        if name == "python3":
+            return "Python 3.11.9"  # below floor -> rejected
+        if name == "python":
+            return "Python 3.12.0"  # meets floor -> accepted
+        raise FileNotFoundError(name)
+
+    monkeypatch.setattr(wire.subprocess, "check_output", fake_check_output)
+    got = _python_exe(pm)
+    assert got == "python"
+
+
+
 # --------------------------------------------------------------------------
 # wire.wire_agent
 # --------------------------------------------------------------------------
