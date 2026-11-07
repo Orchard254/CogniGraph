@@ -933,3 +933,20 @@ async def test_dynamic_call_tool_routes_by_file_path(tmp_path, monkeypatch):
     data = json.loads(res[0].text)
     assert "Beta decision" in data.get("briefing_markdown", "")
 
+
+def test_security_resolves_relative_path_against_routed_project(tmp_path, monkeypatch):
+    proj = tmp_path / "proj_sec"
+    proj.mkdir()
+    (proj / ".git").mkdir()
+    sub = proj / "src"
+    sub.mkdir()
+    # File lives at project root, but we scan from a subdirectory of the project.
+    target = proj / "secret.py"
+    target.write_text("password = 'routed'\n", encoding="utf-8")
+
+    monkeypatch.chdir(sub)
+    out = server.memory_check_security(["secret.py"])
+    assert out["status"] == "COMPLETE"
+    assert out["scanned_files"] == 1
+    assert any("secret.py" in str(h.get("file_path", "")) for h in out["hits"])
+

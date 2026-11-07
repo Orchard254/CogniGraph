@@ -702,7 +702,16 @@ def memory_check_security(file_paths: List[str]) -> dict:
     for fp in paths:
         pth = Path(fp)
         if not pth.is_absolute():
-            pth = Path.cwd() / pth
+            # Resolve relative paths against the routed workspace root
+            # (found via _find_enclosing_project) when available, so a scan
+            # invoked from a subdirectory of a project targets the project root
+            # rather than the raw current working directory. Fall back to cwd
+            # when no enclosing project marker is found.
+            root = _find_enclosing_project(Path.cwd())
+            if root is not None:
+                pth = root / pth
+            else:
+                pth = Path.cwd() / pth
         if not pth.is_file():
             limitations.append(f"file not found: {fp}")
             continue
