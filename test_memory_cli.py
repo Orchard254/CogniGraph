@@ -50,7 +50,7 @@ class FakeCLIStore:
                      fields=None):
         self._rec("query_hybrid", text, category=category, tag=tag, limit=limit,
                   explain=explain, fields=fields)
-        from pm_common import ProjectFieldError, project_fields
+        from pm_common import project_fields
         if fields:
             # Mirror the real store so a bad field list fails the way it does
             # in production rather than being swallowed by the fake.
@@ -270,7 +270,7 @@ def test_stats_output(cli, capsys):
 def test_audit_empty_and_duplicates(cli, capsys, monkeypatch):
     cli("audit")
     assert "No duplicate active facts detected." in capsys.readouterr().out
-    store = FakeCLIStore.instances[-1]
+    _ = FakeCLIStore.instances[-1]
     monkeypatch.setattr(FakeCLIStore, "audit", lambda self: {
         "total_active_checked": 2, "potential_duplicates_count": 1,
         "potential_duplicates": [{"similarity": 0.9, "category": "decision",
@@ -508,3 +508,37 @@ def test_bootstrap_force_protocol_passthrough(cli, monkeypatch, tmp_path):
                         seen.update(force=force_protocol) or {"status": "x"})
     cli("bootstrap", "--root", str(tmp_path), "--apply", "--force-protocol")
     assert seen == {"force": True}
+
+
+# ------------------------------------------------------------------
+# Task 3 regression: CLI field projection on plain query + root defaults
+# ------------------------------------------------------------------
+
+def test_query_plain_projection(cli, capsys):
+    s = cli("query", "hello", "--fields", "id,content")
+    assert "fields" not in _call(s, "query")[0][2]
+    out = capsys.readouterr().out
+    assert "projected onto: id, content" in out
+    assert "—" in out
+
+
+def test_query_plain_bad_field_exits_nonzero(cli, capsys):
+    with pytest.raises(SystemExit) as e:
+        cli("query", "hello", "--fields", "id,nonsense")
+    assert e.value.code == 2
+    assert "unknown result field" in capsys.readouterr().err
+
+
+def test_verify_derives_root_from_db(cli, tmp_path):
+    db = str(tmp_path / ".cognigraph" / "memory.db")
+    s = cli("verify", "3", "--db", db)
+    assert _call(s, "verify_provenance")[0][1:] == ((3,), {"project_root": str(tmp_path)})
+
+
+def test_scan_provenance_derives_root_from_db(cli, tmp_path):
+    db = str(tmp_path / ".cognigraph" / "memory.db")
+    s = cli("scan-provenance", "--db", db)
+    call = _call(s, "scan_provenance")[0]
+    assert call[2]["project_root"] == str(tmp_path)
+    assert call[2]["auto_deprecate"] is False
+    assert call[2]["auto_heal"] is False

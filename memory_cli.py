@@ -222,7 +222,8 @@ def main():
     # file fails on Windows). An explicit --db bypasses CWD/env sniffing;
     # an explicit --root migrates just that project.
     from pm_common import (ensure_startup_migration, maybe_migrate_legacy_data_dir,
-                       parse_fields, ProjectFieldError)
+                       parse_fields, ProjectFieldError, project_fields)
+    from pm_freshness import project_root_for_db
     if getattr(args, "db", None) or getattr(args, "root", None):
         hints = [args.root] if getattr(args, "root", None) else []
         ensure_startup_migration(hints=hints, include_cwd=False, include_env=False)
@@ -357,6 +358,12 @@ def main():
                     raise SystemExit(2)
             else:
                 results = store.query(args.text, category=args.category, tag=args.tag, limit=limit)
+                if fields:
+                    try:
+                        results = project_fields(results, fields)
+                    except ProjectFieldError as e:
+                        print(f"Field projection error: {e}", file=sys.stderr)
+                        raise SystemExit(2)
             if fields:
                 print(f"(projected onto: {', '.join(parse_fields(fields))}, "
                       f"plus id — other keys are not present in this output)")
@@ -389,7 +396,12 @@ def main():
                 print(f"{indent}- [{e['relation']}] -> [{e['target_id']}] ({e['target_category']}) {e['target_content']}")
 
         elif args.command == "verify":
-            res = store.verify_provenance(args.fact_id, project_root=args.root)
+            effective_root = getattr(args, "root", None)
+            if effective_root is None:
+                derived = project_root_for_db(db_path)
+                if derived is not None:
+                    effective_root = str(derived)
+            res = store.verify_provenance(args.fact_id, project_root=effective_root)
             print(f"Provenance status for fact {args.fact_id}: {res['status']}")
             print(json.dumps(res, indent=2))
 
@@ -429,7 +441,12 @@ def main():
                 for f in facts:
                     print(f"[{f['id']}] ({f['category']}) [{f['confidence']}] {f['content']}")
         elif args.command == "scan-provenance":
-            res = store.scan_provenance(project_root=args.root, auto_deprecate=args.auto_deprecate,
+            effective_root = getattr(args, "root", None)
+            if effective_root is None:
+                derived = project_root_for_db(db_path)
+                if derived is not None:
+                    effective_root = str(derived)
+            res = store.scan_provenance(project_root=effective_root, auto_deprecate=args.auto_deprecate,
                                         auto_heal=getattr(args, "auto_heal", False))
             print(json.dumps(res, indent=2))
         elif args.command == "backfill":
