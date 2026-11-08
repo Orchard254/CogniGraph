@@ -248,7 +248,7 @@ def main(argv=None) -> int:
     print("=== Corpus Truth Check ===")
     print(f"Database            : {db_path}")
     print(f"Live tool registry  : {report['tool_count']}")
-    print(f"Checks              : tool_count, tool_reference")
+    print("Checks              : tool_count, tool_reference")
     print(f"Violations          : {len(v)}")
     if v:
         print("\n  These active facts contradict the running system. Each is a")

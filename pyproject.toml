@@ -158,6 +158,5 @@ exclude = [
     "venv/*",
     "__pycache__/*",
     ".pytest_cache/*",
-    "scripts/*",
     "research/runs_*/**",
 ]

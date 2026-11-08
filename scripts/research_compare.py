@@ -29,12 +29,11 @@ for _p in (str(REPO_ROOT), str(SCRIPTS_DIR)):
 
 from pilot_compare import (  # noqa: E402
     build_task_sandbox, run_hidden_check, list_agent_files, bridge_check,
-    task_by_id, seed_task_db,
+    seed_task_db,
 )
 from pilot_opencode import (  # noqa: E402
-    DEFAULT_MODEL, _guard_workdir, find_opencode_cli, run_opencode as _pilot_run,
+    DEFAULT_MODEL, _guard_workdir, find_opencode_cli,
 )
-from pilot_tasks import TASKS as PILOT_TASKS  # noqa: E402
 from research_tasks import TASKS as RESEARCH_TASKS  # noqa: E402
 
 ARMS = ("no_cg", "static_cg", "full_cg")

@@ -27,9 +27,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "eval"))
 
-from eval_golden import aggregate, load_golden, load_query_embeddings, snapshot_db
-from memory_store import MemoryStore
-from pm_search import AGENT_LANE_WEIGHTS, PINNED_NOW_ENV
+from eval_golden import aggregate, load_golden, load_query_embeddings, snapshot_db  # noqa: E402
+from memory_store import MemoryStore  # noqa: E402
+from pm_search import AGENT_LANE_WEIGHTS, PINNED_NOW_ENV  # noqa: E402
 
 EXPECTATIONS = ROOT / "eval" / "fixtures" / "golden_expectations.json"
 FIXTURE = ROOT / "eval" / "fixtures" / "golden_fixture.db"
