@@ -26,6 +26,10 @@ jobs:
           - os: windows-latest
             python-version: "3.12"
             node-version: "20"
+          # macOS: POSIX paths/venv layout verification (OpenCode+CogniGraph live on macOS)
+          - os: macos-latest
+            python-version: "3.12"
+            node-version: "20"
           # Additional Node versions on Ubuntu
           - os: ubuntu-latest
             python-version: "3.12"
