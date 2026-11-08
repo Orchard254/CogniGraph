@@ -1828,3 +1828,127 @@ class TestBlastRadius:
         cp_names = {s['name'] for f in checkpoint['files'] for s in f['symbols']}
         assert 'memory_checkpoint_task' in cp_names
 
+
+
+# ============================================================
+# Structural Join Regression Tests (planner-forced batched join)
+# ============================================================
+class TestStructuralJoinRegression:
+    _N = 514
+
+    def _seed_tie_fixture(self, store):
+        now = "2026-09-13T00:00:00+00:00"
+        for i in range(self._N):
+            fid = store.write(category="component", content=f"curated fact {i}",
+                             file_path=f"f{i:04d}.py", line_start=1, line_end=2,
+                             embed=False, force=True)
+            cur = store.conn.execute(
+                "INSERT INTO structural_nodes (node_type, name, class_name, file_path,"
+                " line_start, line_end, created_at, last_seen_at)"
+                " VALUES ('function','func','','%s',1,2,?,?)" % f"f{i:04d}.py",
+                (now, now))
+            nid = cur.lastrowid
+            store.conn.execute(
+                "INSERT INTO fact_node_links (fact_id, node_id, link_reason, created_at)"
+                " VALUES (?,?,?,?)", (fid, nid, "overlap", now))
+        store.conn.commit()
+
+    def _legacy_per_node_ids(self, store):
+        from pm_common import tokenize_text
+        from corpus_hygiene import STUB_PREFIXES
+        query_tokens = tokenize_text("func")
+        fact_filters = ["m.deprecated_at IS NULL"]
+        fact_filters.append(" AND ".join("m.content NOT LIKE ?" for _ in STUB_PREFIXES))
+        fact_where = " AND ".join(fact_filters)
+        fact_params = [f"{p}%" for p in STUB_PREFIXES]
+        rows = store.conn.execute(
+            "SELECT id, name, node_type, class_name FROM structural_nodes").fetchall()
+        matched = {}
+        for node in rows:
+            node_id = node["id"]
+            name = node["name"] or ""
+            class_name = node["class_name"] or ""
+            node_type = node["node_type"]
+            match_names = [name.lower()]
+            if class_name and node_type == "method":
+                match_names.append(f"{class_name}.{name}".lower())
+            best = 0.0
+            for q in query_tokens:
+                ql = q.lower()
+                for mn in match_names:
+                    if ql == mn:
+                        best = max(best, 1.0)
+                    elif ql in mn or mn in ql:
+                        best = max(best, 0.7)
+            if best > 0:
+                frs = store.conn.execute(
+                    f"SELECT fnl.fact_id FROM fact_node_links fnl "
+                    f"JOIN memory m ON fnl.fact_id = m.id "
+                    f"WHERE fnl.node_id = ? AND {fact_where}",
+                    [node_id] + fact_params).fetchall()
+                for fr in frs:
+                    fid = fr["fact_id"]
+                    matched[fid] = max(matched.get(fid, 0.0), best)
+        items = sorted(matched.items(), key=lambda x: x[1], reverse=True)
+        return [fid for fid, _ in items[:50]]
+
+    def test_top50_ordered_ids_match_per_node_baseline(self, temp_store):
+        self._seed_tie_fixture(temp_store)
+        legacy_ids = self._legacy_per_node_ids(temp_store)
+        new_ids = [fid for fid, _ in temp_store._structural_scores("func")]
+        assert new_ids == legacy_ids, (
+            "planner-forced structural join must reproduce per-node top-50 order; "
+            f"first divergence at "
+            f"{next((i for i,(a,b) in enumerate(zip(legacy_ids,new_ids)) if a!=b), None)}"
+        )
+
+    def test_statement_count_is_two(self, temp_store):
+        self._seed_tie_fixture(temp_store)
+        stmts = []
+        temp_store.conn.set_trace_callback(lambda sql: stmts.append(sql))
+        temp_store._structural_scores("func")
+        temp_store.conn.set_trace_callback(None)
+        assert len(stmts) == 2, (
+            f"expected 2 statements (nodes scan + batched join), got {len(stmts)}"
+        )
+
+    def _seed_two_fact_fixture(self, temp_store, facts):
+        """facts: list of (content, category, tags, deprecated) tuples."""
+        now = "2026-09-13T00:00:00+00:00"
+        result_ids = []
+        for content, category, tags, deprecated in facts:
+            fid = temp_store.write(category=category, content=content,
+                                  tags=tags, file_path=None, embed=False, force=True)
+            if deprecated:
+                temp_store.deprecate(fid, reason="test")
+            temp_store.conn.commit()
+            cur = temp_store.conn.execute(
+                "INSERT INTO structural_nodes (node_type, name, class_name, file_path,"
+                " line_start, line_end, created_at, last_seen_at)"
+                " VALUES ('function','func','','%s',1,2,?,?)" % (f"f{fid:04d}.py",),
+                (now, now))
+            nid = cur.lastrowid
+            temp_store.conn.execute(
+                "INSERT INTO fact_node_links (fact_id, node_id, link_reason, created_at)"
+                " VALUES (?,?,?,?)", (fid, nid, "overlap", now))
+            result_ids.append(fid)
+        temp_store.conn.commit()
+        return result_ids
+
+    def test_deprecated_fact_excluded_from_structural_join(self, temp_store):
+        active_id, deprecated_id = self._seed_two_fact_fixture(temp_store, [
+            ("curated active fact", "component", None, False),
+            ("curated leaked deprecated fact", "component", None, True),
+        ])
+        ids = [fid for fid, _ in temp_store._structural_scores("func")]
+        assert deprecated_id not in ids, "deprecated fact leaked via structural join"
+        assert active_id in ids
+
+    def test_wrong_category_fact_excluded_from_structural_join(self, temp_store):
+        comp_id, wrong_id = self._seed_two_fact_fixture(temp_store, [
+            ("curated component fact", "component", None, False),
+            ("curated constraint fact", "constraint", None, False),
+        ])
+        ids = [fid for fid, _ in temp_store._structural_scores("func", category="component")]
+        assert wrong_id not in ids, "wrong-category fact leaked via structural join"
+        assert comp_id in ids

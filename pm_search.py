@@ -446,8 +446,12 @@ class SearchMixin:
             """
         ).fetchall()
 
-        matched_fact_ids: Dict[int, float] = {}
-        for node in rows:
+        # First pass: score every node in scan order and record its position.
+        # Only nodes with a positive score participate in the batched join.
+        node_scores: Dict[int, float] = {}
+        node_positions: Dict[int, int] = {}
+        matched_node_ids: List[int] = []
+        for pos, node in enumerate(rows):
             node_id = node["id"]
             name = node["name"] or ""
             class_name = node["class_name"] or ""
@@ -468,27 +472,54 @@ class SearchMixin:
                     # Tier 2: substring match (either direction)
                     elif q_lower in match_name or match_name in q_lower:
                         best_node_score = max(best_node_score, 0.7)
-            
+
             if best_node_score > 0:
-                # Resolve fact_ids via fact_node_links, filtering for active facts at query time
-                fact_rows = self.conn.execute(
-                    f"""
-                    SELECT fnl.fact_id
-                    FROM fact_node_links fnl
-                    JOIN memory m ON fnl.fact_id = m.id
-                    WHERE fnl.node_id = ? AND {fact_where}
-                    """,
-                    [node_id] + fact_params
-                ).fetchall()
-                
-                for f_row in fact_rows:
-                    fact_id = f_row["fact_id"]
-                    # Keep the best score across multiple matched nodes for the same fact
-                    matched_fact_ids[fact_id] = max(matched_fact_ids.get(fact_id, 0.0), best_node_score)
-        
-        # Convert to sorted list of (fact_id, score)
-        scored = sorted(matched_fact_ids.items(), key=lambda x: x[1], reverse=True)
-        return scored[:50]  # same cap as other lanes
+                node_scores[node_id] = best_node_score
+                node_positions[node_id] = pos
+                matched_node_ids.append(node_id)
+
+        if not matched_node_ids:
+            return []
+
+        # Planner-forced batched join (single statement) instead of one
+        # fact-lookup per matched node. Keep every existing filter.
+        placeholders = ",".join("?" * len(matched_node_ids))
+        batched_rows = self.conn.execute(
+            f"""
+            SELECT fnl.node_id AS node_id, fnl.fact_id AS fact_id
+            FROM fact_node_links AS fnl INDEXED BY idx_fact_node_links_node
+            CROSS JOIN memory AS m
+            WHERE fnl.node_id IN ({placeholders}) AND fnl.fact_id = m.id AND {fact_where}
+            """,
+            matched_node_ids + fact_params,
+        ).fetchall()
+
+        # Tie stabilization: discover facts node-by-node in the initial scan order
+        # so the first-linked-node position drives tie ordering, matching the
+        # per-node baseline.
+        matched_fact_ids: Dict[int, float] = {}
+        first_node_pos: Dict[int, int] = {}
+        by_node: Dict[int, List[Any]] = {nid: [] for nid in matched_node_ids}
+        for br in batched_rows:
+            by_node.setdefault(br["node_id"], []).append(br)
+        for nid in matched_node_ids:
+            for br in by_node.get(nid, []):
+                fact_id = br["fact_id"]
+                if fact_id not in matched_fact_ids:
+                    matched_fact_ids[fact_id] = node_scores[nid]
+                    first_node_pos[fact_id] = node_positions[nid]
+                else:
+                    if node_scores[nid] > matched_fact_ids[fact_id]:
+                        matched_fact_ids[fact_id] = node_scores[nid]
+                    if node_positions[nid] < first_node_pos[fact_id]:
+                        first_node_pos[fact_id] = node_positions[nid]
+
+        # Sort by earliest-linked-node position first (ascending, stable) so
+        # ties retain baseline discovery order, then by score descending.
+        items = sorted(matched_fact_ids.items(), key=lambda kv: first_node_pos[kv[0]])
+        items = sorted(items, key=lambda kv: kv[1], reverse=True)
+        scored = items[:50]
+        return [(fid, score) for fid, score in scored]  # same cap as other lanes
 
     def query(self, text: str, category: Optional[str] = None, limit: int = 10,
               include_deprecated: bool = False, tag: Optional[str] = None,
