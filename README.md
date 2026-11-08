@@ -146,7 +146,7 @@ The `MemoryStore` class is composed from focused mixins, one per architectural l
 .\venv\Scripts\python.exe memory_cli.py bootstrap --root C:\path\to\your\project --apply
 ```
 
-Setup detail: setup.ps1 creates venv/, installs requirements.txt, then runs the full suite (setup.ps1:16-29). Re-run manually with .\venv\Scripts\python.exe -m pytest -q --ignore=scratch. The collected test modules at repo root include test_llm_priming, test_memory_cli, test_phase3_priming, test_server_tools, test_watcher and test_wire_bootstrap; pytest --collect-only -q --ignore=scratch collected 800 tests as of 2026-11-08 (scratch/ holds a live-watcher probe excluded from the suite).
+Setup detail: setup.ps1 creates venv/, installs requirements.txt, then runs the full suite (setup.ps1:16-29). Re-run manually with .\venv\Scripts\python.exe -m pytest -q --ignore=scratch. The collected test modules at repo root include test_llm_priming, test_memory_cli, test_phase3_priming, test_server_tools, test_watcher and test_wire_bootstrap; pytest --collect-only -q --ignore=scratch collected 801 tests as of 2026-11-08 (scratch/ holds a live-watcher probe excluded from the suite).
 
 Restart your coding agent. It now starts every session with full project context.
 
