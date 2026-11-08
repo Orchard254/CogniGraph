@@ -514,5 +514,17 @@ class OpenCodePluginTests(unittest.TestCase):
             self.assertEqual(seen[1][2]["max_chars"], 1200)
             self.assertEqual(seen[-1], ("closed",))
 
+    def test_install_resolves_bridge_with_absolute_fallback(self):
+        with tempfile.TemporaryDirectory() as d:
+            result = install(d)
+            self.assertTrue(Path(result["bridge"]).is_file())
+            code = Path(result["plugin"]).read_text()
+            self.assertIn("resolveCogniGraphBridge", code)
+            self.assertIn("COGNIGRAPH_BRIDGE", code)
+            self.assertNotIn("__COGNIGRAPH_BRIDGE_JSON__", code)
+            self.assertNotIn("__COGNIGRAPH_PYTHON_JSON__", code)
+            # The baked absolute fallback must still be present.
+            self.assertIn(json.dumps(result["bridge"]), code)
+
 if __name__ == "__main__":
     unittest.main()

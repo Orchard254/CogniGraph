@@ -18,9 +18,12 @@ that interpreter or pass `--python /path/to/venv/bin/python`.
 This creates `.opencode/plugins/cognigraph/index.ts` and adds `@opencode/plugin`
 to `.opencode/package.json` without deleting existing dependencies. OpenCode
 loads local plugins at startup; restart OpenCode after installation. OpenCode
-may install the plugin dependency with Bun at startup. The plugin calls the
-CogniGraph Python bridge by absolute path, so **keep the CogniGraph checkout
-at its installed location** (reinstall if it moves).
+may install the plugin dependency with Bun at startup. The plugin resolves the CogniGraph Python bridge through the installed
+CogniGraph Python module first and falls back to the absolute bridge path baked
+in at installation time. Keep CogniGraph importable by the selected Python
+interpreter (for example through the installed package or an editable install);
+reinstall the plugin if CogniGraph or its Python move and the fallback path
+stops resolving.
 
 To populate memory the first time, follow the existing bootstrap workflow:
 
