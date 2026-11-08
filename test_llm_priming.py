@@ -444,7 +444,7 @@ class TestEnhancedGetContext:
     def test_get_context_no_stray_backticks(self, seeded_store):
         ctx = seeded_store.get_context('fix bug', limit=3)
         lines = ctx.split('\n')
-        intent_lines = [l for l in lines if 'Intent detected' in l]
+        intent_lines = [item for item in lines if 'Intent detected' in item]
         for line in intent_lines:
             assert not line.rstrip().endswith('`'), f"Stray backtick found: {line}"
 
@@ -554,8 +554,8 @@ class TestDocNoiseControl:
 
     def test_doc_dump_kept_for_non_coding_intent(self, temp_store):
         doc_dump = 'readme section ' + 'text ' * 60
-        fid = temp_store.write(category='other', content=doc_dump,
-                               tags='bootstrap, docs', importance=3)
+        temp_store.write(category='other', content=doc_dump,
+                       tags='bootstrap, docs', importance=3)
         facts = temp_store.get_state(limit=10)
         unchanged = temp_store._suppress_doc_noise(facts, 'review')
         assert [f['id'] for f in unchanged] == [f['id'] for f in facts], \
@@ -1159,7 +1159,7 @@ class TestBriefingBloat:
         temp_store.checkpoint_task(
             summary='word ' * 200, test_baseline='word ' * 200)
         briefing = temp_store.prepare_task('fix a bug', limit=1)
-        state_lines = [l for l in briefing.split('\n') if l.startswith('- **[STATE #')]
+        state_lines = [item for item in briefing.split('\n') if item.startswith('- **[STATE #')]
         assert state_lines, "baseline section must exist"
         for line in state_lines:
             assert len(line) < 800, f"baseline state line uncapped: {len(line)} chars"
@@ -1178,8 +1178,8 @@ class TestBriefingBloat:
         temp_store.write(category='component', content='word ' * 200,
                          file_path='big_fact.py')
         briefing = temp_store.get_file_context('big_fact.py')
-        fact_lines = [l for l in briefing.split('\n')
-                      if l.startswith('- **[COMPONENT #')]
+        fact_lines = [item for item in briefing.split('\n')
+                      if item.startswith('- **[COMPONENT #')]
         assert fact_lines, "component fact must be listed"
         for line in fact_lines:
             assert len(line) < 650, f"fact line exceeds content cap: {len(line)}"
@@ -1481,6 +1481,11 @@ class TestWatcherThreadSafety:
                 watcher._sync_file(f, tmp_path, temp_store)
             except Exception as e:
                 errors.append(e)
+            finally:
+                try:
+                    watcher.close_thread_stores(temp_store.db_path)
+                except Exception:
+                    pass
         t = threading.Thread(target=worker)
         t.start()
         t.join()
