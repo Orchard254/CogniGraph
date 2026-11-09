@@ -391,6 +391,7 @@ export default Plugin.define({
                 .replace(/\n### Persistent task evidence \(IDE observations, not proof\)\n(?:- [^\n]*\n)*Observations do not establish code correctness or passing tests\.\n?/, "\n")
                 .replace(/\n### Check observation(?: \(not task completion\))?\n(?:- [^\n]*\n)*/, "\n")
                 .replace(/(?:^|\n)### Goal gate[^\n]*\n(?:- [^\n]*\n|Define acceptance checks before declaring the task complete\.\n)*/, "\n")
+                .replace(/(?:^|\n)### Suggested goal contract \(not registered or approved\)\n(?:- [^\n]*\n)*/, "\n")
           : base
         chunks.push(baseWithoutStalePlan)
       }
