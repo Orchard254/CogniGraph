@@ -202,8 +202,16 @@ def record_check(
     }
 
 
-def check_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
-    """Report the latest check without promoting it to task completion."""
+def check_snapshot(
+    root: Path, session_id: str, task: str, command: str | None = None,
+) -> dict[str, Any]:
+    """Report the latest overall or exact-command check.
+
+    Checking the exact command matters for multi-criterion goals: a passing
+    lint process must not substitute for a requested unit test.
+    """
+    if command is not None and classify_check(command) is None:
+        raise ValueError("invalid exact check command")
     root = root.resolve()
     session_key, task_key = _key(session_id, task)
     blank = {"status": "not_observed", "verified": False, "check_kind": None}
@@ -212,12 +220,16 @@ def check_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
         return blank
     conn = _connect(db)
     try:
-        row = conn.execute(
+        sql = (
             "SELECT check_kind,origin,exit_code,input_fingerprint,"
             "tracked_count,edit_watermark FROM task_check_events "
-            "WHERE session_key=? AND task_key=? ORDER BY id DESC LIMIT 1",
-            (session_key, task_key),
-        ).fetchone()
+            "WHERE session_key=? AND task_key=?"
+        )
+        args: tuple[str, ...] = (session_key, task_key)
+        if command is not None:
+            sql += " AND command_hash=?"
+            args += (hashlib.sha256(command.strip().encode("utf-8")).hexdigest(),)
+        row = conn.execute(sql + " ORDER BY id DESC LIMIT 1", args).fetchone()
         if row is None:
             return blank
         marker = _edit_watermark(conn, session_key, task_key)
