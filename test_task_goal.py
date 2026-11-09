@@ -1,6 +1,7 @@
 """Goal acceptance is based on predeclared observed evidence, not narratives."""
 import json
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -58,6 +59,39 @@ class GoalGateTests(unittest.TestCase):
 
     def statuses(self):
         return {r["id"]: r["status"] for r in self.state()["criteria"]}
+
+    def test_real_cli_register_and_show_roundtrip(self):
+        criteria = [
+            {"id": "auth_source", "type": "source_read", "path": "src/auth.py"},
+            {"id": "auth_test", "type": "check", "command": self.tests},
+        ]
+        base = [sys.executable, "-m", "task_goal", "--project-root",
+                str(self.root), "--session-id", self.session,
+                "--task", self.task]
+        registered = subprocess.run(
+            base + ["--profile", "implementation"],
+            input=json.dumps(criteria), text=True, capture_output=True,
+            check=False, timeout=20,
+        )
+        self.assertEqual(registered.returncode, 0, registered.stderr)
+        self.assertEqual(json.loads(registered.stdout)["status"],
+                         "registered_proposal")
+        shown = subprocess.run(
+            base + ["--show"], text=True, capture_output=True,
+            check=False, timeout=20,
+        )
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertEqual(json.loads(shown.stdout)["status"], "needs_evidence")
+
+    def test_unscoped_check_does_not_satisfy_implementation(self):
+        self.contract()
+        self.check(0)
+        self.assertEqual(self.statuses()["auth_test"], "unscoped_check")
+        self.edit()
+        self.read()
+        self.assertNotEqual(self.state()["status"], "evidence_ready_for_review")
+        self.check(0)
+        self.assertEqual(self.state()["status"], "evidence_ready_for_review")
 
     def test_unregistered_goal_cannot_claim_completion(self):
         report = self.state()
