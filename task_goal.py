@@ -232,25 +232,54 @@ def _source_criterion(conn: sqlite3.Connection, root: Path,
     return "evidence_observed"
 
 
+def _source_edit_between(
+    conn: sqlite3.Connection, session_key: str, task_key: str,
+    source_paths: tuple[str, ...], after_id: int,
+    before_or_equal: int | None = None,
+) -> bool:
+    """Require an observed edit to one of the *contract's* source files."""
+    if not source_paths:
+        return False
+    params: list[Any] = [session_key, task_key, after_id]
+    sql = (
+        "SELECT 1 FROM task_evidence_events "
+        "WHERE session_key=? AND task_key=? AND kind='edit' AND id>? "
+    )
+    if before_or_equal is not None:
+        sql += "AND id<=? "
+        params.append(before_or_equal)
+    sql += "AND file_path IN (" + ",".join("?" for _ in source_paths) + ") LIMIT 1"
+    params.extend(source_paths)
+    try:
+        return conn.execute(sql, params).fetchone() is not None
+    except sqlite3.OperationalError:
+        return False
+
+
 def _regression_red_exists(
     conn: sqlite3.Connection, session_key: str, task_key: str,
     item: dict[str, str], check_floor: int, green_watermark: int,
     origin: str, green_event_id: int,
+    source_paths: tuple[str, ...],
 ) -> bool:
     if green_watermark <= 0:
         return False
     try:
-        row = conn.execute(
-            "SELECT 1 FROM task_check_events WHERE session_key=? AND task_key=? "
-            "AND command_hash=? AND id>? AND exit_code!=0 "
-            "AND tracked_count>0 AND edit_watermark<? AND origin=? "
-            "AND id<? LIMIT 1",
+        rows = conn.execute(
+            "SELECT edit_watermark FROM task_check_events "
+            "WHERE session_key=? AND task_key=? AND command_hash=? "
+            "AND id>? AND exit_code!=0 AND tracked_count>0 "
+            "AND edit_watermark<? AND origin=? AND id<? "
+            "ORDER BY id DESC LIMIT 32",
             (session_key, task_key, item["command_hash"],
              check_floor, green_watermark, origin, green_event_id),
-        ).fetchone()
+        ).fetchall()
     except sqlite3.OperationalError:
         return False
-    return row is not None
+    return any(_source_edit_between(
+        conn, session_key, task_key, source_paths,
+        int(red["edit_watermark"]), green_watermark,
+    ) for red in rows)
 
 
 def goal_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
@@ -287,8 +316,9 @@ def goal_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
         check_floor = int(row["check_floor"])
         edit_floor = int(row["edit_floor"])
         results: list[dict[str, str]] = []
-        current_edits = _event_max(conn, "task_evidence_events",
-                                   session_key, task_key, kind="edit")
+        source_paths = tuple(item["path"] for item in items
+                             if item.get("type") == "source_read"
+                             and _safe_stored_path(item.get("path")))
         for item in items:
             if not isinstance(item, dict) or not _GOAL_ID.fullmatch(str(item.get("id", ""))):
                 return unregistered
@@ -325,6 +355,7 @@ def goal_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
                         and not _regression_red_exists(
                             conn, session_key, task_key, item, check_floor,
                             check["edit_watermark"], origin, check["event_id"],
+                            source_paths,
                         )):
                     status = "needs_red_green_sequence"
             elif kind == "manual_review":
@@ -337,7 +368,10 @@ def goal_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
             })
         # An implementation candidate requires an actual IDE edit after
         # proposal registration, not just a passing check against old code.
-        if row["profile"] in ("implementation", "repair") and current_edits <= edit_floor:
+        if row["profile"] in ("implementation", "repair") and not (
+            _source_edit_between(conn, session_key, task_key,
+                                 source_paths, edit_floor)
+        ):
             results.append({
                 "id": "implementation_change", "type": "edit",
                 "status": "needs_observed_edit", "target": "",
