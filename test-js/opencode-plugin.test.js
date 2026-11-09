@@ -73,6 +73,14 @@ process.stdin.on('end', () => {
     assert.match(third.system[0].text, /context for add cache/);
     assert.equal(fs.readFileSync(countFile, 'utf8').length, 2);
 
+    // "continue" is not a new objective: keep the same task identity and
+    // cached retrieval across short follow-up instructions.
+    hooks.get('prompt')({sessionID: 's1', prompt: {text: 'continue'}});
+    const continuation = req();
+    await hooks.get('context')(continuation);
+    assert.match(continuation.system[0].text, /context for add cache/);
+    assert.equal(fs.readFileSync(countFile, 'utf8').length, 2);
+
     const toolHook = hooks.get('execute.after');
     // A completed read changes the focus and refreshes just the file context.
     await toolHook({sessionID:'s1', status:'completed', tool:'read',
