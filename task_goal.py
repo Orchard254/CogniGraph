@@ -23,7 +23,7 @@ from typing import Any
 from pm_common import looks_like_secret
 from task_checks import check_snapshot, classify_check
 from task_evidence import (
-    _connect, _database, _digest_file, _key, _safe_stored_path, task_snapshot,
+    _connect, _database, _digest_file, _key, _safe_stored_path,
 )
 
 _MAX_CRITERIA = 8
@@ -232,7 +232,7 @@ def _source_criterion(conn: sqlite3.Connection, root: Path,
 def _regression_red_exists(
     conn: sqlite3.Connection, session_key: str, task_key: str,
     item: dict[str, str], check_floor: int, green_watermark: int,
-    origin: str,
+    origin: str, green_event_id: int,
 ) -> bool:
     if green_watermark <= 0:
         return False
@@ -241,9 +241,9 @@ def _regression_red_exists(
             "SELECT 1 FROM task_check_events WHERE session_key=? AND task_key=? "
             "AND command_hash=? AND id>? AND exit_code!=0 "
             "AND tracked_count>0 AND edit_watermark<? AND origin=? "
-            "LIMIT 1",
+            "AND id<? LIMIT 1",
             (session_key, task_key, item["command_hash"],
-             check_floor, green_watermark, origin),
+             check_floor, green_watermark, origin, green_event_id),
         ).fetchone()
     except sqlite3.OperationalError:
         return False
@@ -284,7 +284,6 @@ def goal_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
         check_floor = int(row["check_floor"])
         edit_floor = int(row["edit_floor"])
         results: list[dict[str, str]] = []
-        evidence = task_snapshot(root, session_id, task)
         current_edits = _event_max(conn, "task_evidence_events",
                                    session_key, task_key, kind="edit")
         for item in items:
@@ -322,7 +321,7 @@ def goal_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
                 if (status == "evidence_observed" and kind == "regression"
                         and not _regression_red_exists(
                             conn, session_key, task_key, item, check_floor,
-                            check["edit_watermark"], origin,
+                            check["edit_watermark"], origin, check["event_id"],
                         )):
                     status = "needs_red_green_sequence"
             elif kind == "manual_review":
