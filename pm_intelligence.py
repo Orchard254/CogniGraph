@@ -13,6 +13,10 @@ from typing import Any, Optional
 from pm_common import looks_like_secret
 from pm_freshness import check_source_freshness, project_root_for_db
 from pm_outcomes import _relative_source_path
+from pm_evidence import (
+    required_evidence, evidence_bonus, evidence_type,
+    evaluate_evidence, format_evidence_plan,
+)
 
 _PHASE_CATEGORY_WEIGHTS = {
     "orient": {"decision": 15, "constraint": 13, "component": 10, "state": 8, "convention": 7},
@@ -266,6 +270,8 @@ class IntelligenceMixin:
                 score += 8
             scored.append((score, idx, ref, fact, flag, freshness))
         scored.sort(key=lambda item: (-item[0], item[1]))
+        needs = required_evidence(query, phase)
+        covered: set[str] = set()
 
         header = (
             f"### CogniGraph context · {phase.upper()}\n"
@@ -283,9 +289,20 @@ class IntelligenceMixin:
         omitted_seen = 0
         seen_content: set[str] = set()
 
-        for _, _, ref, fact, flag, freshness in scored:
-            if len(selected) >= limit:
-                break
+        # A task is not a bag of similar facts. Choose the next fact by its
+        # marginal ability to cover a still-unmet evidence need. Baseline
+        # relevance continues to matter, but five similar components should
+        # not crowd out a relevant constraint.
+        remaining = scored[:]
+        while remaining and len(selected) < limit:
+            best_idx = max(
+                range(len(remaining)),
+                key=lambda i: (
+                    remaining[i][0] + evidence_bonus(remaining[i][3], needs, covered),
+                    -remaining[i][1],
+                ),
+            )
+            _, _, ref, fact, flag, freshness = remaining.pop(best_idx)
             if ref in seen:
                 omitted_seen += 1
                 continue
@@ -322,7 +339,10 @@ class IntelligenceMixin:
                 f"  ({'; '.join(metadata)})"
                 + (f"\n  REVIEW: {note}" if note else "") + "\n"
             )
-            if len(output) + len(line_text) + len(footer) > max_chars:
+            # Leave space for the action-oriented evidence state. Guidance
+            # can still shrink or disappear under a very tight budget.
+            guidance_reserve = min(340, max_chars // 5)
+            if len(output) + len(line_text) + len(footer) + guidance_reserve > max_chars:
                 continue
             output += line_text
             seen_content.add(key)
@@ -331,7 +351,13 @@ class IntelligenceMixin:
                 "category": fact.get("category"), "freshness": freshness,
                 "confidence": fact.get("confidence"),
                 "review_required": bool(note),
+                "file_path": _existing_project_path(root, fact.get("file_path")) or "",
             })
+            key_covered = evidence_type({
+                **fact, "file_path": selected[-1]["file_path"],
+            })
+            if key_covered:
+                covered.add(key_covered)
             selected_sources.append((label, fact))
             if note:
                 warnings.append({"ref": label, "reason": note})
@@ -418,6 +444,20 @@ class IntelligenceMixin:
                 "action": "No constraint was delivered in this briefing; check code and tests for restrictions.",
             })
 
+        # Evaluate what the *delivered* evidence covers. The planner never
+        # marks a retrieved claim or test-result memory as verified execution.
+        evidence_plan = evaluate_evidence(query, phase, selected, inspection_targets)
+        plan_lines = format_evidence_plan(evidence_plan)
+        # Prioritize an actionable next step, then progressively add coverage
+        # lines only if the output budget allows it. No partial lines.
+        plan_next = plan_lines[-1]
+        plan_header = plan_lines[0]
+        if len(output) + len(plan_header) + len(plan_next) + len(footer) <= max_chars:
+            output += plan_header + plan_next
+            for plan_line in plan_lines[1:-1]:
+                if len(output) + len(plan_line) + len(footer) <= max_chars:
+                    output += plan_line
+
         # Keep the existing source-qualified receipt exact: suggested linked
         # paths do not silently count as delivered facts or verified memories.
         rendered_targets: list[dict[str, str]] = []
@@ -477,4 +517,5 @@ class IntelligenceMixin:
             "warnings": warnings,
             "inspection_targets": rendered_targets,
             "knowledge_gaps": rendered_gaps,
+            "evidence_plan": evidence_plan,
         }
