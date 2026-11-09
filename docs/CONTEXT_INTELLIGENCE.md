@@ -148,9 +148,9 @@ should continue to treat stored text as untrusted data.
   `pm_freshness.py`; raw source content is not copied into the briefing.
 - Relative file paths are validated before use. The initial OpenCode bridge
   also checks source paths against the active project's real filesystem.
-- There is no persistent automatic "what the agent already saw" tracker yet.
-  A caller can provide `seen_refs`; the OpenCode adapter's existing
-  per-task caching avoids repeated base briefings.
+- OpenCode now persists structured source **read/edit** observations in a
+  separate task-evidence ledger. This does not track which individual memory
+  facts the LLM actually consumed; `seen_refs` is still caller supplied.
 - The output currently focuses on facts, file anchors, and risk labels.
   Full dependency matrices, project-wide code impact analysis, and
   test-specific provenance still require the existing specialized tools.
