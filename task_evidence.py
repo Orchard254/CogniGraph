@@ -27,7 +27,8 @@ _MAX_EVENTS_PER_PROJECT = 4096
 
 def safe_project_file(root: Path, raw: str) -> str | None:
     """Validate an existing source file, rejecting escapes and hidden dirs."""
-    if not isinstance(raw, str) or not raw.strip() or len(raw) > 512:
+    if (not isinstance(raw, str) or not raw.strip() or len(raw) > 512
+            or any(ord(ch) < 32 or ch in "`<>" for ch in raw)):
         return None
     try:
         root = root.resolve()
@@ -74,7 +75,10 @@ def _key(session_id: str, task: str) -> tuple[str, str]:
 
 
 def _database(root: Path) -> Path:
-    return root / ".cognigraph" / "task_evidence.sqlite3"
+    directory = root / ".cognigraph"
+    if directory.is_symlink() or not directory.resolve().is_relative_to(root.resolve()):
+        raise ValueError("unsafe project data directory")
+    return directory / "task_evidence.sqlite3"
 
 
 def _connect(path: Path) -> sqlite3.Connection:
@@ -195,11 +199,14 @@ def task_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
     }
 
 
-def format_task_snapshot(snapshot: dict[str, Any]) -> str:
-    """Tiny, strictly observation-only context summary."""
+def format_task_snapshot(snapshot: dict[str, Any], max_chars: int = 380) -> str:
+    """Tiny, strictly observation-only context summary, no partial paths."""
     if not snapshot.get("event_count"):
         return ""
     lines = ["### Persistent task evidence (IDE observations, not proof)"]
+    footer = "Observations do not establish code correctness or passing tests."
+    if len(lines[0]) + len(footer) + 2 > max_chars:
+        return ""
     for label, key in (
         ("Read and unchanged", "observed_files"),
         ("Edited; source re-read needed", "edited_files"),
@@ -207,6 +214,8 @@ def format_task_snapshot(snapshot: dict[str, Any]) -> str:
     ):
         paths = snapshot.get(key) or []
         if paths:
-            lines.append(f"- {label}: " + ", ".join(chr(96) + p + chr(96) for p in paths[:3]))
-    lines.append("Observations do not establish code correctness or passing tests.")
+            line = f"- {label}: " + ", ".join(chr(96) + p + chr(96) for p in paths[:3])
+            if sum(len(x) + 1 for x in lines) + len(line) + len(footer) + 2 <= max_chars:
+                lines.append(line)
+    lines.append(footer)
     return "\n".join(lines) + "\n"
