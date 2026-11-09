@@ -444,7 +444,11 @@ class IntelligenceMixin:
             if path not in direct_paths and len(knowledge_gaps) < 2:
                 knowledge_gaps.append({
                     "kind": "missing_focused_evidence", "file_path": path,
-                    "action": "No displayed fact is anchored to this file; inspect current source.",
+                    "action": (
+                        "No displayed fact is anchored here; use the source just read as evidence."
+                        if path in observed else
+                        "No displayed fact is anchored to this file; inspect current source."
+                    ),
                 })
         if not selected and len(knowledge_gaps) < 2:
             knowledge_gaps.append({
