@@ -12,6 +12,7 @@ cannot establish owner acceptance or broad task correctness.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import re
@@ -136,6 +137,22 @@ def _normalize(profile: str, criteria: list[dict[str, Any]]) -> list[dict[str, s
     return normalized
 
 
+def _opaque_ref(session_key: str, task_key: str) -> str:
+    """Opaque identity for CLI registration, not a secret or authorization."""
+    raw = bytes.fromhex(session_key) + bytes.fromhex(task_key)
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_ref(ref: str) -> tuple[str, str]:
+    if (not isinstance(ref, str) or len(ref) != 86
+            or re.fullmatch(r"[A-Za-z0-9_-]{86}", ref) is None):
+        raise ValueError("invalid goal reference")
+    raw = base64.urlsafe_b64decode(ref + "==")
+    if len(raw) != 64 or _opaque_ref(raw[:32].hex(), raw[32:].hex()) != ref:
+        raise ValueError("invalid goal reference encoding")
+    return raw[:32].hex(), raw[32:].hex()
+
+
 def propose_goal(root: Path, session_id: str, task: str,
                  profile: str, criteria: list[dict[str, Any]]) -> dict[str, Any]:
     """Register a proposal and freeze the evidence baseline.
@@ -148,6 +165,28 @@ def propose_goal(root: Path, session_id: str, task: str,
     if not root.is_dir() or looks_like_secret(task):
         raise ValueError("invalid or sensitive goal task")
     session_key, task_key = _key(session_id, task)
+    return _propose_keyed_goal(root, session_key, task_key, profile, criteria)
+
+
+def propose_goal_ref(
+    root: Path, ref: str, profile: str, criteria: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Register the *same* project task using a session-independent opaque CLI ref.
+
+    This is not an authentication token. It only avoids copying the full
+    user prompt or internal IDE session ID into a shell command.
+    """
+    root = root.resolve()
+    if not root.is_dir():
+        raise ValueError("invalid project root")
+    session_key, task_key = _decode_ref(ref)
+    return _propose_keyed_goal(root, session_key, task_key, profile, criteria)
+
+
+def _propose_keyed_goal(
+    root: Path, session_key: str, task_key: str,
+    profile: str, criteria: list[dict[str, Any]],
+) -> dict[str, Any]:
     clean = _normalize(profile, criteria)
     contents = json.dumps(clean, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256((profile + "\n" + contents).encode()).hexdigest()
@@ -287,6 +326,7 @@ def goal_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
     root = root.resolve()
     session_key, task_key = _key(session_id, task)
     unregistered = {
+        "registration_ref": _opaque_ref(session_key, task_key),
         "status": "unregistered", "criteria": [], "met": 0, "total": 0,
         "accepted_by_owner": False, "verified": False,
         "next_action": "Define explicit source and check criteria before claiming completion.",
@@ -410,6 +450,7 @@ def goal_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
             action = "Review the implementation against the original objective; no automatic acceptance."
         return {
             "status": state, "profile": row["profile"],
+            "registration_ref": _opaque_ref(session_key, task_key),
             "revision": int(row["revision"]), "criteria": results,
             "met": met, "total": len(results),
             "accepted_by_owner": False, "verified": False,
@@ -425,7 +466,10 @@ def format_goal_snapshot(goal: dict[str, Any], max_chars: int = 340) -> str:
     """Compact, untrusted-data-safe context projection."""
     if goal.get("status") == "unregistered":
         text = ("### Goal gate: not registered\n"
-                "Define acceptance checks before declaring the task complete.\n")
+                "Define acceptance checks before declaring the task complete.\n"
+                "- Goal ref: " + goal.get("registration_ref", "") + "\n"
+                "- Register: python -m task_goal --project-root . --ref "
+                "<goal-ref> --profile repair (JSON criteria on stdin).\n")
         return text if len(text) <= max_chars else ""
     header = (
         "### Goal gate (proposed criteria; not owner acceptance)\n"
@@ -449,23 +493,35 @@ def format_goal_snapshot(goal: dict[str, Any], max_chars: int = 340) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Predeclare goal evidence criteria")
     parser.add_argument("--project-root", required=True)
-    parser.add_argument("--session-id", required=True)
-    parser.add_argument("--task", required=True)
+    parser.add_argument("--session-id")
+    parser.add_argument("--task")
+    parser.add_argument("--ref", help="opaque goal reference from OpenCode context")
     parser.add_argument("--profile", choices=sorted(_PROFILES), default="implementation")
     parser.add_argument("--show", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.ref is None and (args.session_id is None or args.task is None):
+            raise ValueError("session-id and task required without --ref")
+        if args.ref is not None and (args.session_id is not None or args.task is not None):
+            raise ValueError("choose either --ref or session/task")
         if args.show:
+            if args.ref is not None:
+                raise ValueError("use OpenCode context to view referenced goals")
             result = goal_snapshot(Path(args.project_root), args.session_id, args.task)
         else:
             payload = sys.stdin.read(16_385)
             if len(payload) > 16_384:
                 raise ValueError("goal contract payload exceeds 16 KiB")
             criteria = json.loads(payload)
-            result = propose_goal(
-                Path(args.project_root), args.session_id, args.task,
-                args.profile, criteria,
-            )
+            if args.ref is not None:
+                result = propose_goal_ref(
+                    Path(args.project_root), args.ref, args.profile, criteria,
+                )
+            else:
+                result = propose_goal(
+                    Path(args.project_root), args.session_id, args.task,
+                    args.profile, criteria,
+                )
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ValueError, TypeError, json.JSONDecodeError, OSError, sqlite3.Error):
