@@ -37,6 +37,12 @@ Source paths originate from one of:
 - explicit task paths;
 - unambiguous source filenames matching task words.
 
+For memory-derived fallback proposals, the bridge reserves a small character
+budget **before** retrieval so a later proposed contract cannot silently
+push out facts already attributed as delivered. A memory lead is a path to
+inspect, never a claim of correct code or confirmed test behavior. Smaller
+context budgets prioritize prior observations over speculative proposals.
+
 For Python, related existing files such as tests/test_login.py can yield
 a direct candidate like python -m pytest -q tests/test_login.py. For plain
 JavaScript, a matching existing test may yield node --test <path>. A safe
