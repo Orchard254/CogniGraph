@@ -87,7 +87,7 @@ def get_plugin_context(
         check = check_snapshot(root, session_id, task)
         goal = goal_snapshot(root, session_id, task)
         goal_text = format_goal_snapshot(goal, max_chars=min(370, cap // 4))
-        if goal["status"] == "unregistered" and cap >= 1400:
+        if goal["status"] == "unregistered" and cap >= 3000:
             # Read-only bounded filename/path discovery; NEVER register a
             # candidate or infer that a filename proves behavioral coverage.
             proposal = suggest_goal_contract(
