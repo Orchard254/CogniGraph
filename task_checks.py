@@ -97,12 +97,18 @@ def _fingerprint(root: Path, evidence: dict[str, Any]) -> tuple[str | None, int]
 def _edit_watermark(
     conn: sqlite3.Connection, session_key: str, task_key: str,
 ) -> int:
-    row = conn.execute(
-        "SELECT COALESCE(MAX(id),0) AS last_edit "
-        "FROM task_evidence_events "
-        "WHERE session_key=? AND task_key=? AND kind='edit'",
-        (session_key, task_key),
-    ).fetchone()
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(id),0) AS last_edit "
+            "FROM task_evidence_events "
+            "WHERE session_key=? AND task_key=? AND kind='edit'",
+            (session_key, task_key),
+        ).fetchone()
+    except sqlite3.OperationalError as exc:
+        # A project may run its first check before the IDE reads a file.
+        if "no such table" in str(exc):
+            return 0
+        raise
     return int(row["last_edit"])
 
 
