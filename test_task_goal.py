@@ -200,6 +200,31 @@ class GoalGateTests(unittest.TestCase):
         self.check(0)
         self.assertEqual(self.statuses()["auth_test"], "needs_red_green_sequence")
 
+    def test_unrelated_edit_does_not_satisfy_implementation_change(self):
+        self.contract()
+        other = self.root / "src" / "unrelated.py"
+        other.write_text("x = 1\n")
+        record_observation(self.root, self.session, self.task,
+                           "edit", "src/unrelated.py")
+        self.read()
+        self.check(0)
+        self.assertEqual(self.statuses()["implementation_change"],
+                         "needs_observed_edit")
+        self.assertNotEqual(self.state()["status"], "evidence_ready_for_review")
+
+    def test_unrelated_edit_cannot_fake_red_green_regression(self):
+        self.contract(profile="repair", regression=True)
+        other = self.root / "src" / "unrelated.py"
+        other.write_text("x = 1\n")
+        self.read()
+        self.check(1)
+        record_observation(self.root, self.session, self.task,
+                           "edit", "src/unrelated.py")
+        self.read()
+        self.check(0)
+        self.assertEqual(self.statuses()["auth_test"],
+                         "needs_red_green_sequence")
+
     def test_failed_check_cannot_be_cleared_by_different_passing_command(self):
         self.contract()
         self.edit()
