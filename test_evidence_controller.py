@@ -138,6 +138,18 @@ class IntegratedEvidenceSelectionTests(unittest.TestCase):
         self.assertIn("Evidence requirements", report["context_markdown"])
         self.assertLessEqual(report["budget_used_chars"], 2400)
 
+    def test_observed_focus_without_memory_does_not_repeat_inspect_instruction(self):
+        self.store.query_hybrid = lambda *a, **k: []
+        report = self.store.get_intelligent_context(
+            "read authentication", phase="inspect",
+            focus_files=["src/auth.py"], observed_files=["src/auth.py"],
+            max_chars=1600, log_usage=False,
+        )
+        self.assertEqual(report["evidence_plan"]["requirements"][0]["status"],
+                         "source_read_observed")
+        self.assertNotIn("inspect current source", report["context_markdown"].lower())
+        self.assertFalse(report["evidence_plan"]["verified"])
+
     def test_zero_hit_is_guidance_without_fabricated_evidence(self):
         self.store.query_hybrid = lambda *a, **k: []
         report = self.store.get_intelligent_context(
