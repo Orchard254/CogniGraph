@@ -79,7 +79,8 @@
     "docs/FEEDBACK_LEARNING.md",
     "docs/TASK_OUTCOMES.md",
     "docs/SOURCE_FRESHNESS.md",
-    "docs/CONTEXT_INTELLIGENCE.md"
+    "docs/CONTEXT_INTELLIGENCE.md",
+    "docs/GOAL_EVIDENCE_GATE.md"
   ],
   "dependencies": {},
   "devDependencies": {}
