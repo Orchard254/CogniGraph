@@ -204,6 +204,7 @@ def record_check(
 
 def check_snapshot(
     root: Path, session_id: str, task: str, command: str | None = None,
+    *, after_id: int = 0,
 ) -> dict[str, Any]:
     """Report the latest overall or exact-command check.
 
@@ -212,6 +213,8 @@ def check_snapshot(
     """
     if command is not None and classify_check(command) is None:
         raise ValueError("invalid exact check command")
+    if type(after_id) is not int or after_id < 0:
+        raise ValueError("invalid check event lower bound")
     root = root.resolve()
     session_key, task_key = _key(session_id, task)
     blank = {"status": "not_observed", "verified": False, "check_kind": None}
@@ -221,11 +224,11 @@ def check_snapshot(
     conn = _connect(db)
     try:
         sql = (
-            "SELECT check_kind,origin,exit_code,input_fingerprint,"
+            "SELECT id,check_kind,origin,exit_code,input_fingerprint,"
             "tracked_count,edit_watermark FROM task_check_events "
-            "WHERE session_key=? AND task_key=?"
+            "WHERE session_key=? AND task_key=? AND id>?"
         )
-        args: tuple[str, ...] = (session_key, task_key)
+        args: tuple[str | int, ...] = (session_key, task_key, after_id)
         if command is not None:
             sql += " AND command_hash=?"
             args += (hashlib.sha256(command.strip().encode("utf-8")).hexdigest(),)
@@ -253,6 +256,8 @@ def check_snapshot(
         "origin": str(row["origin"]),
         "exit_code": int(row["exit_code"]),
         "tracked_count": count,
+        "event_id": int(row["id"]),
+        "edit_watermark": int(row["edit_watermark"]),
     }
 
 
