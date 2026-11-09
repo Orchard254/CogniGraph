@@ -264,6 +264,19 @@ class GoalGateTests(unittest.TestCase):
                                  "implementation", criteria)
         self.assertEqual(self.state()["status"], "unregistered")
 
+    def test_modified_contract_blob_cannot_reuse_prior_evidence(self):
+        self.contract()
+        self.edit()
+        self.read()
+        self.check(0)
+        self.assertEqual(self.state()["status"], "evidence_ready_for_review")
+        db = self.root / ".cognigraph" / "task_evidence.sqlite3"
+        conn = sqlite3.connect(db)
+        conn.execute("UPDATE task_goal_contracts SET criteria_json='[]'")
+        conn.commit()
+        conn.close()
+        self.assertEqual(self.state()["status"], "unregistered")
+
     def test_task_session_separation_and_no_raw_commands_in_db(self):
         self.contract()
         self.assertEqual(goal_snapshot(self.root, "other", self.task)["status"],
