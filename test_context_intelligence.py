@@ -128,6 +128,16 @@ class IntelligenceContextTests(unittest.TestCase):
         self.assertIsNone(fact["deprecated_at"])
         self.assertEqual(fact["confidence"], "confirmed")
 
+    def test_minimum_budget_prefers_relevant_fact_over_plan_prose(self):
+        report = self.store.get_intelligent_context(
+            "login session", phase="inspect", focus_files=["src/auth.py"],
+            max_chars=512, limit=1, log_usage=False,
+        )
+        self.assertTrue(report["selected"], "A fitting source fact should not be crowded out")
+        self.assertIn(f"memory:{self.auth}", {x["ref"] for x in report["selected"]})
+        self.assertLessEqual(len(report["context_markdown"]), 512)
+        self.assertIn("evidence_plan", report)
+
     def test_output_stays_under_small_budget_and_cannot_promote_exposure(self):
         report = self.store.get_intelligent_context(
             "login session middleware", phase="debug",

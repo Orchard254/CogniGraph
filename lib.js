@@ -39,7 +39,7 @@ const PYTHON_CANDIDATES = [
 // - every pyproject.toml py-module maps to a REQUIRED_FILES .py entry.
 const REQUIRED_FILES = [
   'server.py', 'memory_store.py', 'corpus_hygiene.py', 'pm_backup.py', 'pm_common.py', 'pm_search.py',
-  'pm_feedback.py', 'pm_intelligence.py', 'pm_outcomes.py', 'pm_freshness.py', 'pm_context.py', 'pm_lifecycle.py', 'pm_structural.py', 'bootstrap.py',
+  'pm_feedback.py', 'pm_intelligence.py', 'pm_evidence.py', 'pm_outcomes.py', 'pm_freshness.py', 'pm_context.py', 'pm_lifecycle.py', 'pm_structural.py', 'bootstrap.py',
   'structural_extract.py', 'branch_promotion.py', 'genesis_migrate.py',
   'watcher.py', 'wire.py', 'memory_cli.py', 'install_opencode.py', 'opencode_context.py', '__init__.py',
   'requirements.txt',

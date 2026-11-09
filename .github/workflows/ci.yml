@@ -57,46 +57,16 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
-      - name: Cache Python virtual environment
-        id: cache-venv
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            venv
-          key: ${{ runner.os }}-venv-${{ matrix.python-version }}-${{ hashFiles('requirements.txt', 'pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-venv-${{ matrix.python-version }}-
-
-      - name: Create and activate virtual environment
-        if: steps.cache-venv.outputs.cache-hit != 'true'
+      # Cache pip wheels via setup-python above, not entire virtualenvs.
+      # Hosted runner Python patch versions and image paths change; restoring
+      # a venv from a different image leaves broken interpreter symlinks.
+      - name: Create clean Python virtual environment and install dependencies
         run: |
-          python -m venv venv
+          python -m venv --clear venv
           if [ "$RUNNER_OS" = "Windows" ]; then
-            venv/Scripts/pip install -e ".[dev]"
+            venv/Scripts/python -m pip install -e ".[dev]"
           else
-            venv/bin/pip install -e ".[dev]"
-          fi
-        shell: bash
-
-      - name: Install Python dependencies (cache hit)
-        if: steps.cache-venv.outputs.cache-hit == 'true'
-        run: |
-          # Restored venv executables can point at removed Python patch-version
-          # paths on GitHub-hosted runners. Repair the cached environment
-          # before invoking pip instead of failing with "bad interpreter".
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            if ! venv/Scripts/python --version >/dev/null 2>&1 ||
-               ! venv/Scripts/pip --version >/dev/null 2>&1; then
-              python -m venv --clear venv
-            fi
-            venv/Scripts/pip install -e ".[dev]"
-          else
-            if ! venv/bin/python --version >/dev/null 2>&1 ||
-               ! venv/bin/pip --version >/dev/null 2>&1; then
-              python -m venv --clear venv
-            fi
-            venv/bin/pip install -e ".[dev]"
+            venv/bin/python -m pip install -e ".[dev]"
           fi
         shell: bash
 

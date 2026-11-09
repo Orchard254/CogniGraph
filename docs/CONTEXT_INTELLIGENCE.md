@@ -75,8 +75,9 @@ without asking the LLM to discover or invoke a memory tool:
 - With a known IDE file focus, it flags when no **displayed** fact is directly
   anchored to that file. This is a gap in the **delivered briefing**, never a
   claim that the project has no relevant knowledge.
-- In edit/debug phases, it can flag when no constraint fact was delivered.
-  It does not infer that no constraints exist in source code or archived memory.
+- In edit/debug phases, unmet constraint knowledge is now represented in
+  `evidence_plan.requirements` with status `missing`. This replaces the older
+  generic `no_delivered_constraint` text warning without claiming no constraints exist.
 - Symlink escapes, missing files, hidden paths, dependency directories and
   suspicious paths are excluded from proactive inspection targets.
 - Suggestions and gaps appear only when their **entire line fits** the same

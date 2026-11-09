@@ -13,6 +13,10 @@ from typing import Any, Optional
 from pm_common import looks_like_secret
 from pm_freshness import check_source_freshness, project_root_for_db
 from pm_outcomes import _relative_source_path
+from pm_evidence import (
+    required_evidence, evidence_bonus, evidence_type,
+    evaluate_evidence, format_evidence_plan, structural_dependency_leads,
+)
 
 _PHASE_CATEGORY_WEIGHTS = {
     "orient": {"decision": 15, "constraint": 13, "component": 10, "state": 8, "convention": 7},
@@ -158,6 +162,7 @@ class IntelligenceMixin:
         agent_type: str = "default",
         session_id: Optional[str] = None,
         log_usage: bool = True,
+        observed_files: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Compose a bounded context briefing with per-fact provenance.
 
@@ -179,6 +184,7 @@ class IntelligenceMixin:
         if not isinstance(agent_type, str) or len(agent_type) > 32:
             raise ValueError("invalid agent_type")
         focus = _normalize_focus(focus_files)
+        observed = _normalize_focus(observed_files)
         seen = _normalize_seen(seen_refs)
         query = task.strip() or " ".join(focus)
         self._last_retrieval_id = None
@@ -195,6 +201,7 @@ class IntelligenceMixin:
                 "omitted_seen": 0, "warnings": [],
             }
 
+        needs = required_evidence(query, phase)
         intent = self._detect_intent(query)
         candidates = self.query_hybrid(
             query, limit=min(_MAX_CANDIDATES, max(16, limit * 4)),
@@ -266,6 +273,7 @@ class IntelligenceMixin:
                 score += 8
             scored.append((score, idx, ref, fact, flag, freshness))
         scored.sort(key=lambda item: (-item[0], item[1]))
+        covered: set[str] = set()
 
         header = (
             f"### CogniGraph context · {phase.upper()}\n"
@@ -283,9 +291,24 @@ class IntelligenceMixin:
         omitted_seen = 0
         seen_content: set[str] = set()
 
-        for _, _, ref, fact, flag, freshness in scored:
-            if len(selected) >= limit:
-                break
+        # A task is not a bag of similar facts. Choose the next fact by its
+        # marginal ability to cover a still-unmet evidence need. Baseline
+        # relevance continues to matter, but five similar components should
+        # not crowd out a relevant constraint.
+        remaining = scored[:]
+        while remaining and len(selected) < limit:
+            best_idx = max(
+                range(len(remaining)),
+                key=lambda i: (
+                    remaining[i][0] + evidence_bonus(
+                        {**remaining[i][3], "file_path": _existing_project_path(
+                            root, remaining[i][3].get("file_path")
+                        )}, needs, covered,
+                    ),
+                    -remaining[i][1],
+                ),
+            )
+            _, _, ref, fact, flag, freshness = remaining.pop(best_idx)
             if ref in seen:
                 omitted_seen += 1
                 continue
@@ -322,7 +345,12 @@ class IntelligenceMixin:
                 f"  ({'; '.join(metadata)})"
                 + (f"\n  REVIEW: {note}" if note else "") + "\n"
             )
-            if len(output) + len(line_text) + len(footer) > max_chars:
+            # Leave space for the action-oriented evidence state. Guidance
+            # can still shrink or disappear under a very tight budget.
+            # Very small budgets belong to actual evidence, not guidance.
+            # The structured plan is still returned even when not renderable.
+            guidance_reserve = 0 if max_chars <= 768 else min(340, max_chars // 5)
+            if len(output) + len(line_text) + len(footer) + guidance_reserve > max_chars:
                 continue
             output += line_text
             seen_content.add(key)
@@ -331,7 +359,13 @@ class IntelligenceMixin:
                 "category": fact.get("category"), "freshness": freshness,
                 "confidence": fact.get("confidence"),
                 "review_required": bool(note),
+                "file_path": _existing_project_path(root, fact.get("file_path")) or "",
             })
+            key_covered = evidence_type({
+                **fact, "file_path": selected[-1]["file_path"],
+            })
+            if key_covered:
+                covered.add(key_covered)
             selected_sources.append((label, fact))
             if note:
                 warnings.append({"ref": label, "reason": note})
@@ -358,7 +392,21 @@ class IntelligenceMixin:
             path = _existing_project_path(root, fact.get("file_path"))
             if path:
                 direct_paths.add(path)
-                propose(path, ref, "source_anchor")
+                # Reserve at least one inspection slot for a graph-related
+                # file rather than filling all three with stored fact anchors.
+                if len(inspection_targets) < 2:
+                    propose(path, ref, "source_anchor")
+
+        for path in focus:
+            if len(inspection_targets) < 2:
+                propose(path, "active file focus", "focus_file")
+
+        # Existing code relationships are stronger investigation leads than
+        # lexical similarity, but are never promoted to proven dependencies.
+        for lead in structural_dependency_leads(
+            self.conn, focus, lambda raw: _existing_project_path(root, raw)
+        ):
+            propose(lead["file_path"], lead["basis"], lead["kind"], lead["relation"])
 
         live_ids = [item["fact_id"] for item in selected if item["source"] == "memory"]
         if live_ids and len(inspection_targets) < 3:
@@ -398,25 +446,37 @@ class IntelligenceMixin:
             if path not in direct_paths and len(knowledge_gaps) < 2:
                 knowledge_gaps.append({
                     "kind": "missing_focused_evidence", "file_path": path,
-                    "action": "No displayed fact is anchored to this file; inspect current source.",
+                    "action": (
+                        "No displayed fact is anchored here; use the source just read as evidence."
+                        if path in observed else
+                        "No displayed fact is anchored to this file; inspect current source."
+                    ),
                 })
         if not selected and len(knowledge_gaps) < 2:
             knowledge_gaps.append({
                 "kind": "no_delivered_fact", "file_path": "",
                 "action": "No new relevant fact was delivered; check current source and tests before assuming behavior.",
             })
-        elif not focus and not inspection_targets:
-            knowledge_gaps.append({
-                "kind": "no_source_anchor", "file_path": "",
-                "action": "No source anchor was identified among displayed facts; locate the implementation in code.",
-            })
-        if phase in ("edit", "debug") and not any(
-            item["category"] == "constraint" for item in selected
-        ) and len(knowledge_gaps) < 2:
-            knowledge_gaps.append({
-                "kind": "no_delivered_constraint", "file_path": "",
-                "action": "No constraint was delivered in this briefing; check code and tests for restrictions.",
-            })
+
+        # Evaluate what the *delivered* evidence covers. The planner never
+        # marks a retrieved claim or test-result memory as verified execution.
+        evidence_plan = evaluate_evidence(
+            query, phase, selected, inspection_targets,
+            observed_files=tuple(p for p in observed if p in focus and _existing_project_path(root, p)),
+        )
+        plan_lines = format_evidence_plan(evidence_plan)
+        # Prioritize an actionable next step, then progressively add coverage
+        # lines only if the output budget allows it. No partial lines.
+        plan_next = plan_lines[-1]
+        plan_header = plan_lines[0]
+        if (selected or max_chars > 800) and (
+            len(output) + len(plan_header) + len(plan_next) + len(footer) <= max_chars
+        ):
+            output += plan_header
+            for plan_line in plan_lines[1:-1]:
+                if len(output) + len(plan_line) + len(plan_next) + len(footer) <= max_chars:
+                    output += plan_line
+            output += plan_next
 
         # Keep the existing source-qualified receipt exact: suggested linked
         # paths do not silently count as delivered facts or verified memories.
@@ -427,7 +487,7 @@ class IntelligenceMixin:
             for target in inspection_targets:
                 relation = (
                     f" via stored `{target['relation']}` relationship"
-                    if target["kind"] == "linked_fact" else ""
+                    if target["kind"] in ("linked_fact", "structural_dependency") else ""
                 )
                 line = (
                     f"- `{target['file_path']}` "
@@ -477,4 +537,5 @@ class IntelligenceMixin:
             "warnings": warnings,
             "inspection_targets": rendered_targets,
             "knowledge_gaps": rendered_gaps,
+            "evidence_plan": evidence_plan,
         }

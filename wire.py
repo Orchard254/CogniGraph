@@ -235,6 +235,8 @@ AGENTS_TEMPLATE_MARKER_RE = re.compile(
 # Append the new body hash here whenever the template changes; never remove an
 # entry, so pre-versioning copies stay classifiable as stale (not customized).
 KNOWN_AGENTS_TEMPLATE_HASHES = frozenset({
+    # 2026-11-09 evidence-first task protocol; shipped template marker
+    "14b569725c1b81939044261389716c169caf1c3e19e6fa830bb073df837d053e",
     # b439782 Initial commit: project-memory MCP server
     "0f660ec93bbfc0f5662f65baa8727ee3c251a323e7016ee8bad6d09b3584ed1f",
     # bbff37c Refresh docs: Zed env, wire schema, reliability notes

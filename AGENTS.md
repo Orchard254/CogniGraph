@@ -1,16 +1,30 @@
-# Mandatory CogniGraph Protocol — Self-Prompting for Human Language
+# CogniGraph Evidence-First Agent Protocol
 
-0. Self-prompt (on any human message like "hey fix planner"):
-   intent = lower(strip filler "hey/please/can you/fix/add") + keywords
-   file_paths = user list or top 3 file_path from memory_query(intent, 5) if none given
-   Then STOP — no read/TodoWrite before memory_stats → memory_query(intent) → memory_prepare_task(intent, file_paths)
+For each task, identify the immediate decision, necessary evidence, observed
+facts and remaining uncertainty. An OpenCode V2 native context injection may
+already provide an evidence plan and safe source leads. Use it before adding
+retrieval calls; do not block a legitimate source read or edit on three ritual
+MCP calls.
 
-At the start of EVERY session:
-0. Prefer CogniGraph MCP for deep retrieval. In OpenCode V2, a native plugin may already inject a CogniGraph context briefing; do not block ordinary work solely because MCP tools are absent. If no memory connection exists, disclose that limitation and verify context directly from code.
-1. Call `memory_stats` to confirm the database location and counts.
-2. Call `memory_query` when MCP is available; in OpenCode the native briefing may satisfy initial context. Treat memory as evidence to check against current code, never as unquestionable truth. Pass `intent` (fix/implement/refactor/optimize/...) so ranking boosts the right categories; it is auto-detected from the text if omitted.
-3. Call `memory_prepare_task(intent, file_paths)` before writing any code.
-4. Call `memory_get_file_context(file_path)` while planning an approach to a file, and before modifying it — it now includes the file's code structure (functions/classes/imports) from the structural index.
+When information is missing, inspect current source, callers and tests using
+the smallest useful tool action. Do not treat a retrieved fact or an indexed
+call edge as proof. A successful read is evidence of observation, not of
+correct interpretation; a stored test-result fact is not an executed test.
+Record actual outcomes and revise the plan as new evidence arrives.
+
+The remaining tool reference below is for selective deeper investigations,
+not a mandatory checklist for every prompt.
+
+At the start of a task:
+0. Prefer the injected evidence plan, or inspect current source directly. Use
+   memory tools only when they answer a concrete open question.
+1. Find the implementation and constraints that matter for the next action.
+   Evidence retrieval is optional when direct source inspection is sufficient.
+2. Before a risky change, investigate affected callers and available tests.
+   If the graph lacks evidence, acknowledge the gap and inspect source.
+3. After a structured IDE file read, revise the immediate next action;
+   do not keep re-requesting the same information.
+4. Verify with observed tool outputs, not stored claims of past test success.
 
 LLM priming (context retrieval):
 - Prefer `memory_get_context(query, agent_type=..., max_tokens=..., intent=...)` for a single Markdown briefing; it auto-detects intent, expands related constraints/decisions, and prioritizes critical facts.
@@ -63,4 +77,4 @@ Code graph (one-hop queries — ask these mid-reasoning instead of re-reading fi
 - `memory_flag_fact(fact_id, note)` — fire the moment a served fact misleads you; future briefings stamp the warning inline. Prefer `memory_supersede` when you know the corrected content.
 - `memory_checkpoint_task` accepts `failures`: approaches tried that did NOT work. They are stored as negative-knowledge constraints so no future agent re-derives the dead end.
 - If `memory_cli.py wire` reports `WIRED_WITH_ERRORS`, fix `config_errors` first - the listed config was not written (wire.py:207-222).
-<!-- cognigraph-template sha256:dfb65579e55a6931cbc192b1389931d38ba4615d2de71544a6d2f4e23ed84a54 -->
+<!-- cognigraph-template sha256:14b569725c1b81939044261389716c169caf1c3e19e6fa830bb073df837d053e -->

@@ -293,7 +293,16 @@ export default Plugin.define({
           state.revision !== revision || state.focusEpoch !== focusEpoch) return
       if (!base && !focused) return
       const chunks = []
-      if (base) chunks.push(base)
+      if (base) {
+        // The base briefing is intentionally cached across model requests.
+        // Once IDE activity provides fresh focus, its newer evidence plan
+        // supersedes the base plan's now-stale "Next" instruction. Keep the
+        // original facts (and their attribution), not two conflicting plans.
+        const baseWithoutStalePlan = focused
+          ? base.replace(/\n### Evidence requirements \(not proof\)\n(?:- [^\n]*\n)*Next: [^\n]*\n/, "\n")
+          : base
+        chunks.push(baseWithoutStalePlan)
+      }
       if (focused) {
         chunks.push("### Current file focus (observed IDE activity)\n" +
           "Verify all stored facts against current source, especially after edits.\n\n" + focused)
