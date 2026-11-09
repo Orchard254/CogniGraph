@@ -240,7 +240,17 @@ def evaluate_evidence(
 def format_evidence_plan(plan: dict[str, Any], *, max_lines: int = 3) -> list[str]:
     """Small non-authoritative text projection; structured state remains full."""
     lines = ["\n### Evidence requirements (not proof)\n"]
-    for item in plan["requirements"][:max_lines]:
+    visible = plan["requirements"][:max_lines]
+    observed_check = next(
+        (item for item in plan["requirements"]
+         if item["id"] == "verification" and item["status"] != "missing"),
+        None,
+    )
+    if observed_check and observed_check not in visible and max_lines > 0:
+        # An observed check or stale result is immediately decision-relevant.
+        # Don't bury it behind a long list of ordinary investigation needs.
+        visible = visible[:max_lines - 1] + [observed_check]
+    for item in visible:
         status = item["status"].replace("_", " ")
         lines.append(f"- {item['label']}: {status}\n")
     lines.append("Next: " + plan["next_action"] + "\n")
