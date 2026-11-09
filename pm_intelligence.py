@@ -164,6 +164,7 @@ class IntelligenceMixin:
         log_usage: bool = True,
         observed_files: Optional[list[str]] = None,
         check_observation: Optional[dict[str, Any]] = None,
+        goal_observation: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Compose a bounded context briefing with per-fact provenance.
 
@@ -469,6 +470,13 @@ class IntelligenceMixin:
             observed_files=tuple(p for p in observed if _existing_project_path(root, p)),
             check_observation=check_observation,
         )
+        if goal_observation and goal_observation.get("status") not in (
+            None, "unregistered", "evidence_ready_for_review",
+        ):
+            # The registered acceptance contract overrides generic retrieval
+            # suggestions when it names a specific unmet evidence requirement.
+            evidence_plan["next_action"] = goal_observation["next_action"]
+            evidence_plan["goal_status"] = goal_observation["status"]
         plan_lines = format_evidence_plan(evidence_plan)
         # Prioritize an actionable next step, then progressively add coverage
         # lines only if the output budget allows it. No partial lines.
