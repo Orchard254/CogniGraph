@@ -8,7 +8,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from task_goal import propose_goal, goal_snapshot, format_goal_snapshot
+from task_goal import (
+    propose_goal, propose_goal_ref, goal_snapshot, format_goal_snapshot,
+)
 from task_evidence import record_observation
 from task_checks import record_check, check_snapshot
 
@@ -59,6 +61,44 @@ class GoalGateTests(unittest.TestCase):
 
     def statuses(self):
         return {r["id"]: r["status"] for r in self.state()["criteria"]}
+
+    def test_agent_can_register_goal_using_opaque_context_reference(self):
+        ref = self.state()["registration_ref"]
+        self.assertEqual(len(ref), 86)
+        self.assertNotIn(self.session, ref)
+        self.assertNotIn(self.task, ref)
+        self.assertIn(ref, format_goal_snapshot(self.state(), max_chars=370))
+        criteria = [
+            {"id": "src", "type": "source_read", "path": "src/auth.py"},
+            {"id": "check", "type": "check", "command": self.tests},
+        ]
+        result = propose_goal_ref(self.root, ref, "implementation", criteria)
+        self.assertEqual(result["status"], "registered_proposal")
+        self.assertEqual(self.state()["status"], "needs_evidence")
+        self.assertEqual(self.state()["registration_ref"], ref)
+        for invalid in ("", "bogus", ref[:-1], ref[:-1] + "!", ref + "X"):
+            with self.subTest(ref=invalid):
+                with self.assertRaises(ValueError):
+                    propose_goal_ref(self.root, invalid, "implementation", criteria)
+
+    def test_goal_ref_cli_does_not_need_raw_task_or_session(self):
+        ref = self.state()["registration_ref"]
+        criteria = [
+            {"id": "src", "type": "source_read", "path": "src/auth.py"},
+            {"id": "check", "type": "check", "command": self.tests},
+        ]
+        command = [
+            sys.executable, "-m", "task_goal", "--project-root",
+            str(self.root), "--ref", ref, "--profile", "implementation",
+        ]
+        result = subprocess.run(
+            command, input=json.dumps(criteria), text=True, capture_output=True,
+            check=False, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"],
+                         "registered_proposal")
+        self.assertEqual(self.state()["status"], "needs_evidence")
 
     def test_real_cli_register_and_show_roundtrip(self):
         criteria = [
