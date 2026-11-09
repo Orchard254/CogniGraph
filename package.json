@@ -46,6 +46,7 @@
     "pm_evidence.py",
     "task_evidence.py",
     "task_checks.py",
+    "task_goal.py",
     "pm_outcomes.py",
     "pm_freshness.py",
     "pm_search.py",
