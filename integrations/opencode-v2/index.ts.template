@@ -275,20 +275,25 @@ export default Plugin.define({
         const metadata = event.result?.metadata
         const exitCode = metadata?.exitCode ?? metadata?.exit_code
         const command = event.input?.command
+        const ownRunner = typeof command === "string" &&
+          /(?:^|\\s)-m\\s+task_checks(?:\\s|$)/.test(command)
+        let recorded = false
         if (Number.isSafeInteger(exitCode) && typeof command === "string") {
-          const recorded = await recordTaskEvent(projectRoot, "check", {
+          recorded = await recordTaskEvent(projectRoot, "check", {
             session_id: event.sessionID,
             query: state.query.slice(0, MAX_QUERY),
             command, exit_code: exitCode,
             cwd: event.input?.workdir ?? event.input?.cwd ?? projectRoot,
           })
-          if (recorded) {
-            state.revision += 1
-            state.focusEpoch += 1
-            state.baseNeedsRefresh = true
-            state.response = null
-            state.focusResponse = null
-          }
+        }
+        if (recorded || ownRunner) {
+          // Explicit self-run verification is recorded by its Python runner,
+          // not from the outer shell result. Refresh to read the real ledger.
+          state.revision += 1
+          state.focusEpoch += 1
+          state.baseNeedsRefresh = true
+          state.response = null
+          state.focusResponse = null
         }
         return
       }
