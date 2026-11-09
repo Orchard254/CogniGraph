@@ -15,12 +15,16 @@ Record actual outcomes and revise the plan as new evidence arrives.
 The remaining tool reference below is for selective deeper investigations,
 not a mandatory checklist for every prompt.
 
-At the start of EVERY session:
-0. Prefer CogniGraph MCP for deep retrieval. In OpenCode V2, a native plugin may already inject a CogniGraph context briefing; do not block ordinary work solely because MCP tools are absent. If no memory connection exists, disclose that limitation and verify context directly from code.
-1. Call `memory_stats` to confirm the database location and counts.
-2. Call `memory_query` when MCP is available; in OpenCode the native briefing may satisfy initial context. Treat memory as evidence to check against current code, never as unquestionable truth. Pass `intent` (fix/implement/refactor/optimize/...) so ranking boosts the right categories; it is auto-detected from the text if omitted.
-3. Call `memory_prepare_task(intent, file_paths)` before writing any code.
-4. Call `memory_get_file_context(file_path)` while planning an approach to a file, and before modifying it — it now includes the file's code structure (functions/classes/imports) from the structural index.
+At the start of a task:
+0. Prefer the injected evidence plan, or inspect current source directly. Use
+   memory tools only when they answer a concrete open question.
+1. Find the implementation and constraints that matter for the next action.
+   Evidence retrieval is optional when direct source inspection is sufficient.
+2. Before a risky change, investigate affected callers and available tests.
+   If the graph lacks evidence, acknowledge the gap and inspect source.
+3. After a structured IDE file read, revise the immediate next action;
+   do not keep re-requesting the same information.
+4. Verify with observed tool outputs, not stored claims of past test success.
 
 LLM priming (context retrieval):
 - Prefer `memory_get_context(query, agent_type=..., max_tokens=..., intent=...)` for a single Markdown briefing; it auto-detects intent, expands related constraints/decisions, and prioritizes critical facts.
