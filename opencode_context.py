@@ -135,6 +135,8 @@ def get_plugin_context(
                 briefing = composer(
                     task, phase="orient", max_chars=content_cap, limit=6,
                     agent_type="opencode", log_usage=not refresh,
+                    observed_files=(observation["observed_files"]
+                                    if observation is not None else None),
                 )
                 if not refresh:
                     retrieval_id = briefing.get("retrieval_id")
