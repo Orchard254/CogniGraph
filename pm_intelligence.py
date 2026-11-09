@@ -347,7 +347,9 @@ class IntelligenceMixin:
             )
             # Leave space for the action-oriented evidence state. Guidance
             # can still shrink or disappear under a very tight budget.
-            guidance_reserve = min(340, max_chars // 5)
+            # Very small budgets belong to actual evidence, not guidance.
+            # The structured plan is still returned even when not renderable.
+            guidance_reserve = 0 if max_chars <= 768 else min(340, max_chars // 5)
             if len(output) + len(line_text) + len(footer) + guidance_reserve > max_chars:
                 continue
             output += line_text
