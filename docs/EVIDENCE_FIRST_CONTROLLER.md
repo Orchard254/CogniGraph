@@ -78,9 +78,12 @@ Task understanding currently uses a deterministic, intentionally narrow
 requirements vocabulary; unknown tasks can still need evidence types that
 have not been modeled. The structural graph may omit dynamic or unresolved
 calls. No tests are executed by the controller; it cannot know that a user
-report was reproduced. The source-read signal is ephemeral to the IDE
-interaction; there is **not yet a persistent, cross-request task state or
-test-observation ledger**. There is no LLM-in-the-controller loop.
+report was reproduced. Structured IDE source read/edit observations now persist in a bounded
+project-local journal (see PERSISTENT_TASK_EVIDENCE.md). This allows file
+inspection state to survive context reassembly and plugin restarts for the
+same task/session identity. A complete task-state planner, verified test
+ledger, cross-session objective matching, and LLM-in-the-controller loop
+remain future work.
 
 The next experiment should compare this controller against the previous
 composer on **real coding decisions**: whether necessary files were found,
