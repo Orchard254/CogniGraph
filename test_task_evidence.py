@@ -168,6 +168,37 @@ class IDEBridgeEvidenceTests(unittest.TestCase):
             self.assertNotIn("source read observed", second["context_markdown"])
             self.assertIn("Edited; source re-read needed", second["context_markdown"])
 
+    def test_prior_source_read_guides_new_base_context_without_file_focus(self):
+        from opencode_context import get_plugin_context, record_plugin_evidence
+        from memory_store import MemoryStore
+        from unittest.mock import patch
+        import sys
+        import types
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / ".cognigraph").mkdir()
+            file = root / "src/auth.py"
+            file.parent.mkdir()
+            file.write_text("def login():\n    return True\n")
+            store = MemoryStore(str(root / ".cognigraph" / "memory.db"))
+            try:
+                store.write("component", "Login authentication handler",
+                            file_path="src/auth.py", force=True, embed=False)
+            finally:
+                store.close()
+            record_plugin_evidence(d, "session-r", "fix login", "read", "src/auth.py")
+            class NoVectorStore(MemoryStore):
+                def _query_encode(self, text):
+                    return None
+            with patch.dict(sys.modules, {
+                "memory_store": types.SimpleNamespace(MemoryStore=NoVectorStore),
+            }):
+                answer = get_plugin_context(d, "fix login", session_id="session-r",
+                                            max_chars=2400)
+            self.assertIn("Read and unchanged", answer["context_markdown"])
+            self.assertIn("source read observed", answer["context_markdown"])
+            self.assertFalse(answer["task_evidence"]["verified"])
+
     def test_ledger_still_helps_before_memory_database_is_initialized(self):
         from opencode_context import get_plugin_context, record_plugin_evidence
         with tempfile.TemporaryDirectory() as d:
