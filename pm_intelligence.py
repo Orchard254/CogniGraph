@@ -15,7 +15,7 @@ from pm_freshness import check_source_freshness, project_root_for_db
 from pm_outcomes import _relative_source_path
 from pm_evidence import (
     required_evidence, evidence_bonus, evidence_type,
-    evaluate_evidence, format_evidence_plan,
+    evaluate_evidence, format_evidence_plan, structural_dependency_leads,
 )
 
 _PHASE_CATEGORY_WEIGHTS = {
@@ -162,6 +162,7 @@ class IntelligenceMixin:
         agent_type: str = "default",
         session_id: Optional[str] = None,
         log_usage: bool = True,
+        observed_files: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Compose a bounded context briefing with per-fact provenance.
 
@@ -183,6 +184,7 @@ class IntelligenceMixin:
         if not isinstance(agent_type, str) or len(agent_type) > 32:
             raise ValueError("invalid agent_type")
         focus = _normalize_focus(focus_files)
+        observed = _normalize_focus(observed_files)
         seen = _normalize_seen(seen_refs)
         query = task.strip() or " ".join(focus)
         self._last_retrieval_id = None
@@ -388,7 +390,17 @@ class IntelligenceMixin:
             path = _existing_project_path(root, fact.get("file_path"))
             if path:
                 direct_paths.add(path)
-                propose(path, ref, "source_anchor")
+                # Reserve at least one inspection slot for a graph-related
+                # file rather than filling all three with stored fact anchors.
+                if len(inspection_targets) < 2:
+                    propose(path, ref, "source_anchor")
+
+        # Existing code relationships are stronger investigation leads than
+        # lexical similarity, but are never promoted to proven dependencies.
+        for lead in structural_dependency_leads(
+            self.conn, focus, lambda raw: _existing_project_path(root, raw)
+        ):
+            propose(lead["file_path"], lead["basis"], lead["kind"], lead["relation"])
 
         live_ids = [item["fact_id"] for item in selected if item["source"] == "memory"]
         if live_ids and len(inspection_targets) < 3:
@@ -450,7 +462,10 @@ class IntelligenceMixin:
 
         # Evaluate what the *delivered* evidence covers. The planner never
         # marks a retrieved claim or test-result memory as verified execution.
-        evidence_plan = evaluate_evidence(query, phase, selected, inspection_targets)
+        evidence_plan = evaluate_evidence(
+            query, phase, selected, inspection_targets,
+            observed_files=tuple(p for p in observed if p in focus and _existing_project_path(root, p)),
+        )
         plan_lines = format_evidence_plan(evidence_plan)
         # Prioritize an actionable next step, then progressively add coverage
         # lines only if the output budget allows it. No partial lines.
@@ -471,7 +486,7 @@ class IntelligenceMixin:
             for target in inspection_targets:
                 relation = (
                     f" via stored `{target['relation']}` relationship"
-                    if target["kind"] == "linked_fact" else ""
+                    if target["kind"] in ("linked_fact", "structural_dependency") else ""
                 )
                 line = (
                     f"- `{target['file_path']}` "
