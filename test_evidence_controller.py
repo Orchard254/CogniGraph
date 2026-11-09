@@ -1,4 +1,5 @@
 """Behavior contracts for CogniGraph's evidence-first context controller."""
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -60,6 +61,38 @@ class EvidencePlannerUnitTests(unittest.TestCase):
         states = {r["id"]: r["status"] for r in plan["requirements"]}
         self.assertEqual(states["behavior"], "inspection_lead")
         self.assertEqual(states["dependencies"], "inspection_lead")
+        self.assertFalse(plan["verified"])
+
+
+    def test_structural_graph_locates_a_caller_without_text_similarity(self):
+        from pm_evidence import structural_dependency_leads
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE structural_nodes (id INTEGER PRIMARY KEY, file_path TEXT);
+            CREATE TABLE structural_edges (caller_id INTEGER, callee_id INTEGER,
+                                           edge_type TEXT, id INTEGER PRIMARY KEY);
+            INSERT INTO structural_nodes VALUES (1,'src/auth.py'),(2,'src/route.py'),
+                                                (3,'../escape.py');
+            INSERT INTO structural_edges VALUES (2,1,'calls',1);
+            INSERT INTO structural_edges VALUES (3,1,'calls',2);
+        """)
+        safe = {"src/auth.py", "src/route.py"}
+        leads = structural_dependency_leads(
+            conn, ["src/auth.py"], lambda p: p if p in safe else None,
+        )
+        self.assertEqual([x["file_path"] for x in leads], ["src/route.py"])
+        self.assertEqual(leads[0]["kind"], "structural_dependency")
+        conn.close()
+
+    def test_read_observation_advances_next_action_without_claiming_truth(self):
+        facts = [{"ref": "memory:1", "category": "component",
+                  "file_path": "src/auth.py", "freshness": "UNVERIFIED"}]
+        targets = [{"file_path": "src/auth.py", "kind": "source_anchor"}]
+        plan = evaluate_evidence("fix login", "inspect", facts, targets,
+                                 observed_files=("src/auth.py",))
+        self.assertEqual(plan["requirements"][0]["status"], "source_read_observed")
+        self.assertNotIn("Inspect current source at src/auth.py", plan["next_action"])
         self.assertFalse(plan["verified"])
 
 
