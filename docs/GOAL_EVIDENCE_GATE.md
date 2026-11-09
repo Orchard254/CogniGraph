@@ -35,8 +35,9 @@ The raw task prompt, command and test output are not stored.
 
 Profiles:
 
-- **implementation** — requires an observed post-registration edit, at least
-  one source-read criterion, and one exact check criterion.
+- **implementation** — requires an observed post-registration edit to a
+  source file explicitly named in the contract, at least one source-read
+  criterion, and one exact check criterion.
 - **repair** — same, but requires a regression criterion proving the
   failure-then-edit-then-success check chronology.
 - **inspection** — can require only source-reading or external review;
@@ -49,8 +50,9 @@ Criteria:
 - check: a specific direct test/lint command must have a current, source-scoped
   exit code 0 after registration and match the required origin.
 - regression: the **same** check command must fail after registration, then
-  an observed edit must occur, then the same check must exit 0. Merely
-  running a different passing check or repeating a test without editing does
+  an observed edit to a source file named in the contract must occur,
+  then the same check must exit 0. Editing an unrelated file, running a
+  different passing check, or repeating a test without editing does
   not satisfy it.
 - manual_review: deliberately remains open until a future independently
   verifiable review source is integrated. Model-written "approved" does not
