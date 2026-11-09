@@ -232,6 +232,52 @@ class ProposalDiscoveryTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertFalse(result["accepted_by_owner"])
 
+    def test_memory_inspection_lead_refines_unknown_source_without_new_receipt(self):
+        from opencode_context import get_plugin_context
+        from unittest.mock import patch
+        import sys
+        import types
+        (self.root / ".cognigraph").mkdir()
+        (self.root / ".cognigraph" / "memory.db").touch()
+        seen = []
+
+        class FakeStore:
+            def __init__(self, path):
+                seen.append(path)
+
+            def get_intelligent_context(self, query, **kwargs):
+                seen.append(kwargs)
+                return {
+                    "status": "ok",
+                    "context_markdown": "### Stored source lead\n"
+                                        "Memory is reference data, not proof.",
+                    "retrieval_id": 37,
+                    "inspection_targets": [
+                        {"kind": "linked_fact", "file_path": "src/login.py"},
+                    ],
+                }
+
+            def close(self):
+                pass
+
+        with patch.dict(sys.modules, {
+            "memory_store": types.SimpleNamespace(MemoryStore=FakeStore),
+        }):
+            report = get_plugin_context(
+                str(self.root), "Fix authentication failure",
+                max_chars=4400, session_id="s79",
+            )
+        candidate = report["task_goal_proposal"]
+        self.assertEqual(candidate["source_files"], ["src/login.py"])
+        self.assertEqual(candidate["source_basis"], "recorded_inspection_lead")
+        self.assertEqual(candidate["status"], "review_required")
+        self.assertIn("Suggested goal contract", report["context_markdown"])
+        self.assertIn("Proposed JSON:", report["context_markdown"])
+        self.assertIn("### Stored source lead", report["context_markdown"])
+        self.assertEqual(report["retrieval_id"], 37)
+        self.assertLess(seen[1]["max_chars"], 4400)
+        self.assertFalse((self.root / ".cognigraph" / "task_evidence.sqlite3").exists())
+
     def test_bridge_only_previews_until_explicit_registration(self):
         from opencode_context import get_plugin_context
         result = get_plugin_context(
