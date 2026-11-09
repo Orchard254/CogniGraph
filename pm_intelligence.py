@@ -395,6 +395,10 @@ class IntelligenceMixin:
                 if len(inspection_targets) < 2:
                     propose(path, ref, "source_anchor")
 
+        for path in focus:
+            if len(inspection_targets) < 2:
+                propose(path, "active file focus", "focus_file")
+
         # Existing code relationships are stronger investigation leads than
         # lexical similarity, but are never promoted to proven dependencies.
         for lead in structural_dependency_leads(
