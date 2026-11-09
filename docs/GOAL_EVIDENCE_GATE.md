@@ -68,10 +68,13 @@ In a project directory, define an objective contract before executing its
 checks. The command reads a JSON array from stdin; it is intentionally an
 explicit local operation, not a side effect of normal memory retrieval.
 
+The **preferred OpenCode path** is to copy the opaque Goal ref displayed in
+CogniGraph context (86 URL-safe characters). No raw user prompt or internal
+OpenCode session ID needs to appear in the registration command:
+
     python -m task_goal \
       --project-root . \
-      --session-id "<your OpenCode session ID>" \
-      --task "fix login" \
+      --ref "<Goal ref from injected context>" \
       --profile repair
 
 Submit this JSON on stdin:
@@ -97,10 +100,13 @@ A direct check with independently measured exit status can be run with:
       --session-id "<your OpenCode session ID>" \
       --task "fix login" -- python -m pytest -q test_auth.py
 
-The task/session string must match the active context exactly. The OpenCode
-plugin does not yet offer an end-user form for authoring the contract.
-It detects an explicit task_goal CLI command and refreshes the task briefing
-so newly registered requirements are visible in the next model request.
+The opaque Goal ref identifies the already active task/session in the
+project-local journal; it is **not an authorization credential** and does not
+indicate user approval. The raw session/task CLI form is retained for non-IDE
+use, including `--show` to query a known task. The OpenCode plugin does not
+yet offer an end-user form for authoring the contract. It detects an explicit
+task_goal CLI command and refreshes the task briefing so newly registered
+requirements are visible in the next model request.
 
 ## Output and semantics
 
