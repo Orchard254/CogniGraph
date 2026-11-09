@@ -72,10 +72,10 @@ def evidence_bonus(
         return 0
     if "behavior" in needs and "behavior" not in covered:
         if category in _REQUIREMENTS["behavior"][1] and anchored:
-            return 20
+            return 35
     if "constraints" in needs and "constraints" not in covered:
         if category in _REQUIREMENTS["constraints"][1]:
-            return 20
+            return 35
     return 0
 
 
