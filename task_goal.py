@@ -317,7 +317,7 @@ def goal_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
         edit_floor = int(row["edit_floor"])
         results: list[dict[str, str]] = []
         source_paths = tuple(item["path"] for item in items
-                             if item.get("type") == "source_read"
+                             if isinstance(item, dict) and item.get("type") == "source_read"
                              and _safe_stored_path(item.get("path")))
         for item in items:
             if not isinstance(item, dict) or not _GOAL_ID.fullmatch(str(item.get("id", ""))):
