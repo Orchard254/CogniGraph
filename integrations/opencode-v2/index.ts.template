@@ -277,6 +277,8 @@ export default Plugin.define({
         const command = event.input?.command
         const ownRunner = typeof command === "string" &&
           /(?:^|\s)-m\s+task_checks(?:\s|$)/.test(command)
+        const goalRunner = typeof command === "string" &&
+          /(?:^|\s)-m\s+task_goal(?:\s|$)/.test(command)
         let recorded = false
         if (Number.isSafeInteger(exitCode) && typeof command === "string") {
           recorded = await recordTaskEvent(projectRoot, "check", {
@@ -286,9 +288,10 @@ export default Plugin.define({
             cwd: event.input?.workdir ?? event.input?.cwd ?? projectRoot,
           })
         }
-        if (recorded || ownRunner) {
-          // Explicit self-run verification is recorded by its Python runner,
-          // not from the outer shell result. Refresh to read the real ledger.
+        if (recorded || ownRunner || goalRunner) {
+          // Explicit goal registration and self-run verification are recorded
+          // by their Python commands, not inferred from shell stdout.
+          // Reassemble next context from the objective + evidence ledgers.
           state.revision += 1
           state.focusEpoch += 1
           state.baseNeedsRefresh = true
@@ -387,6 +390,7 @@ export default Plugin.define({
           ? base.replace(/\n### Evidence requirements \(not proof\)\n(?:- [^\n]*\n)*Next: [^\n]*\n/, "\n")
                 .replace(/\n### Persistent task evidence \(IDE observations, not proof\)\n(?:- [^\n]*\n)*Observations do not establish code correctness or passing tests\.\n?/, "\n")
                 .replace(/\n### Check observation(?: \(not task completion\))?\n(?:- [^\n]*\n)*/, "\n")
+                .replace(/(?:^|\n)### Goal gate[^\n]*\n(?:- [^\n]*\n|Define acceptance checks before declaring the task complete\.\n)*/, "\n")
           : base
         chunks.push(baseWithoutStalePlan)
       }
