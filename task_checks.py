@@ -204,7 +204,7 @@ def record_check(
 
 def check_snapshot(
     root: Path, session_id: str, task: str, command: str | None = None,
-    *, after_id: int = 0,
+    *, after_id: int = 0, command_hash: str | None = None,
 ) -> dict[str, Any]:
     """Report the latest overall or exact-command check.
 
@@ -215,6 +215,11 @@ def check_snapshot(
         raise ValueError("invalid exact check command")
     if type(after_id) is not int or after_id < 0:
         raise ValueError("invalid check event lower bound")
+    if command_hash is not None and (
+        command is not None or not isinstance(command_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", command_hash) is None
+    ):
+        raise ValueError("invalid exact check hash")
     root = root.resolve()
     session_key, task_key = _key(session_id, task)
     blank = {"status": "not_observed", "verified": False, "check_kind": None}
@@ -232,6 +237,9 @@ def check_snapshot(
         if command is not None:
             sql += " AND command_hash=?"
             args += (hashlib.sha256(command.strip().encode("utf-8")).hexdigest(),)
+        elif command_hash is not None:
+            sql += " AND command_hash=?"
+            args += (command_hash,)
         row = conn.execute(sql + " ORDER BY id DESC LIMIT 1", args).fetchone()
         if row is None:
             return blank
