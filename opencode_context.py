@@ -103,14 +103,23 @@ def get_plugin_context(
         observation_text = "\n\n".join(
             p.rstrip() for p in (check_text, source_text) if p
         )
+    # Reserve room *before* retrieval for a later project-memory inspection
+    # lead. This prevents rendering a proposal from trimming facts that were
+    # already logged as delivered by the context composer.
+    proposal_budget = min(700, cap // 4) if (
+        goal is not None and goal["status"] == "unregistered"
+        and cap >= 3000 and proposal is not None
+        and not proposal.get("source_files")
+    ) else 0
     reserved = sum(len(p) + 2 for p in (
         observation_text, goal_text, proposal_text,
-    ) if p)
+    ) if p) + proposal_budget
     content_cap = cap - reserved
     if content_cap < 512:
         observation_text = ""
         goal_text = ""
         proposal_text = ""
+        proposal_budget = 0
         content_cap = cap
 
     # Never search an adjacent repository or the CogniGraph installation
@@ -184,8 +193,30 @@ def get_plugin_context(
                 )
                 if not refresh:
                     retrieval_id = briefing.get("retrieval_id")
+                if proposal_budget and isinstance(briefing.get("inspection_targets"), list):
+                    # The memory/code graph supplies *leads* only; each path
+                    # is revalidated by the on-disk candidate discoverer.
+                    leads = [
+                        item.get("file_path") for item in
+                        briefing["inspection_targets"][:6]
+                        if isinstance(item, dict)
+                        and isinstance(item.get("file_path"), str)
+                    ]
+                    if leads:
+                        refined = suggest_goal_contract(
+                            root, task, inspection_leads=leads,
+                        )
+                        if refined.get("source_files"):
+                            if proposal_text and proposal_text.rstrip() in parts:
+                                parts.remove(proposal_text.rstrip())
+                            proposal = refined
+                            proposal_text = format_goal_proposal(
+                                refined, max_chars=proposal_budget,
+                            )
+                            if proposal_text:
+                                parts.insert(1 if goal_text else 0, proposal_text.rstrip())
                 if _is_deliverable_briefing(briefing):
-                    parts.append(briefing["context_markdown"][:cap])
+                    parts.append(briefing["context_markdown"][:content_cap])
             elif not refresh:
                 # An older composer may not support read-only rechecks;
                 # never create a second possibly misleading usage receipt.
