@@ -463,7 +463,9 @@ class IntelligenceMixin:
         # lines only if the output budget allows it. No partial lines.
         plan_next = plan_lines[-1]
         plan_header = plan_lines[0]
-        if len(output) + len(plan_header) + len(plan_next) + len(footer) <= max_chars:
+        if (selected or max_chars > 800) and (
+            len(output) + len(plan_header) + len(plan_next) + len(footer) <= max_chars
+        ):
             output += plan_header
             for plan_line in plan_lines[1:-1]:
                 if len(output) + len(plan_line) + len(plan_next) + len(footer) <= max_chars:
