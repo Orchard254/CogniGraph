@@ -1,9 +1,19 @@
-# Mandatory CogniGraph Protocol — Self-Prompting for Human Language
+# CogniGraph Evidence-First Agent Protocol
 
-0. Self-prompt (on any human message like "hey fix planner"):
-   intent = lower(strip filler "hey/please/can you/fix/add") + keywords
-   file_paths = user list or top 3 file_path from memory_query(intent, 5) if none given
-   Then STOP — no read/TodoWrite before memory_stats → memory_query(intent) → memory_prepare_task(intent, file_paths)
+For each task, identify the immediate decision, necessary evidence, observed
+facts and remaining uncertainty. An OpenCode V2 native context injection may
+already provide an evidence plan and safe source leads. Use it before adding
+retrieval calls; do not block a legitimate source read or edit on three ritual
+MCP calls.
+
+When information is missing, inspect current source, callers and tests using
+the smallest useful tool action. Do not treat a retrieved fact or an indexed
+call edge as proof. A successful read is evidence of observation, not of
+correct interpretation; a stored test-result fact is not an executed test.
+Record actual outcomes and revise the plan as new evidence arrives.
+
+The remaining tool reference below is for selective deeper investigations,
+not a mandatory checklist for every prompt.
 
 At the start of EVERY session:
 0. Prefer CogniGraph MCP for deep retrieval. In OpenCode V2, a native plugin may already inject a CogniGraph context briefing; do not block ordinary work solely because MCP tools are absent. If no memory connection exists, disclose that limitation and verify context directly from code.
