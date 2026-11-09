@@ -462,7 +462,10 @@ class IntelligenceMixin:
         # marks a retrieved claim or test-result memory as verified execution.
         evidence_plan = evaluate_evidence(
             query, phase, selected, inspection_targets,
-            observed_files=tuple(p for p in observed if p in focus and _existing_project_path(root, p)),
+            # A previously observed source can still be relevant after IDE
+            # restart when there is no *current* file focus. Recheck the path,
+            # but never turn a read event into semantic verification.
+            observed_files=tuple(p for p in observed if _existing_project_path(root, p)),
         )
         plan_lines = format_evidence_plan(evidence_plan)
         # Prioritize an actionable next step, then progressively add coverage
