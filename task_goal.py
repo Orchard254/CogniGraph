@@ -24,6 +24,7 @@ from pm_common import looks_like_secret
 from task_checks import check_snapshot, classify_check
 from task_evidence import (
     _connect, _database, _digest_file, _key, _safe_stored_path,
+    safe_project_file,
 )
 
 _MAX_CRITERIA = 8
@@ -223,7 +224,9 @@ def _source_criterion(conn: sqlite3.Connection, root: Path,
         return "needs_source_read"
     if row["kind"] != "read":
         return "needs_reread"
-    actual = _digest_file(root, path) if (root / path).is_file() else None
+    # A stored path is not trusted merely because it matches a criterion.
+    # Recheck symlinks and project bounds before opening its source bytes.
+    actual = _digest_file(root, path) if safe_project_file(root, path) == path else None
     if not actual or row["source_hash"] != actual:
         return "stale_source"
     return "evidence_observed"
