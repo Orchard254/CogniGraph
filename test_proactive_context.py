@@ -70,16 +70,22 @@ class ProactiveContextTests(unittest.TestCase):
         self.assertIn("No displayed fact", result["context_markdown"])
         self.assertNotIn("no facts exist", result["context_markdown"].lower())
 
-    def test_edit_phase_marks_undelivered_constraints_as_gap(self):
+    def test_edit_phase_exposes_missing_constraints_as_requirement(self):
         self.only(self.auth)
         result = self.store.get_intelligent_context(
             "change login", phase="edit", max_chars=3000, limit=1,
             log_usage=False,
         )
-        self.assertIn(
-            "no_delivered_constraint", {x["kind"] for x in result["knowledge_gaps"]},
-        )
-        self.assertIn("check code and tests", result["context_markdown"])
+        requirements = {
+            item["id"]: item for item in result["evidence_plan"]["requirements"]
+        }
+        self.assertEqual(requirements["constraints"]["status"], "missing")
+        self.assertIn("Protect existing decisions and constraints: missing",
+                      result["context_markdown"])
+        # The new evidence contract replaces, rather than duplicates, the
+        # previous generic no_delivered_constraint warning.
+        self.assertNotIn("no_delivered_constraint",
+                         {x["kind"] for x in result["knowledge_gaps"]})
 
     def test_missing_and_external_symlink_anchors_are_not_recommended(self):
         self.only(self.auth)
