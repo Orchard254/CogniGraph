@@ -276,7 +276,7 @@ export default Plugin.define({
         const exitCode = metadata?.exitCode ?? metadata?.exit_code
         const command = event.input?.command
         const ownRunner = typeof command === "string" &&
-          /(?:^|\\s)-m\\s+task_checks(?:\\s|$)/.test(command)
+          /(?:^|\s)-m\s+task_checks(?:\s|$)/.test(command)
         let recorded = false
         if (Number.isSafeInteger(exitCode) && typeof command === "string") {
           recorded = await recordTaskEvent(projectRoot, "check", {
