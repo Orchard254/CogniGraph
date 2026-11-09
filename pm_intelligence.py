@@ -298,7 +298,11 @@ class IntelligenceMixin:
             best_idx = max(
                 range(len(remaining)),
                 key=lambda i: (
-                    remaining[i][0] + evidence_bonus(remaining[i][3], needs, covered),
+                    remaining[i][0] + evidence_bonus(
+                        {**remaining[i][3], "file_path": _existing_project_path(
+                            root, remaining[i][3].get("file_path")
+                        )}, needs, covered,
+                    ),
                     -remaining[i][1],
                 ),
             )
