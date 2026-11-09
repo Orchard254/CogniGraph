@@ -319,7 +319,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(outcome, sort_keys=True))
         if not outcome.get("recorded"):
             return 2
-        return max(0, min(255, outcome["exit_code"]))
+        code = outcome["exit_code"]
+        # Signals are negative subprocess return codes on POSIX. Never map
+        # a signal-terminated verification process to shell exit 0.
+        return min(255, 128 - code) if code < 0 else min(255, code)
     except (ValueError, sqlite3.Error) as exc:
         print(type(exc).__name__, file=sys.stderr)
         return 2
