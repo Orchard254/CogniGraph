@@ -125,6 +125,7 @@ def get_plugin_context(
                 phase=phase, focus_files=valid_focus,
                 max_chars=attention_budget, limit=3,
                 agent_type="opencode", log_usage=False,
+                observed_files=valid_focus if phase == "inspect" else None,
             )
             if _is_deliverable_briefing(briefing):
                 parts.append(briefing["context_markdown"][:attention_budget])
