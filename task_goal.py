@@ -298,14 +298,19 @@ def goal_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
     try:
         try:
             row = conn.execute(
-                "SELECT profile,revision,criteria_json,source_floor,"
+                "SELECT profile,revision,criteria_json,contract_hash,source_floor,"
                 "check_floor,edit_floor FROM task_goal_contracts "
                 "WHERE session_key=? AND task_key=?",
                 (session_key, task_key),
             ).fetchone()
         except sqlite3.DatabaseError:
             return unregistered
-        if row is None:
+        if row is None or row["profile"] not in _PROFILES:
+            return unregistered
+        expected = hashlib.sha256(
+            (row["profile"] + "\n" + row["criteria_json"]).encode("utf-8")
+        ).hexdigest()
+        if expected != row["contract_hash"]:
             return unregistered
         items = json.loads(row["criteria_json"])
         # A corrupted or externally modified database must not promote any
@@ -453,7 +458,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.show:
             result = goal_snapshot(Path(args.project_root), args.session_id, args.task)
         else:
-            criteria = json.load(sys.stdin)
+            payload = sys.stdin.read(16_385)
+            if len(payload) > 16_384:
+                raise ValueError("goal contract payload exceeds 16 KiB")
+            criteria = json.loads(payload)
             result = propose_goal(
                 Path(args.project_root), args.session_id, args.task,
                 args.profile, criteria,
