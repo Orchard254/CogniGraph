@@ -150,6 +150,20 @@ class CheckEvidenceTests(unittest.TestCase):
         self.assertNotIn("fix login", str(row))
         self.assertNotIn("python -m pytest", str(row))
 
+    def test_evidence_database_symlink_cannot_escape_repository(self):
+        with tempfile.TemporaryDirectory() as outside:
+            external = Path(outside) / "foreign.sqlite3"
+            external.write_bytes(b"")
+            directory = self.root / ".cognigraph"
+            directory.mkdir()
+            try:
+                (directory / "task_evidence.sqlite3").symlink_to(external)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink unavailable")
+            with self.assertRaises(ValueError):
+                self.check(0)
+            self.assertEqual(external.read_bytes(), b"")
+
     def test_external_cwd_is_rejected(self):
         outside = self.root.parent
         result = record_check(
