@@ -18,6 +18,7 @@ from task_checks import (
     record_check, check_snapshot, format_check_snapshot,
 )
 from task_goal import goal_snapshot, format_goal_snapshot
+from task_proposals import suggest_goal_contract, format_goal_proposal
 
 MAX_QUERY_CHARS = 4000
 MAX_CONTEXT_CHARS = 6000
@@ -78,12 +79,23 @@ def get_plugin_context(
     check = None
     goal = None
     goal_text = ""
+    proposal = None
+    proposal_text = ""
     observation_text = ""
     if session_id is not None and task:
         observation = task_snapshot(root, session_id, task)
         check = check_snapshot(root, session_id, task)
         goal = goal_snapshot(root, session_id, task)
         goal_text = format_goal_snapshot(goal, max_chars=min(370, cap // 4))
+        if goal["status"] == "unregistered" and cap >= 1400:
+            # Read-only bounded filename/path discovery; NEVER register a
+            # candidate or infer that a filename proves behavioral coverage.
+            proposal = suggest_goal_contract(
+                root, task, focus_files=requested_files,
+            )
+            proposal_text = format_goal_proposal(
+                proposal, max_chars=min(700, cap // 4),
+            )
         check_text = format_check_snapshot(check)
         source_text = format_task_snapshot(
             observation, max_chars=min(260, cap // 5),
@@ -91,13 +103,14 @@ def get_plugin_context(
         observation_text = "\n\n".join(
             p.rstrip() for p in (check_text, source_text) if p
         )
-    reserved = len(observation_text) + len(goal_text) + (
-        4 if observation_text and goal_text else 2 if observation_text or goal_text else 0
-    )
+    reserved = sum(len(p) + 2 for p in (
+        observation_text, goal_text, proposal_text,
+    ) if p)
     content_cap = cap - reserved
     if content_cap < 512:
         observation_text = ""
         goal_text = ""
+        proposal_text = ""
         content_cap = cap
 
     # Never search an adjacent repository or the CogniGraph installation
@@ -108,18 +121,21 @@ def get_plugin_context(
     db = canonical if canonical.is_file() else legacy
     if not db.is_file():
         state = "\n\n".join(
-            part.rstrip() for part in (goal_text, observation_text) if part
+            part.rstrip() for part in (
+                goal_text, proposal_text, observation_text,
+            ) if part
         )
         if state:
             return {"context_markdown": state, "status": "ok",
                     "retrieval_id": None, "task_evidence": observation,
-                    "task_check": check, "task_goal": goal}
+                    "task_check": check, "task_goal": goal,
+                    "task_goal_proposal": proposal}
         return {"context_markdown": "", "status": "no_project_memory"}
 
     from memory_store import MemoryStore
     store = MemoryStore(str(db))
     try:
-        parts = [goal_text.rstrip()] if goal_text else []
+        parts = [p.rstrip() for p in (goal_text, proposal_text) if p]
         retrieval_id = None
         valid_focus = []
         for candidate in reversed(requested_files[-2:]):
@@ -205,6 +221,7 @@ def get_plugin_context(
         response["task_evidence"] = observation
         response["task_check"] = check
         response["task_goal"] = goal
+        response["task_goal_proposal"] = proposal
     return response
 
 
