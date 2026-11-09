@@ -10,34 +10,13 @@ import json
 import sys
 from pathlib import Path
 
+from task_evidence import (
+    safe_project_file as _safe_project_file,
+    record_observation, task_snapshot, format_task_snapshot,
+)
+
 MAX_QUERY_CHARS = 4000
 MAX_CONTEXT_CHARS = 6000
-
-
-# Limit automatic file context to source files; never infer secrets from tool output.
-_SOURCE_SUFFIXES = frozenset({
-    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".cs",
-    ".c", ".h", ".hpp", ".cpp", ".rb", ".php", ".vue", ".svelte", ".sql",
-})
-
-
-def _safe_project_file(root: Path, candidate: str) -> str | None:
-    """Return a relative project path, never a path outside this workspace."""
-    if not isinstance(candidate, str) or not candidate or len(candidate) > 512:
-        return None
-    try:
-        resolved = (root / candidate).resolve()
-        if not resolved.is_relative_to(root) or not resolved.is_file():
-            return None
-        relative = resolved.relative_to(root)
-        if relative.suffix.lower() not in _SOURCE_SUFFIXES:
-            return None
-        if any(part.startswith(".") or part.lower() in ("node_modules", "vendor")
-               for part in relative.parts):
-            return None
-        return relative.as_posix()
-    except (ValueError, OSError, RuntimeError):
-        return None
 
 
 def _is_deliverable_briefing(briefing: dict) -> bool:
@@ -54,6 +33,7 @@ def get_plugin_context(
     project_root: str, query: str, max_chars: int = 4500,
     file_paths: list[str] | None = None,
     *, phase: str = "orient", refresh: bool = False,
+    session_id: str | None = None,
 ) -> dict:
     """Compose automatic initial or IDE-focused context.
 
@@ -84,22 +64,35 @@ def get_plugin_context(
     if not task and not requested_files:
         return {"context_markdown": "", "status": "empty_query"}
 
+    from pm_common import looks_like_secret
+    if task and looks_like_secret(task):
+        # No task evidence lookup/recording for potentially sensitive queries.
+        return {"context_markdown": "", "status": "sensitive_query"}
+
+    cap = max(256, min(max_chars, MAX_CONTEXT_CHARS))
+    observation = None
+    observation_text = ""
+    if session_id is not None and task:
+        observation = task_snapshot(root, session_id, task)
+        observation_text = format_task_snapshot(observation, max_chars=min(380, cap // 4))
+    content_cap = cap - len(observation_text) - 2 if observation_text else cap
+    if content_cap < 512:
+        observation_text = ""
+        content_cap = cap
+
     # Never search an adjacent repository or the CogniGraph installation
-    # directory as a fallback.
+    # directory as a fallback. Observations remain usable if the memory
+    # corpus is not initialized; they do not create facts.
     canonical = root / ".cognigraph" / "memory.db"
     legacy = root / ".project-memory" / "memory.db"
     db = canonical if canonical.is_file() else legacy
     if not db.is_file():
+        if observation_text:
+            return {"context_markdown": observation_text, "status": "ok",
+                    "retrieval_id": None, "task_evidence": observation}
         return {"context_markdown": "", "status": "no_project_memory"}
 
-    from pm_common import looks_like_secret
-    if task and looks_like_secret(task):
-        # Automatic prompt handling must not persist credentials in usage logs.
-        return {"context_markdown": "", "status": "sensitive_query"}
-
     from memory_store import MemoryStore
-
-    cap = max(256, min(max_chars, MAX_CONTEXT_CHARS))
     store = MemoryStore(str(db))
     try:
         parts = []
@@ -115,17 +108,21 @@ def get_plugin_context(
             return {"context_markdown": "", "status": "no_matches"}
         composer = getattr(store, "get_intelligent_context", None)
 
-        if focused_mode and callable(composer) and cap >= 512:
+        if focused_mode and callable(composer) and content_cap >= 512:
             # Preserve room for the established structural file briefing.
             # The phase composer contributes only already-grounded facts and
             # inspection leads; it does not log another attribution receipt.
-            attention_budget = min(900, max(512, cap - 500))
+            attention_budget = min(900, max(512, content_cap - 500))
             briefing = composer(
                 task or " ".join(valid_focus),
                 phase=phase, focus_files=valid_focus,
                 max_chars=attention_budget, limit=3,
                 agent_type="opencode", log_usage=False,
-                observed_files=valid_focus if phase == "inspect" else None,
+                observed_files=(
+                    [p for p in valid_focus if p in observation["observed_files"]]
+                    if observation is not None else
+                    (valid_focus if phase == "inspect" else None)
+                ),
             )
             if _is_deliverable_briefing(briefing):
                 parts.append(briefing["context_markdown"][:attention_budget])
@@ -134,10 +131,12 @@ def get_plugin_context(
             # Prefer the bounded Context Intelligence Layer for the initial
             # task briefing. Keep legacy compatibility for prior installations,
             # constrained budgets, and isolated bridge mocks.
-            if callable(composer) and cap >= 512:
+            if callable(composer) and content_cap >= 512:
                 briefing = composer(
-                    task, phase="orient", max_chars=cap, limit=6,
+                    task, phase="orient", max_chars=content_cap, limit=6,
                     agent_type="opencode", log_usage=not refresh,
+                    observed_files=(observation["observed_files"]
+                                    if observation is not None else None),
                 )
                 if not refresh:
                     retrieval_id = briefing.get("retrieval_id")
@@ -147,7 +146,7 @@ def get_plugin_context(
                 # An older composer may not support read-only rechecks;
                 # never create a second possibly misleading usage receipt.
                 markdown = store.get_context(
-                    task, limit=5, max_chars=cap, agent_type="opencode"
+                    task, limit=5, max_chars=content_cap, agent_type="opencode"
                 )
                 retrieval_id = getattr(store, "_last_retrieval_id", None)
                 if "*No matching facts found in memory.*" not in markdown:
@@ -160,19 +159,38 @@ def get_plugin_context(
             if "UNMAPPED in memory" in brief:
                 continue
             # Prioritize the most recently used file, fit within one cap.
-            remaining = cap - sum(len(p) for p in parts) - len(parts) * 2
+            remaining = content_cap - sum(len(p) for p in parts) - len(parts) * 2
             if remaining < 160:
                 break
             parts.append(brief[:remaining])
 
     finally:
         store.close()
+    if observation_text:
+        parts.append(observation_text.rstrip())
     text = "\n\n".join(parts)[:cap]
     if not text:
         return {"context_markdown": "", "status": "no_matches"}
-    return {"context_markdown": text, "status": "ok",
-            "retrieval_id": retrieval_id}
+    response = {"context_markdown": text, "status": "ok",
+                "retrieval_id": retrieval_id}
+    if observation is not None:
+        response["task_evidence"] = observation
+    return response
 
+
+
+def record_plugin_evidence(
+    project_root: str, session_id: str, query: str,
+    kind: str, file_path: str,
+) -> dict:
+    """Accept only observed structured read/edit events from the IDE bridge."""
+    root = Path(project_root).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError("Project root is not a directory")
+    from pm_common import looks_like_secret
+    if looks_like_secret(query):
+        return {"status": "sensitive_query", "recorded": False}
+    return record_observation(root, session_id, query, kind, file_path)
 
 
 def record_plugin_outcome(
@@ -217,13 +235,18 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="IDE context retrieval via stdin JSON")
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--max-chars", type=int, default=4500)
-    parser.add_argument("--mode", choices=("context", "outcome"), default="context")
+    parser.add_argument("--mode", choices=("context", "outcome", "evidence"), default="context")
     args = parser.parse_args(argv)
     try:
         request = json.load(sys.stdin)
         if not isinstance(request, dict):
             raise ValueError("Input must be a JSON object")
-        if args.mode == "outcome":
+        if args.mode == "evidence":
+            response = record_plugin_evidence(
+                args.project_root, request.get("session_id"), request.get("query"),
+                request.get("kind"), request.get("file_path"),
+            )
+        elif args.mode == "outcome":
             response = record_plugin_outcome(
                 args.project_root,
                 request.get("retrieval_id"),
@@ -237,6 +260,7 @@ def main(argv=None) -> int:
                 file_paths=request.get("file_paths"),
                 phase=request.get("phase", "orient"),
                 refresh=request.get("refresh", False),
+                session_id=request.get("session_id"),
             )
         sys.stdout.write(json.dumps(response) + "\n")
         return 0

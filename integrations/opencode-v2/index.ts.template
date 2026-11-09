@@ -44,16 +44,23 @@ function messageText(value) {
   return messageText(value.content ?? value.parts ?? [])
 }
 
+function isContinuationText(text) {
+  return /^(?:continue|resume|proceed|go on|carry on|keep going|next)[.!]?$/i.test(text.trim())
+}
+
 function latestUserText(messages) {
   if (!Array.isArray(messages)) return ""
+  let fallback = ""
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]
     const role = message?.role ?? message?.info?.role ?? message?.message?.role
     if (role !== "user") continue
-    const text = messageText(message.content ?? message.parts ?? message.message?.content)
-    if (text.trim()) return text.trim().slice(0, MAX_QUERY)
+    const text = messageText(message.content ?? message.parts ?? message.message?.content).trim()
+    if (!text) continue
+    if (!fallback) fallback = text.slice(0, MAX_QUERY)
+    if (!isContinuationText(text)) return text.slice(0, MAX_QUERY)
   }
-  return ""
+  return fallback
 }
 
 function fetchContext(projectRoot, query, filePaths = [], maxChars = BASE_CONTEXT_CHARS, onReceipt = null, options = {}) {
@@ -105,6 +112,47 @@ function fetchContext(projectRoot, query, filePaths = [], maxChars = BASE_CONTEX
     child.stdin.end(JSON.stringify({
       query: query.slice(0, MAX_QUERY), file_paths: filePaths,
       phase: options.phase ?? "orient", refresh: options.refresh === true,
+      session_id: options.sessionID ?? null,
+    }))
+  })
+}
+
+function recordTaskEvidence(projectRoot, sessionID, query, kind, filePath) {
+  // Only call from completed structured IDE tool events. This is not a test
+  // runner, and shell text is deliberately not parsed as evidence.
+  return new Promise((resolve) => {
+    let child
+    try {
+      child = spawn(PYTHON, [COGNIGRAPH_BRIDGE, "--mode", "evidence", "--project-root", projectRoot], {
+        cwd: projectRoot, stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
+      })
+    } catch {
+      return resolve(false)
+    }
+    let stdout = ""
+    let finished = false
+    const done = (value) => {
+      if (finished) return
+      finished = true
+      clearTimeout(timeout)
+      resolve(value)
+    }
+    const timeout = setTimeout(() => { child.kill(); done(false) }, TIMEOUT_MS)
+    child.stdout.setEncoding("utf8")
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk
+      if (stdout.length > 4000) { child.kill(); done(false) }
+    })
+    child.on("error", () => done(false))
+    child.on("close", (code) => {
+      if (code !== 0) return done(false)
+      try { done(JSON.parse(stdout)?.recorded === true) }
+      catch { done(false) }
+    })
+    child.stdin.on("error", () => done(false))
+    child.stdin.end(JSON.stringify({
+      session_id: sessionID, query: query.slice(0, MAX_QUERY),
+      kind, file_path: filePath,
     }))
   })
 }
@@ -201,7 +249,9 @@ export default Plugin.define({
       if (!sessionID || !query?.trim()) return null
       const normalized = query.trim().slice(0, MAX_QUERY)
       const existing = sessions.get(sessionID)
-      if (existing?.query === normalized) return existing
+      if (existing?.query === normalized || (existing && isContinuationText(normalized))) {
+        return existing
+      }
       if (existing) void flushOutcome(existing).catch(() => {})
       const state = {
         query: normalized, response: null, focus: [], focusResponse: null,
@@ -217,7 +267,7 @@ export default Plugin.define({
       // Capture task intent, but never edit the user's persisted prompt.
       remember(event.sessionID, event.prompt?.text)
     })
-    const toolHook = await ctx.tool.hook("execute.after", (event) => {
+    const toolHook = await ctx.tool.hook("execute.after", async (event) => {
       // Never infer files from shell command/output text or failed tools.
       if (event.status !== "completed" || !OBSERVED_FILE_TOOLS.has(event.tool)) return
       const state = sessions.get(event.sessionID)
@@ -249,12 +299,20 @@ export default Plugin.define({
         state.edits.add(normalized)
         if (state.edits.size > 20) state.edits.delete(state.edits.values().next().value)
       }
-      if (!changed && !edited && !phaseChanged) return
+      // Even repeated reads of the same focused file can be significant:
+      // a source may have changed externally, and a fresh read supersedes a
+      // stale digest. Invalidate the context cache after each observed read.
       state.focusEpoch += 1
       if (index >= 0) state.focus.splice(index, 1)
       state.focus.push(normalized)
       if (state.focus.length > 2) state.focus.shift()
       state.focusResponse = null
+      // Durable evidence is committed before the next model request reads
+      // state. Fail open if the bridge or project store is unavailable.
+      await recordTaskEvidence(
+        projectRoot, event.sessionID, state.query,
+        edited ? "edit" : "read", normalized,
+      )
     })
     const contextHook = await ctx.session.hook("context", async (event) => {
       // The model-context hook runs on each model call, including tool turns.
@@ -274,7 +332,7 @@ export default Plugin.define({
               state.retrievalId = retrievalId
             }
           },
-          { phase: "orient", refresh },
+          { phase: "orient", refresh, sessionID: event.sessionID },
         )
       }
       const base = await state.response
@@ -283,7 +341,7 @@ export default Plugin.define({
         if (!state.focusResponse) {
           state.focusResponse = fetchContext(
             projectRoot, state.query, [...state.focus], FILE_CONTEXT_CHARS,
-            null, { phase: state.focusPhase },
+            null, { phase: state.focusPhase, sessionID: event.sessionID },
           )
         }
         focused = await state.focusResponse
@@ -300,6 +358,7 @@ export default Plugin.define({
         // original facts (and their attribution), not two conflicting plans.
         const baseWithoutStalePlan = focused
           ? base.replace(/\n### Evidence requirements \(not proof\)\n(?:- [^\n]*\n)*Next: [^\n]*\n/, "\n")
+                .replace(/\n### Persistent task evidence \(IDE observations, not proof\)\n(?:- [^\n]*\n)*Observations do not establish code correctness or passing tests\.\n?/, "\n")
           : base
         chunks.push(baseWithoutStalePlan)
       }

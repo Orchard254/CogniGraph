@@ -57,6 +57,7 @@ py-modules = [
     "pm_feedback",
     "pm_intelligence",
     "pm_evidence",
+    "task_evidence",
     "pm_outcomes",
     "pm_freshness",
     "pm_search",
