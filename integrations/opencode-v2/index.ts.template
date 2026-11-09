@@ -290,7 +290,9 @@ export default Plugin.define({
         state.edits.add(normalized)
         if (state.edits.size > 20) state.edits.delete(state.edits.values().next().value)
       }
-      if (!changed && !edited && !phaseChanged) return
+      // Even repeated reads of the same focused file can be significant:
+      // a source may have changed externally, and a fresh read supersedes a
+      // stale digest. Invalidate the context cache after each observed read.
       state.focusEpoch += 1
       if (index >= 0) state.focus.splice(index, 1)
       state.focus.push(normalized)
