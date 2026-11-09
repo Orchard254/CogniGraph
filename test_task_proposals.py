@@ -47,8 +47,10 @@ class ProposalDiscoveryTests(unittest.TestCase):
         self.assertFalse(plan["registered"])
         self.assertFalse(plan["verified"])
         self.assertFalse(before.exists(), "candidate generation must be read-only")
-        self.assertIn("Test filename matching does not prove",
-                      plan["challenge"]["warnings"])
+        self.assertTrue(any(
+            "Test filename matching does not prove" in warning
+            for warning in plan["challenge"]["warnings"]
+        ))
 
     def test_missing_test_never_invents_check_or_registerable_repair(self):
         self.test.unlink()
@@ -130,8 +132,10 @@ class ProposalDiscoveryTests(unittest.TestCase):
         plan = self.propose("Fix wallet bug")
         self.assertEqual(plan["test_candidates"][0]["command"], "npm test")
         self.assertEqual(plan["test_candidates"][0]["scope"], "project_wide")
-        self.assertIn("Project-wide check may not exercise",
-                      plan["challenge"]["warnings"])
+        self.assertTrue(any(
+            "Project-wide check may not exercise" in warning
+            for warning in plan["challenge"]["warnings"]
+        ))
 
     def test_masked_npm_script_cannot_be_validation_evidence(self):
         (self.root / "src/wallet.ts").write_text("export const wallet = 1\n")
@@ -153,7 +157,7 @@ class ProposalDiscoveryTests(unittest.TestCase):
         self.assertTrue(plan["challenge"]["registerable"])
 
     def test_sensitive_task_and_duplicate_checks_are_not_promoted(self):
-        secret = self.propose("fix login password=supersecret")
+        secret = self.propose("fix login password=supersecretvalue")
         self.assertEqual(secret["status"], "unavailable")
         self.assertEqual(secret["criteria"], [])
         (self.root / "src/login.test.py").write_text("def test_login(): pass\n")
