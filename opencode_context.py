@@ -14,6 +14,9 @@ from task_evidence import (
     safe_project_file as _safe_project_file,
     record_observation, task_snapshot, format_task_snapshot,
 )
+from task_checks import (
+    record_check, check_snapshot, format_check_snapshot,
+)
 
 MAX_QUERY_CHARS = 4000
 MAX_CONTEXT_CHARS = 6000
@@ -71,10 +74,18 @@ def get_plugin_context(
 
     cap = max(256, min(max_chars, MAX_CONTEXT_CHARS))
     observation = None
+    check = None
     observation_text = ""
     if session_id is not None and task:
         observation = task_snapshot(root, session_id, task)
-        observation_text = format_task_snapshot(observation, max_chars=min(380, cap // 4))
+        check = check_snapshot(root, session_id, task)
+        check_text = format_check_snapshot(check)
+        source_text = format_task_snapshot(
+            observation, max_chars=min(260, cap // 5),
+        )
+        observation_text = "\n\n".join(
+            p.rstrip() for p in (check_text, source_text) if p
+        )
     content_cap = cap - len(observation_text) - 2 if observation_text else cap
     if content_cap < 512:
         observation_text = ""
@@ -89,7 +100,8 @@ def get_plugin_context(
     if not db.is_file():
         if observation_text:
             return {"context_markdown": observation_text, "status": "ok",
-                    "retrieval_id": None, "task_evidence": observation}
+                    "retrieval_id": None, "task_evidence": observation,
+                    "task_check": check}
         return {"context_markdown": "", "status": "no_project_memory"}
 
     from memory_store import MemoryStore
@@ -123,6 +135,7 @@ def get_plugin_context(
                     if observation is not None else
                     (valid_focus if phase == "inspect" else None)
                 ),
+                check_observation=check,
             )
             if _is_deliverable_briefing(briefing):
                 parts.append(briefing["context_markdown"][:attention_budget])
@@ -137,6 +150,7 @@ def get_plugin_context(
                     agent_type="opencode", log_usage=not refresh,
                     observed_files=(observation["observed_files"]
                                     if observation is not None else None),
+                    check_observation=check,
                 )
                 if not refresh:
                     retrieval_id = briefing.get("retrieval_id")
@@ -175,6 +189,7 @@ def get_plugin_context(
                 "retrieval_id": retrieval_id}
     if observation is not None:
         response["task_evidence"] = observation
+        response["task_check"] = check
     return response
 
 
@@ -191,6 +206,23 @@ def record_plugin_evidence(
     if looks_like_secret(query):
         return {"status": "sensitive_query", "recorded": False}
     return record_observation(root, session_id, query, kind, file_path)
+
+
+def record_plugin_check(
+    project_root: str, session_id: str, query: str,
+    command: str, exit_code: int, cwd: str | None = None,
+) -> dict:
+    """Accept a *numeric runtime exit code*, not a textual test claim."""
+    root = Path(project_root).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError("Project root is not a directory")
+    from pm_common import looks_like_secret
+    if looks_like_secret(query) or looks_like_secret(command):
+        return {"status": "sensitive_query", "recorded": False}
+    return record_check(
+        root, session_id, query, command, exit_code,
+        origin="ide_runtime", cwd=cwd,
+    )
 
 
 def record_plugin_outcome(
@@ -235,13 +267,19 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="IDE context retrieval via stdin JSON")
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--max-chars", type=int, default=4500)
-    parser.add_argument("--mode", choices=("context", "outcome", "evidence"), default="context")
+    parser.add_argument("--mode", choices=("context", "outcome", "evidence", "check"), default="context")
     args = parser.parse_args(argv)
     try:
         request = json.load(sys.stdin)
         if not isinstance(request, dict):
             raise ValueError("Input must be a JSON object")
-        if args.mode == "evidence":
+        if args.mode == "check":
+            response = record_plugin_check(
+                args.project_root, request.get("session_id"), request.get("query"),
+                request.get("command"), request.get("exit_code"),
+                request.get("cwd"),
+            )
+        elif args.mode == "evidence":
             response = record_plugin_evidence(
                 args.project_root, request.get("session_id"), request.get("query"),
                 request.get("kind"), request.get("file_path"),
