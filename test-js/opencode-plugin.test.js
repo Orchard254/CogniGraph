@@ -34,9 +34,14 @@ process.stdin.on('end', () => {
   const phase = req.refresh ? 'R' : ({orient: 'O', inspect: 'I', verify: 'V'}[req.phase] ?? '?');
   fs.appendFileSync(process.env.COGNIGRAPH_TEST_CALLS, phase);
   process.stdout.write(JSON.stringify({
-    context_markdown: req.file_paths?.length
+    context_markdown: (req.file_paths?.length
       ? 'focused ' + req.phase + ' files: ' + req.file_paths.join(',')
-      : 'context for ' + req.query + (req.refresh ? ' refreshed' : ''),
+      : 'context for ' + req.query + (req.refresh ? ' refreshed' : ''))
+      + String.fromCharCode(10)
+      + '### Suggested goal contract (not registered or approved)'
+      + String.fromCharCode(10)
+      + (req.file_paths?.length ? '- Source: focused.ts' : '- Source: stale.ts')
+      + String.fromCharCode(10),
     retrieval_id: req.refresh || req.file_paths?.length ? null : 41,
   }));
 });
@@ -94,6 +99,13 @@ process.stdin.on('end', () => {
     const focused = req();
     await hooks.get('context')(focused);
     assert.match(focused.system[0].text, /focused inspect files: src\/auth.ts/);
+    // A file-focused proposal replaces the older, less-informed base
+    // proposal rather than presenting both as competing acceptance plans.
+    assert.match(focused.system[0].text, /Source: focused\.ts/);
+    assert.doesNotMatch(focused.system[0].text, /Source: stale\.ts/);
+    assert.equal(
+      (focused.system[0].text.match(/### Suggested goal contract/g) || []).length, 1
+    );
     assert.equal(fs.readFileSync(countFile, 'utf8'), 'OOEI');
     await hooks.get('context')(focused);
     assert.equal(focused.system.length, 1, 'same assembled request has one memory block');
