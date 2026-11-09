@@ -51,7 +51,9 @@ def _safe_stored_path(raw: str) -> bool:
     if (not isinstance(raw, str) or not raw or len(raw) > 512
             or any(ord(ch) < 32 or ch in "`<>" for ch in raw)):
         return False
-    parts = raw.replace("\\\\", "/").split("/")
+    if "\\" in raw:
+        return False
+    parts = raw.split("/")
     return (not raw.startswith("/") and not any(
         part in ("", ".", "..") or part.startswith(".") or part.lower() in _EXCLUDED
         for part in parts
