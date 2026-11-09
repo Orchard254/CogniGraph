@@ -147,6 +147,7 @@ def evaluate_evidence(
     selected: list[dict[str, Any]],
     inspection_targets: list[dict[str, str]],
     observed_files: tuple[str, ...] = (),
+    check_observation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate only *delivered* facts and *rendered* inspection leads.
 
@@ -190,7 +191,16 @@ def evaluate_evidence(
         elif key == "dependencies":
             paths = list(dict.fromkeys(linked))[:3]
             status = "inspection_lead" if paths else "missing"
-        # No selected memory can prove a failure was reproduced or tests ran.
+        elif key == "verification" and check_observation:
+            observed = check_observation.get("status")
+            status = {
+                "observed_zero_exit": "exit_zero_observed",
+                "observed_nonzero_exit": "check_failed_observed",
+                "stale": "stale_check",
+                "unscoped_zero_exit": "unscoped_check",
+                "unscoped_nonzero_exit": "unscoped_check",
+            }.get(observed, "missing")
+        # Memory and agent assertions cannot establish observed checks.
         requirements.append({
             "id": key, "label": label, "status": status,
             "refs": refs, "paths": paths,
@@ -199,7 +209,11 @@ def evaluate_evidence(
     # Immediate action is deliberately narrower than the entire task plan.
     # Lead paths must have been validated and rendered by the caller.
     behavior = next((r for r in requirements if r["id"] == "behavior"), None)
-    if behavior and behavior["status"] != "source_read_observed" and behavior["paths"]:
+    if check_observation and check_observation.get("status") == "observed_nonzero_exit":
+        next_action = "Investigate the observed nonzero check exit before declaring success."
+    elif check_observation and check_observation.get("status") == "stale":
+        next_action = "Rerun the stale check against current source before relying on it."
+    elif behavior and behavior["status"] != "source_read_observed" and behavior["paths"]:
         next_action = "Inspect current source at " + behavior["paths"][0] + " before relying on stored behavior."
     elif behavior and behavior["status"] == "missing":
         next_action = "Locate the current implementation in source before editing or assuming behavior."
@@ -215,7 +229,11 @@ def evaluate_evidence(
         "requirements": requirements,
         "next_action": next_action,
         "verified": False,
-        "unresolved_count": sum(r["status"] == "missing" for r in requirements),
+        "unresolved_count": sum(
+            r["status"] in ("missing", "check_failed_observed",
+                            "stale_check", "unscoped_check")
+            for r in requirements
+        ),
     }
 
 
