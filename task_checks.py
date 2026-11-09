@@ -316,8 +316,14 @@ def run_check(
     if not root.is_dir():
         raise ValueError("invalid project root")
     try:
+        # A generic "python" check should use the interpreter running this
+        # installed CogniGraph verifier (including its virtual environment).
+        # Preserve the original command for exact acceptance-contract hashing.
+        effective_argv = (
+            [sys.executable, *argv[1:]] if argv[0] == "python" else argv
+        )
         completed = subprocess.run(
-            argv, cwd=str(root), timeout=timeout, check=False,
+            effective_argv, cwd=str(root), timeout=timeout, check=False,
             shell=False, stdin=subprocess.DEVNULL,
         )
         code = completed.returncode

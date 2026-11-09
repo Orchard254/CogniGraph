@@ -18,6 +18,7 @@ from task_checks import (
     record_check, check_snapshot, format_check_snapshot,
 )
 from task_goal import goal_snapshot, format_goal_snapshot
+from task_proposals import suggest_goal_contract, format_goal_proposal
 
 MAX_QUERY_CHARS = 4000
 MAX_CONTEXT_CHARS = 6000
@@ -78,12 +79,23 @@ def get_plugin_context(
     check = None
     goal = None
     goal_text = ""
+    proposal = None
+    proposal_text = ""
     observation_text = ""
     if session_id is not None and task:
         observation = task_snapshot(root, session_id, task)
         check = check_snapshot(root, session_id, task)
         goal = goal_snapshot(root, session_id, task)
         goal_text = format_goal_snapshot(goal, max_chars=min(370, cap // 4))
+        if goal["status"] == "unregistered" and cap >= 3000:
+            # Read-only bounded filename/path discovery; NEVER register a
+            # candidate or infer that a filename proves behavioral coverage.
+            proposal = suggest_goal_contract(
+                root, task, focus_files=requested_files,
+            )
+            proposal_text = format_goal_proposal(
+                proposal, max_chars=min(700, cap // 4),
+            )
         check_text = format_check_snapshot(check)
         source_text = format_task_snapshot(
             observation, max_chars=min(260, cap // 5),
@@ -91,13 +103,23 @@ def get_plugin_context(
         observation_text = "\n\n".join(
             p.rstrip() for p in (check_text, source_text) if p
         )
-    reserved = len(observation_text) + len(goal_text) + (
-        4 if observation_text and goal_text else 2 if observation_text or goal_text else 0
-    )
+    # Reserve room *before* retrieval for a later project-memory inspection
+    # lead. This prevents rendering a proposal from trimming facts that were
+    # already logged as delivered by the context composer.
+    proposal_budget = min(700, cap // 4) if (
+        goal is not None and goal["status"] == "unregistered"
+        and cap >= 3000 and proposal is not None
+        and not proposal.get("source_files")
+    ) else 0
+    reserved = sum(len(p) + 2 for p in (
+        observation_text, goal_text, proposal_text,
+    ) if p) + proposal_budget
     content_cap = cap - reserved
     if content_cap < 512:
         observation_text = ""
         goal_text = ""
+        proposal_text = ""
+        proposal_budget = 0
         content_cap = cap
 
     # Never search an adjacent repository or the CogniGraph installation
@@ -108,18 +130,21 @@ def get_plugin_context(
     db = canonical if canonical.is_file() else legacy
     if not db.is_file():
         state = "\n\n".join(
-            part.rstrip() for part in (goal_text, observation_text) if part
+            part.rstrip() for part in (
+                goal_text, proposal_text, observation_text,
+            ) if part
         )
         if state:
             return {"context_markdown": state, "status": "ok",
                     "retrieval_id": None, "task_evidence": observation,
-                    "task_check": check, "task_goal": goal}
+                    "task_check": check, "task_goal": goal,
+                    "task_goal_proposal": proposal}
         return {"context_markdown": "", "status": "no_project_memory"}
 
     from memory_store import MemoryStore
     store = MemoryStore(str(db))
     try:
-        parts = [goal_text.rstrip()] if goal_text else []
+        parts = [p.rstrip() for p in (goal_text, proposal_text) if p]
         retrieval_id = None
         valid_focus = []
         for candidate in reversed(requested_files[-2:]):
@@ -168,8 +193,30 @@ def get_plugin_context(
                 )
                 if not refresh:
                     retrieval_id = briefing.get("retrieval_id")
+                if proposal_budget and isinstance(briefing.get("inspection_targets"), list):
+                    # The memory/code graph supplies *leads* only; each path
+                    # is revalidated by the on-disk candidate discoverer.
+                    leads = [
+                        item.get("file_path") for item in
+                        briefing["inspection_targets"][:6]
+                        if isinstance(item, dict)
+                        and isinstance(item.get("file_path"), str)
+                    ]
+                    if leads:
+                        refined = suggest_goal_contract(
+                            root, task, inspection_leads=leads,
+                        )
+                        if refined.get("source_files"):
+                            if proposal_text and proposal_text.rstrip() in parts:
+                                parts.remove(proposal_text.rstrip())
+                            proposal = refined
+                            proposal_text = format_goal_proposal(
+                                refined, max_chars=proposal_budget,
+                            )
+                            if proposal_text:
+                                parts.insert(1 if goal_text else 0, proposal_text.rstrip())
                 if _is_deliverable_briefing(briefing):
-                    parts.append(briefing["context_markdown"][:cap])
+                    parts.append(briefing["context_markdown"][:content_cap])
             elif not refresh:
                 # An older composer may not support read-only rechecks;
                 # never create a second possibly misleading usage receipt.
@@ -205,6 +252,7 @@ def get_plugin_context(
         response["task_evidence"] = observation
         response["task_check"] = check
         response["task_goal"] = goal
+        response["task_goal_proposal"] = proposal
     return response
 
 

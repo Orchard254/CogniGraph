@@ -60,6 +60,7 @@ py-modules = [
     "task_evidence",
     "task_checks",
     "task_goal",
+    "task_proposals",
     "pm_outcomes",
     "pm_freshness",
     "pm_search",
