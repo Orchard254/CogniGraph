@@ -471,7 +471,7 @@ class IntelligenceMixin:
             check_observation=check_observation,
         )
         if goal_observation and goal_observation.get("status") not in (
-            None, "unregistered", "evidence_ready_for_review",
+            None, "unregistered",
         ):
             # The registered acceptance contract overrides generic retrieval
             # suggestions when it names a specific unmet evidence requirement.
