@@ -62,6 +62,9 @@ class CheckEvidenceTests(unittest.TestCase):
             "python -m pytest\nexit 0",
             "npm install", "git status", "npm run deploy",
             "pytest $(echo -q)",
+            "pytest --collect-only", "python -m pytest --version",
+            "pytest -h", "pytest --fixtures", "pytest --setup-plan",
+            "python -m unittest --help",
         )
         self.assertTrue(all(classify_check(command) is None for command in rejected))
         self.assertFalse(self.check(0, "pytest || true")["recorded"])
