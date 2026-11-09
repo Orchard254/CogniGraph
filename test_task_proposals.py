@@ -197,6 +197,37 @@ class ProposalDiscoveryTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertFalse(result["accepted_by_owner"])
 
+    def test_real_red_green_pilot_from_discovery_to_evidence_review(self):
+        """A fixture pilot with actual pytest subprocess exits, not mock claims."""
+        from task_evidence import record_observation
+        from task_checks import run_check
+        self.test.write_text(
+            "from src.login import login\n"
+            "def test_login():\n"
+            "    assert login()\n"
+        )
+        plan = self.propose()
+        ref = goal_snapshot(self.root, "pilot-session", self.task)["registration_ref"]
+        propose_goal_ref(self.root, ref, plan["profile"], plan["criteria"])
+        record_observation(self.root, "pilot-session", self.task,
+                           "read", "src/login.py")
+        argv = ["python", "-m", "pytest", "-q", "tests/test_login.py"]
+        red = run_check(self.root, "pilot-session", self.task, argv, timeout=60)
+        self.assertTrue(red["recorded"])
+        self.assertNotEqual(red["exit_code"], 0, "actual initial fixture must fail")
+        self.source.write_text("def login(): return True\n")
+        record_observation(self.root, "pilot-session", self.task,
+                           "edit", "src/login.py")
+        record_observation(self.root, "pilot-session", self.task,
+                           "read", "src/login.py")
+        green = run_check(self.root, "pilot-session", self.task, argv, timeout=60)
+        self.assertTrue(green["recorded"])
+        self.assertEqual(green["exit_code"], 0, "actual repaired fixture must pass")
+        result = goal_snapshot(self.root, "pilot-session", self.task)
+        self.assertEqual(result["status"], "evidence_ready_for_review")
+        self.assertFalse(result["verified"])
+        self.assertFalse(result["accepted_by_owner"])
+
     def test_bridge_only_previews_until_explicit_registration(self):
         from opencode_context import get_plugin_context
         result = get_plugin_context(
