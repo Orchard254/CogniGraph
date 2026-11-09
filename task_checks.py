@@ -29,6 +29,13 @@ _MAX_CHECKS_PER_PROJECT = 512
 # Deliberately exclude compound shell programs and their deceptive exit codes:
 # e.g. "pytest || true" must never turn a failed test into an observed pass.
 _SHELL_OPERATORS = frozenset(";&|><$" + chr(96) + "\n\r\x00")
+# Commands that intentionally do not execute checks cannot count as evidence.
+# This list is conservative; unknown flags still require independent review.
+_NON_EXECUTING_FLAGS = frozenset({
+    "-h", "--help", "--version", "-V", "--collect-only", "--co",
+    "--fixtures", "--fixtures-per-test", "--setup-plan", "--trace-config",
+    "--list", "--list-tests",
+})
 
 
 def classify_check(command: str) -> str | None:
@@ -45,6 +52,8 @@ def classify_check(command: str) -> str | None:
         return None
     exe = Path(argv[0].replace("\\", "/")).name.lower()
     args = argv[1:]
+    if any(arg.split("=", 1)[0] in _NON_EXECUTING_FLAGS for arg in args):
+        return None
     if exe in ("pytest", "py.test"):
         return "pytest"
     if re.fullmatch(r"python(?:3(?:\.\d{1,2})?)?(?:\.exe)?", exe):
