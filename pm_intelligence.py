@@ -201,6 +201,7 @@ class IntelligenceMixin:
                 "omitted_seen": 0, "warnings": [],
             }
 
+        needs = required_evidence(query, phase)
         intent = self._detect_intent(query)
         candidates = self.query_hybrid(
             query, limit=min(_MAX_CANDIDATES, max(16, limit * 4)),
@@ -272,7 +273,6 @@ class IntelligenceMixin:
                 score += 8
             scored.append((score, idx, ref, fact, flag, freshness))
         scored.sort(key=lambda item: (-item[0], item[1]))
-        needs = required_evidence(query, phase)
         covered: set[str] = set()
 
         header = (
@@ -451,18 +451,6 @@ class IntelligenceMixin:
                 "kind": "no_delivered_fact", "file_path": "",
                 "action": "No new relevant fact was delivered; check current source and tests before assuming behavior.",
             })
-        elif not focus and not inspection_targets:
-            knowledge_gaps.append({
-                "kind": "no_source_anchor", "file_path": "",
-                "action": "No source anchor was identified among displayed facts; locate the implementation in code.",
-            })
-        if phase in ("edit", "debug") and not any(
-            item["category"] == "constraint" for item in selected
-        ) and len(knowledge_gaps) < 2:
-            knowledge_gaps.append({
-                "kind": "no_delivered_constraint", "file_path": "",
-                "action": "No constraint was delivered in this briefing; check code and tests for restrictions.",
-            })
 
         # Evaluate what the *delivered* evidence covers. The planner never
         # marks a retrieved claim or test-result memory as verified execution.
@@ -476,10 +464,11 @@ class IntelligenceMixin:
         plan_next = plan_lines[-1]
         plan_header = plan_lines[0]
         if len(output) + len(plan_header) + len(plan_next) + len(footer) <= max_chars:
-            output += plan_header + plan_next
+            output += plan_header
             for plan_line in plan_lines[1:-1]:
-                if len(output) + len(plan_line) + len(footer) <= max_chars:
+                if len(output) + len(plan_line) + len(plan_next) + len(footer) <= max_chars:
                     output += plan_line
+            output += plan_next
 
         # Keep the existing source-qualified receipt exact: suggested linked
         # paths do not silently count as delivered facts or verified memories.
