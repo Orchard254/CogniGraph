@@ -58,13 +58,16 @@ briefing supersedes it. The plugin remains fail-open.
   or even that every source line was in the tool's output.
 - edited_files: latest event is an editor change; prior reads are invalid.
 - stale_files: file changed, disappeared, or became unsafe since a read.
-- verified: always false; no test runner is wired into this ledger.
+- verified: remains false for the overall task. Individual process
+  checks now have a separate source-aware observation table and an explicit
+  self-run verifier (see OBSERVED_CHECK_VERIFICATION.md).
 
 ## Deliberate non-features
 
-The current ledger does not claim successful test execution, reproducible
-failures, verified architecture, or completed tasks. It also does not infer
-an explicit user acceptance decision from model output.
+The ledger now distinguishes observed **individual check process exits**
+from unverified claims. It still cannot prove complete test coverage,
+reproducible user failures, architecture correctness, or completed tasks.
+It does not infer user acceptance from model output.
 
 It survives plugin restarts **within the same IDE session/task identity**.
 Cross-session task matching, durable constraints/decisions and verification

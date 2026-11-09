@@ -25,6 +25,12 @@ process.stdin.on('end', () => {
     process.stdout.write(JSON.stringify({status:'recorded', recorded:true}));
     return;
   }
+  if (process.argv.includes('check')) {
+    fs.appendFileSync(process.env.COGNIGRAPH_TEST_CALLS, 'C');
+    const safe = req.command === 'python -m pytest -q';
+    process.stdout.write(JSON.stringify({status: safe ? 'recorded' : 'not_direct_check', recorded:safe}));
+    return;
+  }
   const phase = req.refresh ? 'R' : ({orient: 'O', inspect: 'I', verify: 'V'}[req.phase] ?? '?');
   fs.appendFileSync(process.env.COGNIGRAPH_TEST_CALLS, phase);
   process.stdout.write(JSON.stringify({
@@ -134,6 +140,35 @@ process.stdin.on('end', () => {
     assert.match(other.system[0].text, /context for fix login/);
     assert.equal(fs.readFileSync(countFile, 'utf8'), 'OOEIEIERVEIO');
     assert.doesNotMatch(other.system[0].text, /focused .* files/);
+
+    // "completed" can describe a tool's execution while its output merely
+    // *claims* the tests passed. Without numeric runtime exit metadata,
+    // Cognigraph must not record a verification observation.
+    const beforeCheck = fs.readFileSync(countFile, 'utf8');
+    await toolHook({sessionID:'s1', status:'completed', tool:'bash',
+      input:{command:'python -m pytest -q'},
+      result:{output:'everything passed', metadata:{}}});
+    assert.equal(fs.readFileSync(countFile, 'utf8'), beforeCheck);
+
+    // A genuine nonzero process exit is still recorded, and triggers a fresh
+    // briefing; it never becomes a success just because stdout says "passed".
+    await toolHook({sessionID:'s1', status:'completed', tool:'bash',
+      input:{command:'python -m pytest -q', workdir:root},
+      result:{output:'all green', metadata:{exitCode:1}}});
+    assert.equal(fs.readFileSync(countFile, 'utf8'), beforeCheck + 'C');
+    const afterCheck = req();
+    await hooks.get('context')(afterCheck);
+    assert.equal(fs.readFileSync(countFile, 'utf8'), beforeCheck + 'CRI');
+    assert.match(afterCheck.system[0].text, /context for add cache refreshed/);
+
+    // Even an explicit exit 0 cannot turn a compound shell command into
+    // evidence. The bridge refuses it and context is not invalidated.
+    await toolHook({sessionID:'s1', status:'completed', tool:'bash',
+      input:{command:'pytest || true'}, result:{metadata:{exitCode:0}}});
+    const afterRejected = fs.readFileSync(countFile, 'utf8');
+    assert.equal(afterRejected, beforeCheck + 'CRIC');
+    await hooks.get('context')(req());
+    assert.equal(fs.readFileSync(countFile, 'utf8'), afterRejected);
   } finally {
     if (originalCountPath === undefined) delete process.env.COGNIGRAPH_TEST_CALLS;
     else process.env.COGNIGRAPH_TEST_CALLS = originalCountPath;

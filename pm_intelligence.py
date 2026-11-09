@@ -163,6 +163,7 @@ class IntelligenceMixin:
         session_id: Optional[str] = None,
         log_usage: bool = True,
         observed_files: Optional[list[str]] = None,
+        check_observation: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Compose a bounded context briefing with per-fact provenance.
 
@@ -466,6 +467,7 @@ class IntelligenceMixin:
             # restart when there is no *current* file focus. Recheck the path,
             # but never turn a read event into semantic verification.
             observed_files=tuple(p for p in observed if _existing_project_path(root, p)),
+            check_observation=check_observation,
         )
         plan_lines = format_evidence_plan(evidence_plan)
         # Prioritize an actionable next step, then progressively add coverage

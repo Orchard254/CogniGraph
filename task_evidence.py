@@ -92,7 +92,10 @@ def _database(root: Path) -> Path:
     directory = root / ".cognigraph"
     if directory.is_symlink() or not directory.resolve().is_relative_to(root.resolve()):
         raise ValueError("unsafe project data directory")
-    return directory / "task_evidence.sqlite3"
+    db = directory / "task_evidence.sqlite3"
+    if db.is_symlink():
+        raise ValueError("unsafe project evidence database")
+    return db
 
 
 def _connect(path: Path) -> sqlite3.Connection:
