@@ -46,6 +46,18 @@ def safe_project_file(root: Path, raw: str) -> str | None:
         return None
 
 
+def _safe_stored_path(raw: str) -> bool:
+    """Even local SQLite rows are untrusted input to model-visible context."""
+    if (not isinstance(raw, str) or not raw or len(raw) > 512
+            or any(ord(ch) < 32 or ch in "`<>" for ch in raw)):
+        return False
+    parts = raw.replace("\\\\", "/").split("/")
+    return (not raw.startswith("/") and not any(
+        part in ("", ".", "..") or part.startswith(".") or part.lower() in _EXCLUDED
+        for part in parts
+    ) and Path(raw).suffix.lower() in _EXTENSIONS)
+
+
 def _digest_file(root: Path, relative: str) -> str | None:
     """Bound source hashing; never retain source bytes or read large files."""
     path = root / relative
@@ -178,7 +190,7 @@ def task_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
     seen = set()
     for row in rows:
         candidate = row["file_path"]
-        if candidate in seen:
+        if not _safe_stored_path(candidate) or candidate in seen:
             continue
         seen.add(candidate)
         safe = safe_project_file(root, candidate)
