@@ -46,6 +46,7 @@
     "pm_evidence.py",
     "task_evidence.py",
     "task_checks.py",
+    "task_goal.py",
     "pm_outcomes.py",
     "pm_freshness.py",
     "pm_search.py",
@@ -78,7 +79,8 @@
     "docs/FEEDBACK_LEARNING.md",
     "docs/TASK_OUTCOMES.md",
     "docs/SOURCE_FRESHNESS.md",
-    "docs/CONTEXT_INTELLIGENCE.md"
+    "docs/CONTEXT_INTELLIGENCE.md",
+    "docs/GOAL_EVIDENCE_GATE.md"
   ],
   "dependencies": {},
   "devDependencies": {}

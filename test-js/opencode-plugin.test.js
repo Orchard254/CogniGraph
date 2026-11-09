@@ -169,6 +169,16 @@ process.stdin.on('end', () => {
     assert.equal(afterRejected, beforeCheck + 'CRIC');
     await hooks.get('context')(req());
     assert.equal(fs.readFileSync(countFile, 'utf8'), afterRejected);
+
+    // An explicit objective-contract CLI call changes task verification
+    // requirements; refresh the cached task-level briefing even when the
+    // file focus is unchanged and shell metadata is absent.
+    await toolHook({sessionID:'s1', status:'completed', tool:'bash',
+      input:{command:'python -m task_goal --show'}});
+    const afterGoal = req();
+    await hooks.get('context')(afterGoal);
+    assert.match(afterGoal.system[0].text, /context for add cache refreshed/);
+    assert.equal(fs.readFileSync(countFile, 'utf8'), afterRejected + 'RI');
   } finally {
     if (originalCountPath === undefined) delete process.env.COGNIGRAPH_TEST_CALLS;
     else process.env.COGNIGRAPH_TEST_CALLS = originalCountPath;

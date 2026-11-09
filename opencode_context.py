@@ -17,6 +17,7 @@ from task_evidence import (
 from task_checks import (
     record_check, check_snapshot, format_check_snapshot,
 )
+from task_goal import goal_snapshot, format_goal_snapshot
 
 MAX_QUERY_CHARS = 4000
 MAX_CONTEXT_CHARS = 6000
@@ -75,10 +76,14 @@ def get_plugin_context(
     cap = max(256, min(max_chars, MAX_CONTEXT_CHARS))
     observation = None
     check = None
+    goal = None
+    goal_text = ""
     observation_text = ""
     if session_id is not None and task:
         observation = task_snapshot(root, session_id, task)
         check = check_snapshot(root, session_id, task)
+        goal = goal_snapshot(root, session_id, task)
+        goal_text = format_goal_snapshot(goal, max_chars=min(370, cap // 4))
         check_text = format_check_snapshot(check)
         source_text = format_task_snapshot(
             observation, max_chars=min(260, cap // 5),
@@ -86,9 +91,13 @@ def get_plugin_context(
         observation_text = "\n\n".join(
             p.rstrip() for p in (check_text, source_text) if p
         )
-    content_cap = cap - len(observation_text) - 2 if observation_text else cap
+    reserved = len(observation_text) + len(goal_text) + (
+        4 if observation_text and goal_text else 2 if observation_text or goal_text else 0
+    )
+    content_cap = cap - reserved
     if content_cap < 512:
         observation_text = ""
+        goal_text = ""
         content_cap = cap
 
     # Never search an adjacent repository or the CogniGraph installation
@@ -98,16 +107,19 @@ def get_plugin_context(
     legacy = root / ".project-memory" / "memory.db"
     db = canonical if canonical.is_file() else legacy
     if not db.is_file():
-        if observation_text:
-            return {"context_markdown": observation_text, "status": "ok",
+        state = "\n\n".join(
+            part.rstrip() for part in (goal_text, observation_text) if part
+        )
+        if state:
+            return {"context_markdown": state, "status": "ok",
                     "retrieval_id": None, "task_evidence": observation,
-                    "task_check": check}
+                    "task_check": check, "task_goal": goal}
         return {"context_markdown": "", "status": "no_project_memory"}
 
     from memory_store import MemoryStore
     store = MemoryStore(str(db))
     try:
-        parts = []
+        parts = [goal_text.rstrip()] if goal_text else []
         retrieval_id = None
         valid_focus = []
         for candidate in reversed(requested_files[-2:]):
@@ -136,6 +148,7 @@ def get_plugin_context(
                     (valid_focus if phase == "inspect" else None)
                 ),
                 check_observation=check,
+                goal_observation=goal,
             )
             if _is_deliverable_briefing(briefing):
                 parts.append(briefing["context_markdown"][:attention_budget])
@@ -151,6 +164,7 @@ def get_plugin_context(
                     observed_files=(observation["observed_files"]
                                     if observation is not None else None),
                     check_observation=check,
+                    goal_observation=goal,
                 )
                 if not refresh:
                     retrieval_id = briefing.get("retrieval_id")
@@ -190,6 +204,7 @@ def get_plugin_context(
     if observation is not None:
         response["task_evidence"] = observation
         response["task_check"] = check
+        response["task_goal"] = goal
     return response
 
 

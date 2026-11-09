@@ -29,6 +29,13 @@ _MAX_CHECKS_PER_PROJECT = 512
 # Deliberately exclude compound shell programs and their deceptive exit codes:
 # e.g. "pytest || true" must never turn a failed test into an observed pass.
 _SHELL_OPERATORS = frozenset(";&|><$" + chr(96) + "\n\r\x00")
+# Commands that intentionally do not execute checks cannot count as evidence.
+# This list is conservative; unknown flags still require independent review.
+_NON_EXECUTING_FLAGS = frozenset({
+    "-h", "--help", "--version", "-V", "--collect-only", "--co",
+    "--fixtures", "--fixtures-per-test", "--setup-plan", "--trace-config",
+    "--list", "--list-tests",
+})
 
 
 def classify_check(command: str) -> str | None:
@@ -45,6 +52,8 @@ def classify_check(command: str) -> str | None:
         return None
     exe = Path(argv[0].replace("\\", "/")).name.lower()
     args = argv[1:]
+    if any(arg.split("=", 1)[0] in _NON_EXECUTING_FLAGS for arg in args):
+        return None
     if exe in ("pytest", "py.test"):
         return "pytest"
     if re.fullmatch(r"python(?:3(?:\.\d{1,2})?)?(?:\.exe)?", exe):
@@ -202,8 +211,24 @@ def record_check(
     }
 
 
-def check_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
-    """Report the latest check without promoting it to task completion."""
+def check_snapshot(
+    root: Path, session_id: str, task: str, command: str | None = None,
+    *, after_id: int = 0, command_hash: str | None = None,
+) -> dict[str, Any]:
+    """Report the latest overall or exact-command check.
+
+    Checking the exact command matters for multi-criterion goals: a passing
+    lint process must not substitute for a requested unit test.
+    """
+    if command is not None and classify_check(command) is None:
+        raise ValueError("invalid exact check command")
+    if type(after_id) is not int or after_id < 0:
+        raise ValueError("invalid check event lower bound")
+    if command_hash is not None and (
+        command is not None or not isinstance(command_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", command_hash) is None
+    ):
+        raise ValueError("invalid exact check hash")
     root = root.resolve()
     session_key, task_key = _key(session_id, task)
     blank = {"status": "not_observed", "verified": False, "check_kind": None}
@@ -212,12 +237,19 @@ def check_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
         return blank
     conn = _connect(db)
     try:
-        row = conn.execute(
-            "SELECT check_kind,origin,exit_code,input_fingerprint,"
+        sql = (
+            "SELECT id,check_kind,origin,exit_code,input_fingerprint,"
             "tracked_count,edit_watermark FROM task_check_events "
-            "WHERE session_key=? AND task_key=? ORDER BY id DESC LIMIT 1",
-            (session_key, task_key),
-        ).fetchone()
+            "WHERE session_key=? AND task_key=? AND id>?"
+        )
+        args: tuple[str | int, ...] = (session_key, task_key, after_id)
+        if command is not None:
+            sql += " AND command_hash=?"
+            args += (hashlib.sha256(command.strip().encode("utf-8")).hexdigest(),)
+        elif command_hash is not None:
+            sql += " AND command_hash=?"
+            args += (command_hash,)
+        row = conn.execute(sql + " ORDER BY id DESC LIMIT 1", args).fetchone()
         if row is None:
             return blank
         marker = _edit_watermark(conn, session_key, task_key)
@@ -241,6 +273,8 @@ def check_snapshot(root: Path, session_id: str, task: str) -> dict[str, Any]:
         "origin": str(row["origin"]),
         "exit_code": int(row["exit_code"]),
         "tracked_count": count,
+        "event_id": int(row["id"]),
+        "edit_watermark": int(row["edit_watermark"]),
     }
 
 
