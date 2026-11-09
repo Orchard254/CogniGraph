@@ -44,16 +44,23 @@ function messageText(value) {
   return messageText(value.content ?? value.parts ?? [])
 }
 
+function isContinuationText(text) {
+  return /^(?:continue|resume|proceed|go on|carry on|keep going|next)[.!]?$/i.test(text.trim())
+}
+
 function latestUserText(messages) {
   if (!Array.isArray(messages)) return ""
+  let fallback = ""
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]
     const role = message?.role ?? message?.info?.role ?? message?.message?.role
     if (role !== "user") continue
-    const text = messageText(message.content ?? message.parts ?? message.message?.content)
-    if (text.trim()) return text.trim().slice(0, MAX_QUERY)
+    const text = messageText(message.content ?? message.parts ?? message.message?.content).trim()
+    if (!text) continue
+    if (!fallback) fallback = text.slice(0, MAX_QUERY)
+    if (!isContinuationText(text)) return text.slice(0, MAX_QUERY)
   }
-  return ""
+  return fallback
 }
 
 function fetchContext(projectRoot, query, filePaths = [], maxChars = BASE_CONTEXT_CHARS, onReceipt = null, options = {}) {
@@ -242,7 +249,9 @@ export default Plugin.define({
       if (!sessionID || !query?.trim()) return null
       const normalized = query.trim().slice(0, MAX_QUERY)
       const existing = sessions.get(sessionID)
-      if (existing?.query === normalized) return existing
+      if (existing?.query === normalized || (existing && isContinuationText(normalized))) {
+        return existing
+      }
       if (existing) void flushOutcome(existing).catch(() => {})
       const state = {
         query: normalized, response: null, focus: [], focusResponse: null,
